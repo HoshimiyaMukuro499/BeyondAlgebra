@@ -7,6 +7,9 @@ node_modules/
 # 网页版构建产物（由 web/build.mjs 从根目录版本文件生成）
 web/public/
 
+# Wrangler 本地状态
+.wrangler/
+
 # 模拟引擎运行产物
 sim_results*.json
 sim_results*.txt
