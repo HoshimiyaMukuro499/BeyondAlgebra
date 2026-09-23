@@ -1,0 +1,13 @@
+{
+  "name": "miwen-guiji",
+  "version": "1.0.0",
+  "private": true,
+  "description": "《密文轨迹》——2D 俯视角射击动作 + 轻塔防 HTML5 游戏",
+  "type": "module",
+  "scripts": {
+    "build:web": "node web/build.mjs",
+    "deploy": "node web/build.mjs && wrangler deploy --config web/wrangler.toml",
+    "preview": "node web/build.mjs && wrangler dev --config web/wrangler.toml",
+    "sim": "node simCore.js"
+  }
+}

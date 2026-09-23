@@ -1,0 +1,207 @@
+{
+  "main": {
+    "id": "9a9ffb41ba1dd7d1",
+    "type": "split",
+    "children": [
+      {
+        "id": "a123035e7024f83a",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "5056a3c2ac6e01c7",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "道歉与反思.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "道歉与反思"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "5a7998f13e8335e3",
+    "type": "split",
+    "children": [
+      {
+        "id": "bec99c36bd931afd",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "b175467818eea00b",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-folder-closed",
+              "title": "文件列表"
+            }
+          },
+          {
+            "id": "747bde47ea87d873",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "搜索"
+            }
+          },
+          {
+            "id": "76004cb43ef15bef",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "书签"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "14c9ec96f1000150",
+    "type": "split",
+    "children": [
+      {
+        "id": "80c0059f4e6dbcd0",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "b6d99c098ceacb3b",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "README.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "README 的反向链接列表"
+            }
+          },
+          {
+            "id": "2971b86473a835b8",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "EDITION.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "EDITION 的出链列表"
+            }
+          },
+          {
+            "id": "5ec6ee67cb22fca6",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "标签"
+            }
+          },
+          {
+            "id": "f9cab4fda0fb1744",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "添加笔记属性"
+            }
+          },
+          {
+            "id": "21b75a168efee397",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "策划案.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "策划案 的大纲"
+            }
+          }
+        ],
+        "currentTab": 1
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:打开快速切换": false,
+      "graph:查看关系图谱": false,
+      "canvas:新建白板": false,
+      "daily-notes:打开/创建今天的日记": false,
+      "templates:插入模板": false,
+      "command-palette:打开命令面板": false,
+      "bases:新建数据库": false
+    }
+  },
+  "active": "5056a3c2ac6e01c7",
+  "lastOpenFiles": [
+    "EDITION.md",
+    "README.md",
+    "道歉与反思.md",
+    "道歉与反思.md.tmp.32588.404e27e60852",
+    "CLAUDE.md",
+    "CLAUDE.md.tmp.32588.fe2727b07217",
+    "EDITION.md.tmp.32588.4fcca2816fd4",
+    "CLAUDE.md.tmp.32588.965082a5c6c4",
+    "EDITION.md.tmp.32588.8cb489e59079",
+    "EDITION.md.tmp.32588.425bfc472405",
+    "EDITION.md.tmp.32588.f52e4f77e894",
+    "EDITION.md.tmp.32588.6960d5132bf9",
+    "README.md.tmp.15620.ca0f903f4aa8",
+    "CLAUDE.md.tmp.15620.3b19dc9ffd6d",
+    "欢迎.md"
+  ]
+}

@@ -1,0 +1,12 @@
+# Claude Code 本地配置与对话记录
+.claude/
+
+# Node
+node_modules/
+
+# 网页版构建产物（由 web/build.mjs 从根目录版本文件生成）
+web/public/
+
+# 模拟引擎运行产物
+sim_results*.json
+sim_results*.txt
