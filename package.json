@@ -6,8 +6,8 @@
   "type": "module",
   "scripts": {
     "build:web": "node web/build.mjs",
-    "deploy": "node web/build.mjs && npx wrangler deploy --config web/wrangler.toml",
-    "preview": "node web/build.mjs && npx wrangler dev --config web/wrangler.toml",
+    "deploy": "node web/build.mjs && npx wrangler pages deploy web/public --project-name=miwen-guiji --branch=main --commit-dirty=true",
+    "preview": "node web/build.mjs && npx wrangler pages dev web/public",
     "sim": "node simCore.js"
   }
 }

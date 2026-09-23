@@ -2,7 +2,7 @@
 
 2D 俯视角射击动作 + 轻塔防 HTML5 游戏。玩家用 WASD 移动留下可叠加的伤害轨迹、自动射击清怪、把「密文板」两两组合成永久被动，保护核心据点冲击最高楼层。
 
-**网页试玩**：<https://miwen-guiji.workers.dev> — `/classic/` 经典版 · `/ai/` AI 拓展版
+**网页试玩**：<https://miwen-guiji.pages.dev> — `/classic/` 经典版 · `/ai/` AI 拓展版
 
 ---
 
@@ -47,8 +47,7 @@ BeyondAlgebra/
 ├── simRunner.js               # Puppeteer 无头运行器
 ├── sim.bat                    # Windows 快捷脚本
 ├── web/                       # 网页版构建与 Cloudflare 部署
-│   ├── build.mjs              # 自动挑选 2.x / 9.x 最新版本生成静态站点
-│   └── wrangler.toml          # Cloudflare Workers 配置
+│   └── build.mjs              # 自动挑选 2.x / 9.x 最新版本生成静态站点
 ├── BeyondAlgebra/             # 策划案与开发文档（Obsidian 仓库）
 │   ├── README.md              # 策划案精简版：规则 / 怪物 / 公式 / 密文板全表
 │   ├── EDITION.md             # 版本记录（按时间倒序）
@@ -76,10 +75,12 @@ node analyzeSim.js sim_results.json      # 输出 10 项指标分析
 
 `web/build.mjs` 会扫描仓库根目录，自动挑选 **2.x 最新版** → `/classic/`、**9.x 最新版** → `/ai/`，并生成首页。原版本文件不会被改动（构建产物逐字节等于源文件）。
 
+托管在 **Cloudflare Pages**，项目名 `miwen-guiji`，生产域名为项目级域名 `miwen-guiji.pages.dev`——不含任何账号标识，且国内可直连（`workers.dev` 域名在国内通常需要代理）。
+
 ```bash
 npm run build:web     # 只生成静态站点到 web/public/
-npm run preview       # 本地预览（wrangler dev）
-npm run deploy        # 构建并发布到 Cloudflare Workers
+npm run preview       # 本地预览（wrangler pages dev）
+npm run deploy        # 构建并发布到 Cloudflare Pages
 ```
 
 首次部署需先登录 Cloudflare：
