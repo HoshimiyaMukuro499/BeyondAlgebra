@@ -144,8 +144,9 @@ function landingPage(classic, ai, sizes) {
   </a>
 </div>
 <footer>
-  <div>WASD 移动 · 鼠标点击手牌 · 空格宣读组合 · P 暂停 · Shift 冲刺轨迹</div>
-  <div>按 <code>\`</code> 切换调试模式，数字键 1-8 可直接生成指定怪物</div>
+  <div>通用：WASD 移动 · 鼠标点手牌填槽 · 空格宣读组合 · H 机制图鉴</div>
+  <div>9.x 追加：Shift 冲刺轨迹 · Q 终极技 · P 暂停（工作台批量宣读）</div>
+  <div>首次进入会播放新手教程「古老的石板 1-5」，可随时跳过</div>
 </footer>
 </body>
 </html>

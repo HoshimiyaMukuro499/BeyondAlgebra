@@ -1,0 +1,3136 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>密文轨迹 demo 2.18</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+        body {
+            background: #0a0e17;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Segoe UI', 'PingFang SC', sans-serif;
+            color: #e0e8f0;
+        }
+        .wrapper {
+            background: #131b26;
+            border-radius: 28px;
+            padding: 20px 24px 24px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8);
+            border: 1px solid #2a3a50;
+            max-width: 1100px;
+            width: 100%;
+        }
+        .game-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .canvas-wrap {
+            position: relative;
+            background: #0c121c;
+            border-radius: 18px;
+            border: 1px solid #253544;
+            padding: 4px;
+            pointer-events: none;
+            flex: 1;
+            min-width: 400px;
+        }
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            aspect-ratio: 780 / 560;
+            border-radius: 14px;
+            cursor: crosshair;
+            background: #0a111b;
+            pointer-events: none;
+        }
+        .panel {
+            width: 280px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: auto;
+            flex-shrink: 0;
+        }
+        .panel-box {
+            background: #18212c;
+            border-radius: 16px;
+            padding: 10px 12px;
+            border: 1px solid #2a3d52;
+            pointer-events: auto;
+        }
+        .panel-box h4 {
+            font-size: 10px;
+            font-weight: 400;
+            color: #8aa3c0;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+        }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            padding: 1px 0;
+            border-bottom: 1px solid #1f2e3d;
+        }
+        .stat-row:last-child {
+            border-bottom: none;
+        }
+        .stat-val {
+            color: #b8d0ea;
+            font-weight: 600;
+        }
+        .stat-val.score {
+            color: #f5c542;
+            font-size: 15px;
+        }
+        .stat-val.danger {
+            color: #f58b8b;
+        }
+
+        .hand-row {
+            display: flex;
+            gap: 4px;
+            margin-top: 3px;
+            flex-wrap: wrap;
+        }
+        .hand-card {
+            background: #1e2d3e;
+            border-radius: 6px;
+            padding: 3px 6px;
+            font-size: 10px;
+            border: 1px solid #3a5575;
+            cursor: pointer;
+            transition: 0.1s;
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            flex: 1;
+            min-width: 40px;
+            justify-content: center;
+            pointer-events: auto;
+        }
+        .hand-card:hover {
+            background: #2a3f58;
+            border-color: #5d82aa;
+            transform: translateY(-1px);
+        }
+        .hand-card .tag {
+            font-size: 7px;
+            background: #2a4058;
+            padding: 0 4px;
+            border-radius: 20px;
+            color: #9bb6d4;
+        }
+        .hand-card.trigger-card {
+            border-left: 3px solid #4a9eff;
+        }
+        .hand-card.effect-card {
+            border-left: 3px solid #ffb347;
+        }
+
+        .slot-group {
+            display: flex;
+            gap: 6px;
+            margin: 3px 0 6px;
+        }
+        .slot {
+            flex: 1;
+            background: #0f1823;
+            border-radius: 8px;
+            padding: 6px 3px;
+            border: 1px dashed #3a5575;
+            text-align: center;
+            font-size: 10px;
+            min-height: 32px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+        .slot.filled {
+            border-color: #6a9fd8;
+            background: #1a2a3d;
+        }
+        .slot .sub {
+            font-size: 7px;
+            opacity: 0.5;
+        }
+        .btn-combine {
+            width: 100%;
+            padding: 6px 0;
+            background: #2a4a6a;
+            border: none;
+            border-radius: 30px;
+            font-weight: 700;
+            font-size: 12px;
+            color: #eaf2ff;
+            cursor: pointer;
+            transition: 0.1s;
+            box-shadow: 0 2px 0 #0f1c2b;
+            pointer-events: auto;
+        }
+        .btn-combine:active {
+            transform: translateY(2px);
+            box-shadow: 0 0 0 #0f1c2b;
+        }
+        .btn-combine:disabled {
+            opacity: 0.3;
+            transform: translateY(2px);
+            box-shadow: 0 0 0 #0f1c2b;
+            pointer-events: none;
+        }
+        .feedback {
+            background: #0d1823;
+            border-radius: 10px;
+            padding: 6px 10px;
+            font-size: 11px;
+            min-height: 32px;
+            border-left: 3px solid #4a7a9f;
+            color: #c2d6ed;
+            pointer-events: none;
+        }
+        .feedback .tag {
+            display: inline-block;
+            background: #1e3349;
+            border-radius: 30px;
+            padding: 0 8px;
+            font-size: 8px;
+            margin-right: 4px;
+            color: #b0cef0;
+        }
+
+        .lib-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+            margin-top: 3px;
+        }
+        .lib-card {
+            background: #1a2635;
+            padding: 2px 8px 2px 6px;
+            border-radius: 20px;
+            font-size: 9px;
+            border: 1px solid #314a63;
+            cursor: pointer;
+            transition: 0.1s;
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            pointer-events: auto;
+        }
+        .lib-card:hover {
+            background: #253a52;
+            border-color: #5a7fa5;
+        }
+        .lib-card.lib-trigger {
+            border-left: 3px solid #4a9eff;
+        }
+        .lib-card.lib-effect {
+            border-left: 3px solid #ffb347;
+        }
+        .lib-card .badge {
+            font-size: 6px;
+            background: #2a4058;
+            padding: 0 4px;
+            border-radius: 20px;
+            color: #8aaecf;
+        }
+        .lib-card .count-badge {
+            font-size: 7px;
+            background: #1a2a3a;
+            padding: 0 4px;
+            border-radius: 20px;
+            color: #6a8aaa;
+        }
+
+        .passive-list {
+            max-height: 50px;
+            overflow-y: auto;
+            font-size: 10px;
+            color: #b8d0ea;
+        }
+        .passive-list .item {
+            padding: 1px 0;
+            border-bottom: 1px solid #1a2a3a;
+            display: flex;
+            justify-content: space-between;
+        }
+        .passive-list .item .count {
+            color: #ffb347;
+            font-weight: 600;
+        }
+
+        .controls-hint {
+            font-size: 9px;
+            color: #6a85a3;
+            text-align: center;
+            padding: 2px 0;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+            pointer-events: auto;
+        }
+        .controls-hint kbd {
+            background: #1a2736;
+            padding: 1px 6px;
+            border-radius: 4px;
+            border: 1px solid #3a5575;
+            font-size: 9px;
+            color: #c0d6ee;
+        }
+        .btn-reset {
+            background: transparent;
+            border: 1px solid #3a5575;
+            color: #8aa3c0;
+            padding: 1px 12px;
+            border-radius: 30px;
+            font-size: 9px;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+        .btn-reset:hover {
+            background: #1f3145;
+            border-color: #6a8db0;
+        }
+        .hand-count {
+            font-size: 9px;
+            color: #6a8aaa;
+            margin-left: 4px;
+        }
+        .wave-display {
+            font-size: 18px;
+            font-weight: 700;
+            color: #f5c542;
+            text-align: center;
+        }
+
+        .passive-box {
+            max-height: 60px;
+            overflow-y: auto;
+        }
+        .passive-box::-webkit-scrollbar {
+            width: 2px;
+        }
+        .passive-box::-webkit-scrollbar-thumb {
+            background: #2a4058;
+            border-radius: 10px;
+        }
+
+        /* 三选一 + 真空期 */
+        .selection-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .selection-overlay.active { display: flex; }
+        .selection-overlay h3 {
+            color: #f5c542;
+            font-size: 20px;
+            margin-bottom: 4px;
+        }
+        .selection-row {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .selection-card {
+            background: #1a2635;
+            border-radius: 16px;
+            padding: 20px 28px;
+            border: 2px solid #3a5575;
+            cursor: pointer;
+            text-align: center;
+            transition: 0.15s;
+            min-width: 140px;
+            pointer-events: auto;
+        }
+        .selection-card:hover {
+            background: #253a52;
+            border-color: #f5c542;
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(245,197,66,0.3);
+        }
+        .selection-card .s-emoji { font-size: 36px; display: block; margin-bottom: 6px; }
+        .selection-card .s-label { font-size: 16px; color: #e0e8f0; font-weight: 600; }
+        .selection-card .s-type { font-size: 10px; color: #8aa3c0; margin-top: 4px; }
+        .selection-card.sel-trigger { border-left: 4px solid #4a9eff; }
+        .selection-card.sel-effect { border-left: 4px solid #ffb347; }
+
+        .vacuum-bar-wrap {
+            display: none;
+            background: #18212c;
+            border-radius: 12px;
+            padding: 8px 14px;
+            border: 1px solid #2a3d52;
+            align-items: center;
+            gap: 10px;
+        }
+        .vacuum-bar-wrap.active { display: flex; }
+        .vacuum-bar-fill {
+            flex: 1;
+            height: 8px;
+            background: #1a2a3a;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .vacuum-bar-fill-inner {
+            height: 100%;
+            background: linear-gradient(90deg, #4a9eff, #5ac8fa);
+            border-radius: 10px;
+            transition: width 0.3s;
+        }
+        .vacuum-label {
+            font-size: 11px;
+            color: #b0cef0;
+            white-space: nowrap;
+            min-width: 50px;
+            text-align: center;
+        }
+        .btn-skip {
+            background: #2a4a6a;
+            border: none;
+            color: #eaf2ff;
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            pointer-events: auto;
+        }
+        .btn-skip:hover { background: #3a5f8a; }
+
+        @media (max-width: 1100px) {
+            .game-row {
+                flex-direction: column;
+                align-items: center;
+            }
+            .panel {
+                width: 100%;
+                max-width: 780px;
+                flex-direction: row;
+                flex-wrap: wrap;
+            }
+            .panel-box {
+                flex: 1;
+                min-width: 150px;
+            }
+            .canvas-wrap {
+                min-width: unset;
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="wrapper">
+    <div class="game-row">
+        <div class="canvas-wrap">
+            <canvas id="gameCanvas" width="780" height="560"></canvas>
+        </div>
+
+        <div class="panel" id="panelRoot">
+            <div class="panel-box">
+                <h4>📊 密文轨迹 demo 2.18 · 新手教程 + 性能修复</h4>
+                <div class="stat-row"><span>🏰 核心</span><span class="stat-val" id="coreDisplay">100%</span></div>
+                <div class="stat-row"><span>🌊 波次</span><span class="stat-val wave-display" id="waveDisplay">1</span></div>
+                <div class="stat-row"><span>⭐ 得分</span><span class="stat-val score" id="scoreDisplay">0</span></div>
+                <div class="stat-row"><span>🛡️ 护盾</span><span class="stat-val" id="hpDisplay">100</span></div>
+                <div class="stat-row"><span>⚔️ 攻击</span><span class="stat-val" id="atkDisplay">10</span></div>
+                <div class="stat-row"><span>💥 倍率</span><span class="stat-val" id="multDisplay">x1.0</span></div>
+                <div class="stat-row"><span>🐾 怪物</span><span class="stat-val" id="monsterCount">0</span></div>
+                <div class="stat-row"><span>💀 击杀</span><span class="stat-val" id="killDisplay">0</span></div>
+                <div class="stat-row" style="border-bottom:none;margin-top:2px;font-size:10px;color:#6a8aaa;">
+                    <span>📈 难度系数</span>
+                    <span class="stat-val" id="diffDisplay" style="color:#ff8844;">1.00x</span>
+                </div>
+            </div>
+
+            <div class="panel-box">
+                <h4>🃏 手牌 <span style="font-weight:400;font-size:9px;color:#6a85a3;">左键填入 · 满20替旧</span>
+                    <span class="hand-count" id="handCountDisplay">触发:0 效果:0</span>
+                </h4>
+                <div class="hand-row" id="handContainer"></div>
+
+                <div class="slot-group">
+                    <div class="slot" id="triggerSlot">⬅ 触发<br><span class="sub">点击选择</span></div>
+                    <div class="slot" id="effectSlot">效果 ➡<br><span class="sub">点击选择</span></div>
+                </div>
+                <button class="btn-combine" id="combineBtn">🔮 宣读组合</button>
+                <div class="feedback" id="feedbackBox"><span class="tag">✦</span> 永久被动，触发即叠加</div>
+            </div>
+
+            <div class="panel-box">
+                <h4>⚡ 被动 <span style="font-weight:400;font-size:9px;color:#6a85a3;">触发即叠加</span></h4>
+                <div class="passive-box" id="passiveList">
+                    <div style="color:#5a7a9a;font-size:10px;">暂无被动</div>
+                </div>
+            </div>
+
+            <div class="panel-box">
+                <h4>📜 牌库 <span style="font-weight:400;font-size:9px;color:#6a85a3;">无限抽取</span></h4>
+                <div class="lib-grid" id="libraryGrid"></div>
+            </div>
+
+            <div class="vacuum-bar-wrap" id="vacuumBar">
+                <span class="vacuum-label" id="vacuumLabel">⏳ 整顿 5s</span>
+                <div class="vacuum-bar-fill"><div class="vacuum-bar-fill-inner" id="vacuumFill" style="width:100%"></div></div>
+                <button class="btn-skip" id="skipBtn">⏭ 跳过</button>
+            </div>
+
+            <div class="controls-hint">
+                <span><kbd>W A S D</kbd> 移动</span>
+                <span><kbd>空格</kbd> 组合</span>
+                <span><kbd>`</kbd> 调试</span>
+                <span>指数增长 · 极限挑战</span>
+                <button class="btn-reset" id="resetBtn">↺ 重开</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="selection-overlay" id="selectionOverlay">
+    <h3>🎴 选择一张卡牌加入手牌</h3>
+    <div class="selection-row" id="selectionRow"></div>
+</div>
+
+<script>
+    // ============================================================
+    //  无限模式 · 指数增长 · 7种怪物 · 反噬修复 · 公式重做
+    // ============================================================
+
+    // ---------- 词条数据 ----------
+    const TRIGGERS = [
+        { id: 'T01', label: '对自身', emoji: '🧍' },
+        { id: 'T02', label: '对敌群', emoji: '👾' },
+        { id: 'T06', label: '怪触轨', emoji: '🐾' },
+        { id: 'T07', label: '射击命中', emoji: '🎯' },
+        { id: 'T08', label: '连环击杀', emoji: '🔥' },
+        { id: 'T10', label: '残血触发', emoji: '❤️‍🔥' },
+    ];
+    const EFFECTS = [
+        { id: 'E01', label: '攻击增幅', emoji: '⚔️' },
+        { id: 'E02', label: '连环击', emoji: '💥' },
+        { id: 'E03', label: '生命回复', emoji: '💚' },
+        { id: 'E04', label: '移速减慢', emoji: '🐢' },
+        { id: 'E06', label: '轨迹升级', emoji: '⬆️' },
+        { id: 'E07', label: '轨迹爆伤', emoji: '💣' },
+        { id: 'E10', label: '怪物反噬', emoji: '🔄' },
+        { id: 'E11', label: '自速暴涨', emoji: '💨' },
+    ];
+
+    // ---------- 怪物类型定义 ----------
+    const MONSTER_TYPES = {
+        BASIC: {
+            id: 'basic',
+            label: '普通',
+            emoji: '👾',
+            color: '#cc6633',
+            eliteColor: '#dd5544',
+            baseHp: 24,
+            hpScale: 10.5,
+            baseSpeed: 0.28125,
+            speedScale: 0.0125,
+            baseAtk: 3,
+            atkScale: 0.7,
+            radius: 12,
+            eliteRadius: 18,
+            scoreValue: 5,
+            eliteScoreValue: 15,
+            weight: 30,
+            moveInterval: 60,
+        },
+        FAST: {
+            id: 'fast',
+            label: '疾速',
+            emoji: '💨',
+            color: '#66ccff',
+            eliteColor: '#44aadd',
+            baseHp: 15,
+            hpScale: 6.0,
+            baseSpeed: 0.5625,
+            speedScale: 0.021875,
+            baseAtk: 2,
+            atkScale: 0.5,
+            radius: 10,
+            eliteRadius: 14,
+            scoreValue: 6,
+            eliteScoreValue: 18,
+            weight: 25,
+            moveInterval: 30,
+        },
+        TANK: {
+            id: 'tank',
+            label: '重装',
+            emoji: '🛡️',
+            color: '#88aa77',
+            eliteColor: '#66aa55',
+            baseHp: 75,
+            hpScale: 27,
+            baseSpeed: 0.125,
+            speedScale: 0.0046875,
+            baseAtk: 5,
+            atkScale: 1.0,
+            radius: 18,
+            eliteRadius: 24,
+            scoreValue: 10,
+            eliteScoreValue: 25,
+            weight: 18,
+            moveInterval: 120,
+        },
+        HEALER: {
+            id: 'healer',
+            label: '治疗',
+            emoji: '💚',
+            color: '#55dd88',
+            eliteColor: '#44cc77',
+            baseHp: 30,
+            hpScale: 10.5,
+            baseSpeed: 0.21875,
+            speedScale: 0.009375,
+            baseAtk: 1,
+            atkScale: 0.3,
+            radius: 13,
+            eliteRadius: 17,
+            scoreValue: 8,
+            eliteScoreValue: 20,
+            weight: 12,
+            isHealer: true,
+            healAmount: 2.5,
+            moveInterval: 80,
+        },
+        SLOW: {
+            id: 'slow',
+            label: '迟缓',
+            emoji: '🐌',
+            color: '#bb88dd',
+            eliteColor: '#aa77cc',
+            baseHp: 36,
+            hpScale: 13.5,
+            baseSpeed: 0.1875,
+            speedScale: 0.0078125,
+            baseAtk: 4,
+            atkScale: 0.9,
+            radius: 14,
+            eliteRadius: 18,
+            scoreValue: 7,
+            eliteScoreValue: 22,
+            weight: 10,
+            isSlow: true,
+            slowAmount: 0.25,
+            moveInterval: 90,
+        },
+        SPLITTER: {
+            id: 'splitter',
+            label: '分裂',
+            emoji: '🧬',
+            color: '#ffaa44',
+            eliteColor: '#ee8833',
+            baseHp: 45,
+            hpScale: 16.5,
+            baseSpeed: 0.25,
+            speedScale: 0.0109375,
+            baseAtk: 3,
+            atkScale: 0.6,
+            radius: 14,
+            eliteRadius: 18,
+            scoreValue: 9,
+            eliteScoreValue: 24,
+            weight: 10,
+            isSplitter: true,
+            splitCount: 2,
+            moveInterval: 70,
+        },
+        BOSS: {
+            id: 'boss', label: 'BOSS', emoji: '👑',
+            color: '#ff2255', eliteColor: '#ff0044',
+            baseHp: 50000, hpScale: 0, baseSpeed: 0.1, speedScale: 0,
+            baseAtk: 24, atkScale: 0, radius: 30, eliteRadius: 35,
+            scoreValue: 3000, eliteScoreValue: 3000, weight: 0,
+            isBoss: true, spawnInterval: 100, moveInterval: 60,
+        },
+    };
+
+    function getBossHp() {
+        return Math.floor(50000 * Math.pow(1.6, Math.floor(G.wave / 10) - 1));
+    }
+
+    const MONSTER_TYPE_LIST = Object.values(MONSTER_TYPES);
+
+    // ---------- 游戏状态 ----------
+    const G = {
+        player: { x: 390, y: 280, r: 14, hp: 100, maxHp: 100, speed: 2.8, atk: 10, mult: 1.0, shootCooldown: 0 },
+        core: { x: 390, y: 280, r: 22, hp: 100, maxHp: 100 },
+        bullets: [],
+        monsters: [],
+        trails: [],
+        particles: [],
+        hand: [],
+        triggerSlot: null,
+        effectSlot: null,
+        wave: 1,
+        monstersToSpawn: 0,
+        spawnTimer: 0,
+        combineCooldown: false,
+        passives: {},
+        buffs: { atkUp: 0, multUp: 0, trailDmg: 1, trailWidth: 6, speedUp: 1, slowAll: 0 },
+        keys: { w: false, a: false, s: false, d: false },
+        mouse: { x: 390, y: 280 },
+        frame: 0,
+        gameOver: false,
+        fireRate: 10,
+        fireCounter: 0,
+        target: null,
+        killCount: 0,
+        killStreak: 0,
+        score: 0,
+        comboCount: 0,
+        maxCombo: 0,
+        scoreMultiplier: 1,
+        difficulty: 1,
+        playerSlowTimer: 0,
+        playerSlowAmount: 0,
+        handTriggerCount: 0,
+        handEffectCount: 0,
+        vacuumActive: false,
+        vacuumTimer: 0,
+        selectingActive: false,
+        selectionCards: [],
+        bossPending: false,
+        bossSpawned: false,
+        floatingTexts: [],
+        debug: false,
+        // 画布尺寸
+        canvasWidth: 780,
+        canvasHeight: 560,
+    };
+
+    // ---------- DOM ----------
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // ---------- 辅助 ----------
+    function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+    function rand(min, max) { return Math.random() * (max - min) + min; }
+    function randInt(min, max) { return Math.floor(rand(min, max + 1)); }
+    function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+    function angleTo(a, b) { return Math.atan2(b.y - a.y, b.x - a.x); }
+
+    // 特效数量上限：粒子/浮字是纯表现层，必须封顶。
+    // 生成速率随波数上升而寿命固定，不封顶的话每帧 draw 成本会一路涨到掉帧。
+    const PARTICLE_MAX = 300;
+    const FLOAT_MAX = 60;
+
+    // ---------- 浮动数值 ----------
+    function showFloatingText(x, y, text, color) {
+        if (G.floatingTexts.length >= FLOAT_MAX) G.floatingTexts.shift();
+        G.floatingTexts.push({
+            x, y, text, color,
+            life: 35,
+            maxLife: 35,
+            vy: -1.2 - Math.random() * 0.6,
+            vx: (Math.random() - 0.5) * 0.8,
+        });
+    }
+
+    // ============================================================
+    //  指数增长公式
+    // ============================================================
+    function getDifficultyMultiplier() {
+        return Math.pow(1.16, G.wave - 1);
+    }
+
+    function getMonsterCount() {
+        return Math.min(4 + Math.floor(3 * Math.pow(1.10, G.wave)), 50);
+    }
+
+    function getEliteChance() {
+        return Math.min(0.05 + 0.04 * Math.log2(G.wave + 1), 0.35);
+    }
+
+    function getSpawnInterval() {
+        if (Tutorial.active && Tutorial.spawnInterval) return Tutorial.spawnInterval;
+        return Math.max(6, 25 / Math.pow(1.06, G.wave - 1));
+    }
+
+    // ---------- 手牌平衡 ----------
+    function updateHandCount() {
+        G.handTriggerCount = G.hand.filter(c => c.type === 'trigger').length;
+        G.handEffectCount = G.hand.filter(c => c.type === 'effect').length;
+        const el = document.getElementById('handCountDisplay');
+        if (el) el.textContent = `触发:${G.handTriggerCount} 效果:${G.handEffectCount}`;
+    }
+
+    // ---------- 被动系统 ----------
+    function addPassive(triggerId, effectId) {
+        if (!G.passives[triggerId]) G.passives[triggerId] = [];
+        const existing = G.passives[triggerId].find(p => p.effectId === effectId);
+        if (existing) existing.count += 1;
+        else G.passives[triggerId].push({ effectId: effectId, count: 1 });
+        applyPassiveEffect(triggerId, effectId, true);
+        updatePassiveUI();
+        addScore(10);
+    }
+
+    function triggerPassive(triggerId) {
+        if (!G.passives[triggerId]) return;
+        for (const p of G.passives[triggerId]) {
+            for (let i = 0; i < p.count; i++) {
+                applyPassiveEffect(triggerId, p.effectId, false);
+            }
+        }
+    }
+
+    function applyPassiveEffect(triggerId, effectId, isInitial) {
+        const p = G.player;
+        const isHighFreq = (triggerId === 'T06' || triggerId === 'T07' || triggerId === 'T08');
+        switch (effectId) {
+            case 'E01': {
+                const val = isHighFreq ? 4 : 10;
+                G.buffs.atkUp += val;
+                if (!isInitial) spawnParticles(p.x, p.y, '#ff8844', 5);
+                setFeedback(`⚔️ 攻击+${val} (累计+${G.buffs.atkUp})`, '#ff8844');
+                break;
+            }
+            case 'E02':
+                G.buffs.multUp += 0.2;
+                if (!isInitial) spawnParticles(p.x, p.y, '#ffdd44', 5);
+                setFeedback(`💥 倍率+0.2 (累计x${(1 + G.buffs.multUp).toFixed(1)})`, '#ffdd44');
+                break;
+            case 'E03': {
+                const val = isHighFreq ? 4 : 15;
+                p.hp = Math.min(p.maxHp, p.hp + val);
+                spawnParticles(p.x, p.y, '#44ff88', 8);
+                showFloatingText(p.x, p.y - p.r, '+' + val, '#44ff88');
+                setFeedback(`💚 回复${val}生命`, '#44ff88');
+                break;
+            }
+            case 'E04':
+                G.buffs.slowAll = Math.min(0.5, G.buffs.slowAll + 0.05);
+                if (!isInitial) setFeedback(`🐢 怪物减速+5% (累计${Math.round(G.buffs.slowAll * 100)}%)`, '#88ccff');
+                break;
+            case 'E06':
+                G.buffs.trailDmg += 1;
+                G.buffs.trailWidth += 2;
+                if (!isInitial) setFeedback(`⬆️ 轨迹伤害+1，宽度+2`, '#66ddff');
+                break;
+            case 'E07':
+                if (!isInitial) {
+                    const count = explodeTrails(p.x, p.y, 200);
+                    setFeedback(`💣 引爆${count}段轨迹`, '#ff6633');
+                    if (count > 0) addScore(count * 2);
+                }
+                break;
+            case 'E10':
+                if (!isInitial && G.monsters.length > 0) {
+                    const dmg = Math.floor(50 * (2 + getDifficultyMultiplier()) / 3);
+                    G.monsters.forEach(m => {
+                        m.hp = Math.max(0, m.hp - dmg);
+                        spawnParticles(m.x, m.y, '#ff6644', 4);
+                        showFloatingText(m.x, m.y - m.r, '-' + dmg, '#ff6644');
+                    });
+                    setFeedback(`🔄 怪物反噬！全场${G.monsters.length}只怪物各受${dmg}点伤害`, '#ff6644');
+                }
+                break;
+            case 'E11':
+                G.buffs.speedUp += 0.3;
+                if (!isInitial) setFeedback(`💨 移速+30% (累计x${G.buffs.speedUp.toFixed(1)})`, '#88ddff');
+                break;
+        }
+        updateUI();
+    }
+
+    // ---------- 得分系统 ----------
+    function addScore(amount) {
+        G.score += Math.floor(amount * G.scoreMultiplier);
+        G.comboCount += 1;
+        if (G.comboCount > G.maxCombo) G.maxCombo = G.comboCount;
+        if (G.comboCount > 5) G.scoreMultiplier = 1 + Math.floor(G.comboCount / 10) * 0.5;
+        updateUI();
+    }
+
+    // ---------- 怪物生成 ----------
+    function spawnMonster() {
+        const scripted = Tutorial.active ? Tutorial.nextSpawn() : null;
+        const side = randInt(0, 3);
+        let x, y;
+        const pad = 30;
+        const w = G.canvasWidth || 780;
+        const h = G.canvasHeight || 560;
+        if (side === 0) { x = rand(-pad, w + pad);
+            y = -pad; } else if (side === 1) { x = w + pad;
+            y = rand(-pad, h + pad); } else if (side === 2) { x = rand(-pad, w + pad);
+            y = h + pad; } else { x = -pad;
+            y = rand(-pad, h + pad); }
+
+        const diff = getDifficultyMultiplier();
+        const eliteChance = getEliteChance();
+        const isElite = scripted ? !!scripted.elite : (Math.random() < eliteChance);
+
+        let type;
+        if (scripted) {
+            // 教程关：类型由脚本指定
+            type = MONSTER_TYPES[String(scripted.type).toUpperCase()] || MONSTER_TYPES.BASIC;
+        } else {
+            let typePool = MONSTER_TYPE_LIST.filter(t => !t.isBoss);
+            let weights = typePool.map(t => {
+                let w = t.weight;
+                if (t.id === 'healer' && G.wave < 3) w *= 0.2;
+                if (t.id === 'splitter' && G.wave < 2) w *= 0.2;
+                if (t.id === 'tank' && G.wave > 10) w *= 1.5;
+                if (t.id === 'fast' && G.wave > 8) w *= 1.3;
+                if (t.id === 'healer' && G.wave > 8) w *= 1.4;
+                if (t.id === 'splitter' && G.wave > 8) w *= 1.3;
+                return w;
+            });
+            const totalWeight = weights.reduce((a, b) => a + b, 0);
+            let r = Math.random() * totalWeight;
+            type = typePool[0];
+            for (let i = 0; i < typePool.length; i++) {
+                r -= weights[i];
+                if (r <= 0) { type = typePool[i]; break; }
+            }
+        }
+
+        const hpMul = Tutorial.active ? Tutorial.hpMul : 1;
+        const hp = (isElite ?
+            (type.baseHp + type.hpScale * 1.5) * diff :
+            (type.baseHp + type.hpScale) * diff) * hpMul;
+        const speed = isElite ?
+            (type.baseSpeed + type.speedScale * 1.2) * Math.min(diff, 3.0) :
+            (type.baseSpeed + type.speedScale) * Math.min(diff, 3.0);
+        const atk = isElite ?
+            (type.baseAtk + type.atkScale * 1.3) * Math.min(diff, 4.0) :
+            (type.baseAtk + type.atkScale) * Math.min(diff, 4.0);
+
+        const monster = {
+            x,
+            y,
+            r: isElite ? type.eliteRadius : type.radius,
+            hp: Math.min(hp, 5000),
+            maxHp: Math.min(hp, 5000),
+            speed: Math.min(speed * (1 - G.buffs.slowAll), 5.0),
+            isElite,
+            atk: Math.min(atk, 80),
+            hitCooldown: 0,
+            trailDamageCooldown: 0,
+            scoreValue: isElite ? type.eliteScoreValue * diff : type.scoreValue * diff,
+            type: type.id,
+            typeLabel: type.label,
+            typeEmoji: type.emoji,
+            color: isElite ? type.eliteColor : type.color,
+            isHealer: type.isHealer || false,
+            healAmount: (type.healAmount || 3) * Math.min(diff, 2.5),
+            isSlow: type.isSlow || false,
+            slowAmount: (type.slowAmount || 0.25) + G.wave * 0.005,
+            isSplitter: type.isSplitter || false,
+            splitCount: type.splitCount || 2,
+            canSplit: true,
+            healCooldown: 0,
+            isChild: false,
+            moveInterval: type.moveInterval || 60,
+            moveTimer: rand(0, (type.moveInterval || 60) * 2),
+            isMoving: Math.random() < 0.5,
+            alwaysMoving: G.wave >= 10 && Math.random() < Math.min(0.10 + 0.09 * (G.wave - 10), 1.0),
+        };
+        G.monsters.push(monster);
+    }
+
+    // ---------- 调试生成 ----------
+    const DEBUG_TYPE_KEYS = ['basic', 'fast', 'tank', 'healer', 'slow', 'splitter', 'boss'];
+    function spawnDebugMonster(typeKey) {
+        if (typeKey === 'boss') {
+            spawnBoss();
+            return;
+        }
+        const type = MONSTER_TYPES[typeKey.toUpperCase()];
+        if (!type) return;
+        const p = G.player; const diff = getDifficultyMultiplier();
+        const hp = (type.baseHp + type.hpScale) * diff;
+        const speed = (type.baseSpeed + type.speedScale) * Math.min(diff, 3.0);
+        const atk = (type.baseAtk + type.atkScale) * Math.min(diff, 4.0);
+        const isElite = Math.random() < getEliteChance();
+        const angle = rand(0, Math.PI * 2); const d = 80 + rand(0, 60);
+        const monster = {
+            x: p.x + Math.cos(angle) * d, y: p.y + Math.sin(angle) * d,
+            r: isElite ? type.eliteRadius : type.radius,
+            hp: Math.min(hp, 5000), maxHp: Math.min(hp, 5000),
+            speed: Math.min(speed * (1 - G.buffs.slowAll), 5.0),
+            isElite, atk: Math.min(atk, 80),
+            hitCooldown: 0, trailDamageCooldown: 0,
+            scoreValue: isElite ? type.eliteScoreValue * diff : type.scoreValue * diff,
+            type: type.id, typeLabel: type.label, typeEmoji: type.emoji,
+            color: isElite ? type.eliteColor : type.color,
+            isHealer: type.isHealer || false,
+            healAmount: (type.healAmount || 3) * Math.min(diff, 2.5),
+            isSlow: type.isSlow || false,
+            slowAmount: (type.slowAmount || 0.25) + G.wave * 0.005,
+            isSplitter: type.isSplitter || false, splitCount: type.splitCount || 2,
+            canSplit: true, healCooldown: 0, isChild: false,
+            moveInterval: type.moveInterval || 60,
+            moveTimer: rand(0, (type.moveInterval || 60) * 2),
+            isMoving: Math.random() < 0.5,
+            alwaysMoving: G.wave >= 10 && Math.random() < Math.min(0.10 + 0.09 * (G.wave - 10), 1.0),
+        };
+        G.monsters.push(monster);
+        spawnParticles(monster.x, monster.y, type.color, 8);
+        setFeedback(`🐛 调试：生成 ${type.emoji} ${type.label} (HP${Math.floor(monster.hp)})`, '#88ccff');
+    }
+
+    // ---------- 分裂逻辑 ----------
+    function splitMonster(m) {
+        if (!m.canSplit || !m.isSplitter) return;
+        const count = Math.min(m.splitCount + Math.floor(G.wave / 10), 4);
+        for (let i = 0; i < count; i++) {
+            const angle = (i / count) * Math.PI * 2 + rand(-0.3, 0.3);
+            const dist2 = 30 + rand(0, 20);
+            const child = {
+                x: m.x + Math.cos(angle) * dist2,
+                y: m.y + Math.sin(angle) * dist2,
+                r: m.r * 0.55,
+                hp: m.maxHp * 0.3,
+                maxHp: m.maxHp * 0.3,
+                speed: m.speed * 1.3,
+                isElite: false,
+                atk: m.atk * 0.4,
+                hitCooldown: 0,
+                trailDamageCooldown: 0,
+                scoreValue: m.scoreValue * 0.2,
+                type: 'split_child',
+                typeLabel: '子体',
+                typeEmoji: '🟢',
+                color: '#88cc66',
+                isHealer: false,
+                healAmount: 0,
+                isSlow: false,
+                slowAmount: 0,
+                isSplitter: false,
+                canSplit: false,
+                healCooldown: 0,
+                isChild: true,
+                moveInterval: 40,
+                moveTimer: rand(0, 80),
+                isMoving: Math.random() < 0.5,
+                alwaysMoving: G.wave >= 10 && Math.random() < Math.min(0.10 + 0.09 * (G.wave - 10), 1.0),
+            };
+            G.monsters.push(child);
+            spawnParticles(child.x, child.y, '#88cc66', 4);
+        }
+    }
+
+    // ---------- BOSS ----------
+    function spawnBoss() {
+        const type = MONSTER_TYPES.BOSS;
+        const hp = getBossHp();
+        const w = G.canvasWidth || 780, h = G.canvasHeight || 560;
+        const side = randInt(0, 3), pad = 50;
+        let x, y;
+        if (side === 0) { x = rand(pad, w - pad); y = -pad; }
+        else if (side === 1) { x = w + pad; y = rand(pad, h - pad); }
+        else if (side === 2) { x = rand(pad, w - pad); y = h + pad; }
+        else { x = -pad; y = rand(pad, h - pad); }
+        const boss = {
+            x, y, r: type.radius,
+            hp: Math.min(hp, 800000), maxHp: Math.min(hp, 800000),
+            speed: type.baseSpeed * (1 - G.buffs.slowAll),
+            isElite: false, atk: type.baseAtk * Math.min(getDifficultyMultiplier(), 4.0),
+            hitCooldown: 0, trailDamageCooldown: 0,
+            scoreValue: type.scoreValue * getDifficultyMultiplier(),
+            type: type.id, typeLabel: type.label, typeEmoji: type.emoji,
+            color: type.color, isHealer: false, healAmount: 0,
+            isSlow: false, slowAmount: 0, isSplitter: false, canSplit: false,
+            healCooldown: 0, isChild: false, isBoss: true,
+            spawnTimer: type.spawnInterval,
+            moveInterval: type.moveInterval, moveTimer: rand(0, 120),
+            isMoving: true, alwaysMoving: true,
+        };
+        G.monsters.push(boss);
+        spawnParticles(x, y, '#ff2266', 35);
+        setFeedback(`👑 BOSS登场！HP ${Math.floor(hp)} · 第${G.wave}波`, '#ff3366');
+    }
+
+    function spawnBossMinion(boss) {
+        const types = ['basic', 'fast', 'slow'];
+        const typeId = types[Math.floor(Math.random() * types.length)];
+        const type = MONSTER_TYPES[typeId.toUpperCase()] || MONSTER_TYPES.BASIC;
+        const diff = getDifficultyMultiplier();
+        const angle = rand(0, Math.PI * 2);
+        const d = boss.r + 30 + rand(10, 40);
+        const m = {
+            x: boss.x + Math.cos(angle) * d, y: boss.y + Math.sin(angle) * d,
+            r: type.radius * 0.8,
+            hp: (type.baseHp + type.hpScale) * diff * 0.5,
+            maxHp: (type.baseHp + type.hpScale) * diff * 0.5,
+            speed: type.baseSpeed * 1.2 * (1 - G.buffs.slowAll),
+            isElite: false, atk: type.baseAtk * 0.5,
+            hitCooldown: 0, trailDamageCooldown: 0,
+            scoreValue: type.scoreValue * 0.3,
+            type: type.id, typeLabel: '爪牙', typeEmoji: type.emoji,
+            color: type.color, isHealer: false, healAmount: 0,
+            isSlow: false, slowAmount: 0, isSplitter: false, canSplit: false,
+            healCooldown: 0, isChild: true, isBoss: false,
+            moveInterval: 40, moveTimer: rand(0, 80), isMoving: true,
+            alwaysMoving: Math.random() < 0.5,
+        };
+        G.monsters.push(m);
+        spawnParticles(m.x, m.y, '#ff4466', 3);
+    }
+
+    // ---------- 治疗逻辑 ----------
+    function applyHealing() {
+        for (const m of G.monsters) {
+            if (!m.isHealer) continue;
+            m.healCooldown--;
+            if (m.healCooldown <= 0) {
+                m.healCooldown = Math.max(40, 60 - G.wave * 0.3);
+                for (const other of G.monsters) {
+                    if (other === m) continue;
+                    if (dist(m, other) < 120) {
+                        other.hp = Math.min(other.maxHp, other.hp + m.healAmount);
+                        spawnParticles(other.x, other.y, '#44ff88', 1);
+                        showFloatingText(other.x, other.y - other.r, '+' + Math.floor(m.healAmount), '#44ff88');
+                    }
+                }
+                m.hp = Math.min(m.maxHp, m.hp + m.healAmount * 0.5);
+                spawnParticles(m.x, m.y, '#44ff88', 2);
+                showFloatingText(m.x, m.y - m.r, '+' + Math.floor(m.healAmount * 0.5), '#44ff88');
+            }
+        }
+    }
+
+    // ============================================================
+    //  新手教程 · 古老的石板 1-5
+    //  —— 数据驱动：TUTORIAL_WAVES 描述脚本，Tutorial 负责调度与绘制
+    //  触发类型：enter(进入延时) / after(上一条结束后) / move(累计移动)
+    //           kill(本波击杀) / clear(清空) / slots(两槽填满)
+    //           combo(连击) / event(具名事件)
+    // ============================================================
+    const TUTORIAL_MAX_WAVE = 5;
+    const TUTORIAL_TIMEOUT = 25 * 60; // 25s：先给更直白的提示
+    const TUTORIAL_FORCE = 20 * 60;   // 再 20s：自动放行，绝不卡流程
+    const TUTORIAL_FONT = '"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif';
+
+    const TUTORIAL_WAVES = {
+        1: {
+            title: '你的轨迹就是武器',
+            hpMul: 0.6,
+            spawnInterval: 90,
+            spawn: [{ type: 'basic', n: 4 }],
+            steps: [
+                { kind: 'banner', on: 'enter', hold: 110 },
+                { on: 'enter', d: 20, gate: true, point: 'player', hold: 300,
+                  text: '按 W A S D 移动。你脚下会拖出一条蓝色轨迹，这就是你的武器。',
+                  fallback: '用键盘的 W A S D 四个键移动角色。' },
+                { on: 'move', n: 300, gate: true, hold: 300,
+                  text: '怪物踩到轨迹会持续掉血。轨迹只留存 6 秒——边走边补。',
+                  fallback: '先随便走一走，比如绕一个方形。' },
+                { on: 'move', n: 900, hold: 300,
+                  text: '试着绕一个圈，把怪物困在轨迹里。',
+                  fallback: '按住 W 走一段，再按住 D 走一段，拐个弯。' },
+                { on: 'kill', n: 1, hold: 300,
+                  text: '第一次击杀。子弹是自动发射的——你只需要专心走位。',
+                  fallback: '靠近怪物，让自动射击打到它。' },
+                { on: 'after', d: 150, hold: 300,
+                  text: '怪物是「停顿 → 冲刺」交替前进的，冲刺时速度翻倍。它们不是匀速的。' },
+                { on: 'after', d: 240, hold: 300,
+                  text: '每清空一波都会更难：难度 = 1.16^(波数-1)，也就是每波强 16%。' },
+                { on: 'clear', hold: 240,
+                  text: '清空一波了。选一张牌，接着是 5 秒整顿期——随你铺轨。' },
+            ],
+        },
+        2: {
+            title: '子弹与护盾',
+            spawnInterval: 60,
+            spawn: [{ type: 'basic', n: 4 }, { type: 'fast', n: 2 }],
+            drops: [{ on: 'kill', n: 2, card: 'T07' }, { on: 'kill', n: 4, card: 'E01' }],
+            steps: [
+                { kind: 'banner', on: 'enter', hold: 110 },
+                { on: 'enter', d: 60, hold: 300,
+                  text: '子弹自动瞄准，优先级：治疗 💚 → 精英 ⭐ → BOSS 👑 → 最近的怪。' },
+                { on: 'event', name: 'hit', point: 'core', hold: 330,
+                  text: '怪物撞到核心时，先扣 🛡️ 护盾。护盾归零后才会真正伤害核心 HP。',
+                  fallback: '让怪物靠近中央的核心，看看撞上去会怎样。' },
+                { on: 'event', name: 'pickup', point: 'hand', hold: 330,
+                  text: '击杀会掉落密文板。手牌上限 20 张，满了会自动替换最老的一张。',
+                  fallback: '再打死几只怪，等它掉一张牌。' },
+                { on: 'after', d: 120, hold: 300,
+                  text: '疾速怪 💨 跑得快但很脆，优先清掉它们；治疗怪 💚 会奶队友。' },
+                { on: 'after', d: 240, hold: 300,
+                  text: '清空一波后可以选 1 张牌，然后是 5 秒整顿期：自由铺轨、组合卡牌，点 ⏭ 跳过 直接开战。' },
+                { on: 'clear', hold: 240,
+                  text: '清空一波了。' },
+            ],
+        },
+        3: {
+            title: '密文板 · 本作的核心',
+            spawnInterval: 70,
+            hand: ['T07', 'E01'],
+            spawn: [{ type: 'basic', n: 3 }, { type: 'healer', n: 2 }, { type: 'tank', n: 2 }],
+            drops: [{ on: 'killType', type: 'healer', card: 'T06' },
+                    { on: 'killType', type: 'healer', card: 'E06' }],
+            steps: [
+                { kind: 'banner', on: 'enter', hold: 110 },
+                { on: 'enter', d: 60, gate: true, point: 'hand', hold: 420,
+                  text: '左边蓝色是触发板，右边红色是效果板。点一下手牌，把它填进对应的槽位。',
+                  fallback: '用鼠标点手牌区里的那两张牌，各点一下。' },
+                { on: 'slots', gate: true, point: 'combine', hold: 420,
+                  text: '两个槽位都填好了。现在按 空格 宣读组合。',
+                  fallback: '按下键盘的空格键。' },
+                { on: 'event', name: 'combine', hold: 330,
+                  text: '两张牌消耗了，变成永久被动：每次射击命中，攻击力永久 +5。' },
+                { on: 'after', d: 180, hold: 330,
+                  text: '这就是核心循环——越打越强。同一种组合可以反复宣读叠层。' },
+                { on: 'after', d: 240, hold: 330,
+                  text: '触发板与效果板的数量差不能超过 1，否则牌库拒绝给你抽牌。' },
+                { on: 'after', d: 240, point: 'panel', hold: 330,
+                  text: '右侧牌库可以无限抽牌，所有板子都在里面，鼠标悬停能看说明。' },
+                { on: 'after', d: 240, hold: 300,
+                  text: '试试再宣读一次同样的组合——它会继续叠层，攻击力越滚越高。' },
+                { on: 'clear', hold: 300,
+                  text: '治疗怪 💚 给同伴回血，优先集火；重装怪 🛡️ 血厚但慢。' },
+            ],
+        },
+        4: {
+            title: '三选一与整顿期',
+            spawnInterval: 70,
+            spawn: [{ type: 'basic', n: 3 }, { type: 'splitter', n: 2 }, { type: 'slow', n: 2 }],
+            drops: [{ on: 'killType', type: 'splitter', card: 'T08' },
+                    { on: 'killChild', card: 'E11' }],
+            selection: ['T08', 'E06', 'E11'],
+            steps: [
+                { kind: 'banner', on: 'enter', hold: 110 },
+                { on: 'enter', d: 60, hold: 330,
+                  text: '分裂怪 🧬 死后会裂成 2 只子体；迟缓怪 🐌 打中你会让你变慢。' },
+                { on: 'event', name: 'split', hold: 330,
+                  text: '子体也会被轨迹伤害——把它们一起引到轨迹上，或者优先点掉。',
+                  fallback: '打掉一只分裂怪，看它裂开。' },
+                { on: 'after', d: 180, hold: 330,
+                  text: '清空一波 +波数×10 分，每 5 波额外 +波数×15 分。分数是无限的。' },
+                { on: 'clear', hold: 360,
+                  text: '接下来是三选一，选哪张决定你往哪个流派走。选完是 5 秒整顿期，点 ⏭ 跳过 立刻开战。' },
+            ],
+        },
+        5: {
+            title: '连击与精英',
+            spawnInterval: 60,
+            spawn: [{ type: 'basic', n: 4 }, { type: 'fast', n: 2 },
+                    { type: 'basic', n: 1, elite: true }],
+            drops: [{ on: 'killElite', card: 'T10' }, { on: 'killElite', card: 'E03' }],
+            steps: [
+                { kind: 'banner', on: 'enter', hold: 110 },
+                { on: 'enter', d: 60, point: 'elite', hold: 300,
+                  text: '⭐ 精英怪体型更大、血更厚，击杀得分也更高。', fallback: '找到场上那只更大的怪。' },
+                { on: 'combo', n: 5, hold: 330,
+                  text: '连击越高，得分倍率越高：每 10 连击 +0.5 倍。',
+                  fallback: '连续击杀不中断，攒到 5 连击。' },
+                { on: 'after', d: 360, hold: 330,
+                  text: '护盾顶不住时，试试 T10 残血触发 + E03 生命回复：血量跌破 30% 会自动回血。' },
+                { on: 'after', d: 240, hold: 330,
+                  text: '第 10 波会有 👑 BOSS，它持续召唤爪牙，血量随波数指数增长。' },
+                { on: 'after', d: 240, hold: 360,
+                  text: '右上角按 H 打开机制图鉴——所有板子、公式、怪物都在里面。' },
+                { kind: 'banner', on: 'clear', text: '教程结束 · 从这里开始是你的冒险', hold: 140 },
+            ],
+        },
+    };
+
+    // 机制图鉴（H 键）—— 覆盖本作全部机制
+    const CODEX_PAGES = [
+        {
+            title: '📖 机制图鉴 1/3 · 基础',
+            lines: [
+                '## 移动与轨迹',
+                'W A S D 移动，脚下持续生成伤害轨迹。',
+                '轨迹留存 6 秒，初始宽度 6，轨迹伤害 = 1 + log2(波数+1)×0.5。',
+                '轨迹能持续伤害踩上去的怪物，是你最主要的输出手段。',
+                '',
+                '## 自动射击',
+                '子弹自动发射，无需按键。目标优先级：治疗 → 精英 → BOSS → 最近的怪。',
+                '射击间隔 = max(6, 12 - 波数×0.08) 帧，命中得分 +1。',
+                '',
+                '## 核心与护盾',
+                '护盾 100 点，怪物撞击时先扣护盾，每 30 帧只能撞一次。',
+                '一次撞击对护盾造成 怪物攻击力×0.35 的伤害；护盾归零后才扣核心 HP。',
+                '核心 HP 归零即游戏结束。',
+                '',
+                '## 怪物行为',
+                '怪物以「停顿 → 冲刺」交替前进，冲刺时速度翻倍，不是匀速的。',
+                '7 种怪物：普通 👾 / 疾速 💨 / 重装 🛡️ / 治疗 💚 / 迟缓 🐌 / 分裂 🧬 / BOSS 👑。',
+                '治疗怪给周围同伴回血；迟缓怪命中你会让你减速；分裂怪死后裂成 2 只子体。',
+                '',
+                '## 操作',
+                'W A S D 移动 · 鼠标点击手牌填入槽位 · 空格 宣读组合 · ⏭ 跳过 整顿期',
+                'H 开关本图鉴 · ` 调试模式（数字键 1-7 直接生成指定怪物，教程期间禁用）',
+            ],
+        },
+        {
+            title: '📖 机制图鉴 2/3 · 密文板',
+            lines: [
+                '## 组合规则',
+                '1 张触发板 + 1 张效果板 → 宣读组合 → 永久被动，可反复叠层。',
+                '手牌上限 20 张，满了自动替换最老的一张。',
+                '触发板与效果板数量差不得超过 1，否则牌库拒绝给你抽牌。',
+                '右侧牌库可无限抽牌，全部板子都在里面。',
+                '',
+                '## 触发板',
+                'T01 对自身 · T02 对敌群 · T06 怪触轨',
+                'T07 射击命中 · T08 连环击杀 · T10 残血触发',
+                '',
+                '## 效果板',
+                'E01 攻击增幅 · E02 连环击 · E03 生命回复 · E04 移速减慢',
+                'E06 轨迹升级 · E07 轨迹爆伤 · E10 怪物反噬 · E11 自速暴涨',
+                '',
+                '## 玩法提示',
+                'T06+E06 走铺轨流：怪物踩到轨迹就变强，轨迹越铺越粗。',
+                'E10 怪物反噬需轨迹伤害 > 5 才生效，怪物之间会互相伤害。',
+                'T01/T02 是即时触发，宣读当帧就结算一次效果。',
+                '',
+                '## 参考组合',
+                'T07 + E01：每次命中永久 +5 攻击 —— 稳定成长。',
+                'T10 + E03：残血自动回血 —— 续航。',
+                'T08 + E11：连杀后自身提速 —— 滚雪球。',
+            ],
+        },
+        {
+            title: '📖 机制图鉴 3/3 · 成长与得分',
+            lines: [
+                '## 难度曲线',
+                '难度系数 D = 1.16^(波数-1)，每波比上一波强 16%。',
+                '每波怪物数 = min(4 + floor(3×1.10^波数), 50)。',
+                '精英出现概率 = min(0.05 + 0.04×log2(波数+1), 0.35)。',
+                '普通怪掉落密文板的概率 = min(0.2 + 波数×0.005, 0.5)。',
+                '',
+                '## 得分',
+                '击杀得分 = 怪物分值 × 难度系数；精英为 3 倍左右。',
+                '连击超过 5 后，每满 10 连击得分倍率 +0.5（x1.0 → x1.5 → x2.0 …）。',
+                '清空一波 +波数×10 分；每 5 波额外 +波数×15 分。',
+                '波间三选一额外 +15 分。',
+                '',
+                '## 波间流程',
+                '清空 → 三选一（选 1 张牌）→ 5 秒整顿期（可自由铺轨 / 组合）→ 下一波。',
+                '整顿期点 ⏭ 跳过 可立刻开战。',
+                '',
+                '## BOSS',
+                '每 10 波出现 👑 BOSS：血量 = 50000 × 1.6^(波数÷10 - 1)。',
+                'BOSS 会持续召唤爪牙，击杀掉落 2-3 张密文板。',
+                '',
+                '## 精英',
+                '精英体型更大、血量与攻击更高，得分也更高。',
+                '波数越高精英越常见，是后期的主要分数来源。',
+            ],
+        },
+    ];
+
+    const Tutorial = {
+        active: false, seen: false, finished: false,
+        wave: 1, cfg: null,
+        idx: -1, stepTimer: 0, waveTimer: 0, pendTimer: 0,
+        banner: null, text: null, hint: null,
+        gateLeft: 0, moveAcc: 0, lastX: null, lastY: null,
+        kills: 0, killedTypes: {}, flags: {},
+        dropQueue: [], spawnQueue: [], selectionPreset: null,
+        hpMul: 1, spawnInterval: 0,
+        codexOpen: false, codexPage: 0, _btns: [],
+
+        // ---------- 查询 ----------
+        gateClosed() { return this.active && this.gateLeft > 0; },
+
+        clearCondition() {
+            return G.monsters.length === 0 && G.monstersToSpawn === 0 &&
+                !G.vacuumActive && !G.bossPending;
+        },
+
+        // 三选一遮罩要不要为教程字幕让路：
+        // 字幕正在播 → 让路；本波还有没播完的 clear 字幕 → 让路
+        holdSelection() {
+            if (!this.active || !this.cfg) return false;
+            if (this.text) return true;
+            for (let i = this.idx + 1; i < this.cfg.steps.length; i++) {
+                if (this.cfg.steps[i].on === 'clear') return true;
+            }
+            return false;
+        },
+
+        // ---------- 生命周期 ----------
+        startWave(w) {
+            const cfg = TUTORIAL_WAVES[w];
+            if (!cfg) { this.active = false; return false; }
+            this.active = true;
+            this.cfg = cfg;
+            this.wave = w;
+            this.idx = -1;
+            this.stepTimer = 0; this.waveTimer = 0; this.pendTimer = 0;
+            this.text = null; this.hint = null; this.banner = null;
+            this.moveAcc = 0; this.lastX = null; this.lastY = null;
+            this.kills = 0; this.killedTypes = {}; this.flags = {};
+            this.hpMul = cfg.hpMul || 1;
+            this.spawnInterval = cfg.spawnInterval || 0;
+            this.selectionPreset = cfg.selection || null;
+            this.dropQueue = (cfg.drops || []).map(d => ({ ...d, done: 0 }));
+            this.spawnQueue = [];
+            (cfg.spawn || []).forEach(s => {
+                for (let i = 0; i < s.n; i++) {
+                    this.spawnQueue.push({ type: s.type, elite: !!(s.elite && i === 0) });
+                }
+            });
+            this.gateLeft = (cfg.steps || []).filter(s => s.gate).length;
+
+            // 预设手牌：清空并发放
+            if (cfg.hand) {
+                G.hand = [];
+                cfg.hand.forEach(id => {
+                    const t = TRIGGERS.find(c => c.id === id);
+                    const e = t ? null : EFFECTS.find(c => c.id === id);
+                    if (t) G.hand.push({ ...t, type: 'trigger' });
+                    else if (e) G.hand.push({ ...e, type: 'effect' });
+                });
+            }
+            updateUI();
+            return true;
+        },
+
+        reset() {
+            this.active = false;
+            this.finished = false;
+            this.codexOpen = false;
+            this.wave = 1; this.cfg = null; this.idx = -1;
+            this.text = null; this.hint = null; this.banner = null;
+            this.gateLeft = 0; this.spawnQueue = []; this.dropQueue = [];
+            this.selectionPreset = null; this.hpMul = 1; this.spawnInterval = 0;
+            this.moveAcc = 0; this.lastX = null; this.lastY = null;
+            this.kills = 0; this.killedTypes = {}; this.flags = {};
+        },
+
+        // ---------- 出怪 / 掉落 ----------
+        nextSpawn() {
+            if (!this.active || this.spawnQueue.length === 0) return null;
+            return this.spawnQueue.shift();
+        },
+
+        emit(name, data) {
+            if (!this.active) return;
+            if (name === 'kill') {
+                this.kills++;
+                const t = (data && data.type) || '?';
+                if (!(data && data.isChild)) this.killedTypes[t] = (this.killedTypes[t] || 0) + 1;
+                if (data && data.isElite) this.flags.eliteKill = true;
+                if (data && data.isChild) this.flags.childKill = true;
+                this.checkDrops();
+                return;
+            }
+            this.flags[name] = true;
+        },
+
+        checkDrops() {
+            while (this.dropQueue.length > 0) {
+                const d = this.dropQueue[0];
+                let ok = false;
+                if (d.on === 'kill') ok = this.kills >= d.n;
+                else if (d.on === 'killType') ok = (this.killedTypes[d.type] || 0) >= (d.n || 1);
+                else if (d.on === 'killElite') ok = !!this.flags.eliteKill;
+                else if (d.on === 'killChild') ok = !!this.flags.childKill;
+                if (!ok) break;
+                this.dropQueue.shift();
+                dropScriptedCard(d.card);
+            }
+        },
+
+        // ---------- 步骤调度 ----------
+        triggered(s) {
+            switch (s.on) {
+                case 'enter':
+                case 'after': return this.pendTimer >= (s.d || 0);
+                case 'move': return this.moveAcc >= s.n;
+                case 'kill': return this.kills >= s.n;
+                case 'combo': return G.comboCount >= s.n;
+                case 'slots': return !!(G.triggerSlot && G.effectSlot);
+                case 'clear': return this.clearCondition();
+                case 'event': return !!this.flags[s.name];
+                default: return true;
+            }
+        },
+
+        show(i) {
+            const s = this.cfg.steps[i];
+            this.idx = i;
+            this.stepTimer = 0;
+            this.pendTimer = 0;
+            this.hint = null;
+            const text = s.kind === 'banner' && !s.text ?
+                `古老的石板-${this.wave} · ${this.cfg.title}` : s.text;
+            this.text = { step: s, text };
+            if (s.kind === 'banner') this.banner = { text, life: s.hold || 110, maxLife: s.hold || 110 };
+        },
+
+        advance() {
+            const cur = this.text && this.text.step;
+            if (cur && cur.gate && this.gateLeft > 0) this.gateLeft--;
+            this.text = null;
+            this.hint = null;
+            this.stepTimer = 0;
+            this.pendTimer = 0;
+        },
+
+        finish() {
+            this.active = false;
+            this.finished = true;
+            this.seen = true;
+            this.text = null;
+            this.banner = null;
+            this.hint = null;
+            setFeedback('🎓 教程结束 · 第 6 波起恢复随机', '#f5c542');
+        },
+
+        tick() {
+            if (!this.active) return;
+            if (G.gameOver || G.selectingActive) return;
+            this.waveTimer++;
+            this.pendTimer++;
+            if (this.banner && --this.banner.life <= 0) this.banner = null;
+
+            // 累计移动距离
+            const p = G.player;
+            if (this.lastX !== null) {
+                this.moveAcc += Math.hypot(p.x - this.lastX, p.y - this.lastY);
+            }
+            this.lastX = p.x;
+            this.lastY = p.y;
+
+            // 当前字幕播完 → 收掉，等下一步的触发条件
+            if (this.text) {
+                this.stepTimer++;
+                const hold = this.text.step.hold != null ? this.text.step.hold : 300;
+                if (this.stepTimer >= hold) this.advance();
+                return;
+            }
+
+            const next = this.idx + 1;
+            if (next >= this.cfg.steps.length) { this.finish(); return; }
+            const s = this.cfg.steps[next];
+
+            if (this.triggered(s)) { this.show(next); return; }
+
+            // 超时保底：先换直白提示，再自动放行
+            if (this.hint && --this.hint.life <= 0) this.hint = null;
+            if (s.fallback && this.pendTimer === TUTORIAL_TIMEOUT) {
+                this.hint = { text: s.fallback, life: TUTORIAL_FORCE };
+            }
+            if (this.pendTimer >= TUTORIAL_TIMEOUT + TUTORIAL_FORCE) this.show(next);
+        },
+
+        // ---------- 跳过 / 重看 ----------
+        skip() {
+            if (!this.active || !this.cfg) return;
+            this.active = false;
+            this.finished = true;
+            this.seen = true;
+            this.text = null;
+            this.banner = null;
+            this.hint = null;
+            G.hand = [];
+            ['T07', 'E01', 'T06', 'E06', 'T08', 'E11'].forEach(id => {
+                const t = TRIGGERS.find(c => c.id === id);
+                const e = t ? null : EFFECTS.find(c => c.id === id);
+                if (t) G.hand.push({ ...t, type: 'trigger' });
+                else if (e) G.hand.push({ ...e, type: 'effect' });
+            });
+            addPassive('T07', 'E01');
+            addPassive('T06', 'E06');
+            addScore(500);
+            G.wave = TUTORIAL_MAX_WAVE; // advanceWave 会 +1 → 第 6 波
+            advanceWave();
+            setFeedback('⏭ 已跳过教程 · 从第 6 波开始', '#88ccff');
+        },
+
+        replay() {
+            this.seen = false;
+            this.finished = false;
+            resetGame();
+            setFeedback('🎓 重新开始教程 · 古老的石板 1', '#7bb3ff');
+        },
+
+        handleClick(x, y) {
+            for (const b of this._btns) {
+                if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+                    if (b.id === 'skip') this.skip();
+                    else if (b.id === 'replay') this.replay();
+                    else if (b.id === 'codex') {
+                        this.codexOpen = !this.codexOpen;
+                        this.codexPage = 0;
+                    }
+                    return true;
+                }
+            }
+            return false;
+        },
+    };
+
+    // 脚本掉落：按 id 直接发放，并保证触发/效果交替
+    function dropScriptedCard(cardId) {
+        const t = TRIGGERS.find(c => c.id === cardId);
+        const e = t ? null : EFFECTS.find(c => c.id === cardId);
+        const card = t || e;
+        if (!card) return;
+        if (G.hand.length >= 20) {
+            const old = G.hand.shift();
+            setFeedback(`📥 ${old.emoji}→${card.emoji}${card.label} (替换)`, '#8ab3d0');
+        } else {
+            setFeedback(`📥 拾取 ${card.emoji} ${card.label}`, '#8ab3d0');
+        }
+        G.hand.push({ ...card, type: t ? 'trigger' : 'effect' });
+        Tutorial.emit('pickup', card);
+        updateUI();
+    }
+
+    // 开发期自检：脚本掉落必须满足「触发/效果差值 ≤ 1」
+    function tutorialCheckBalance() {
+        Object.keys(TUTORIAL_WAVES).forEach(w => {
+            const cfg = TUTORIAL_WAVES[w];
+            const list = (cfg.drops || []).map(d => d.card).concat(cfg.hand || []);
+            if (list.length === 0) return;
+            const t = list.filter(c => c[0] === 'T').length;
+            const e = list.filter(c => c[0] === 'E').length;
+            if (Math.abs(t - e) > 1) {
+                console.warn(`[教程] 第 ${w} 波脚本掉落不平衡 T=${t} E=${e}`, list);
+            }
+        });
+    }
+
+    // ---------- 教程渲染 ----------
+    function tutorialRoundRect(c, x, y, w, h, r) {
+        c.beginPath();
+        c.moveTo(x + r, y);
+        c.arcTo(x + w, y, x + w, y + h, r);
+        c.arcTo(x + w, y + h, x, y + h, r);
+        c.arcTo(x, y + h, x, y, r);
+        c.arcTo(x, y, x + w, y, r);
+        c.closePath();
+    }
+
+    function tutorialTargetPoint(name) {
+        const cw = G.canvasWidth || 780, ch = G.canvasHeight || 560;
+        const rect = canvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) return null;
+        const sx = cw / rect.width, sy = ch / rect.height;
+        const domMap = {
+            hand: 'handContainer', combine: 'combineBtn', slot: 'triggerSlot',
+            vacuum: 'vacuumBar', panel: 'libraryGrid',
+        };
+        const domId = domMap[name];
+        if (domId) {
+            const el = document.getElementById(domId);
+            if (el) {
+                const r = el.getBoundingClientRect();
+                const outside = r.left > rect.right || r.right < rect.left ||
+                    r.bottom < rect.top || r.top > rect.bottom;
+                return {
+                    x: clamp((r.left + r.width / 2 - rect.left) * sx, 16, cw - 16),
+                    y: clamp((r.top + r.height / 2 - rect.top) * sy, 16, ch - 16),
+                    outside,
+                };
+            }
+            return null;
+        }
+        if (name === 'core') return { x: G.core.x, y: G.core.y };
+        if (name === 'player') return { x: G.player.x, y: G.player.y };
+        if (name === 'elite') {
+            const m = G.monsters.find(mm => mm.isElite);
+            return m ? { x: m.x, y: m.y } : null;
+        }
+        if (name === 'monsters') {
+            const m = G.monsters[0];
+            return m ? { x: m.x, y: m.y } : null;
+        }
+        return null;
+    }
+
+    const TUTORIAL_POINT_LABEL = {
+        hand: '手牌', combine: '宣读组合', slot: '槽位', vacuum: '整顿期',
+        panel: '牌库', core: '核心', player: '你', elite: '精英怪', monsters: '怪物',
+    };
+
+    function drawTutorialPointer(name) {
+        const pt = tutorialTargetPoint(name);
+        if (!pt) return;
+        const cw = G.canvasWidth || 780;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(245,197,66,0.85)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 5]);
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 14 + Math.sin(G.frame * 0.12) * 3, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        if (pt.outside) {
+            const dir = pt.x > cw / 2 ? 1 : -1;
+            ctx.beginPath();
+            ctx.moveTo(pt.x, pt.y);
+            ctx.lineTo(pt.x + 24 * dir, pt.y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(pt.x + 30 * dir, pt.y);
+            ctx.lineTo(pt.x + 18 * dir, pt.y - 7);
+            ctx.lineTo(pt.x + 18 * dir, pt.y + 7);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(245,197,66,0.85)';
+            ctx.fill();
+        }
+        const label = TUTORIAL_POINT_LABEL[name];
+        if (label) {
+            ctx.font = `12px ${TUTORIAL_FONT}`;
+            const tw = ctx.measureText(label).width;
+            const lx = clamp(pt.x + 22, 10, cw - tw - 26);
+            const ly = clamp(pt.y - 32, 22, (G.canvasHeight || 560) - 22);
+            ctx.globalAlpha = 0.9;
+            ctx.fillStyle = '#0a0e17';
+            tutorialRoundRect(ctx, lx - 9, ly - 12, tw + 18, 24, 6);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = '#f5c542';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, lx, ly);
+        }
+        ctx.restore();
+    }
+
+    function drawTutorialSubtitle(text) {
+        const cw = G.canvasWidth || 780, ch = G.canvasHeight || 560;
+        ctx.save();
+        ctx.font = `15px ${TUTORIAL_FONT}`;
+        const maxW = cw * 0.88 - 32;
+        const lines = [];
+        let cur = '';
+        for (const ch2 of text) {
+            if (ctx.measureText(cur + ch2).width > maxW) { lines.push(cur); cur = ''; }
+            cur += ch2;
+        }
+        if (cur) lines.push(cur);
+        const lineH = 22, padY = 12;
+        const barW = cw * 0.88;
+        const barH = lines.length * lineH + padY * 2;
+        const bx = (cw - barW) / 2, by = ch - barH - 16;
+
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = '#0a0e17';
+        tutorialRoundRect(ctx, bx, by, barW, barH, 10);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = 'rgba(123,179,255,0.45)';
+        ctx.lineWidth = 1;
+        tutorialRoundRect(ctx, bx, by, barW, barH, 10);
+        ctx.stroke();
+        ctx.fillStyle = '#7bb3ff';
+        ctx.fillRect(bx + 10, by + 10, 3, barH - 20);
+
+        ctx.font = `15px ${TUTORIAL_FONT}`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#e8f2ff';
+        lines.forEach((ln, i) => ctx.fillText(ln, bx + 22, by + padY + lineH * i + lineH / 2));
+        ctx.restore();
+    }
+
+    function drawCodex() {
+        const cw = G.canvasWidth || 780, ch = G.canvasHeight || 560;
+        const pages = CODEX_PAGES;
+        const pi = clamp(Tutorial.codexPage, 0, pages.length - 1);
+        const page = pages[pi];
+        ctx.save();
+        ctx.fillStyle = 'rgba(6,10,18,0.95)';
+        ctx.fillRect(0, 0, cw, ch);
+        ctx.strokeStyle = 'rgba(123,179,255,0.4)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(3, 3, cw - 6, ch - 6);
+
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.font = `bold 18px ${TUTORIAL_FONT}`;
+        ctx.fillStyle = '#f5c542';
+        ctx.fillText(page.title, 30, 22);
+
+        let y = 56;
+        const colW = cw - 60;
+        for (const raw of page.lines) {
+            if (raw === '') { y += 8; continue; }
+            const isHead = raw.startsWith('##');
+            const line = isHead ? raw.slice(2) : raw;
+            ctx.font = isHead ? `bold 14px ${TUTORIAL_FONT}` : `13px ${TUTORIAL_FONT}`;
+            ctx.fillStyle = isHead ? '#7bb3ff' : '#c8dcf0';
+            ctx.fillText(line, 30, y, colW);
+            y += isHead ? 24 : 19;
+        }
+
+        ctx.font = `12px ${TUTORIAL_FONT}`;
+        ctx.fillStyle = '#6a8aaa';
+        ctx.fillText('← → 翻页 · H 或点击任意处关闭', 30, ch - 26);
+        ctx.textAlign = 'right';
+        ctx.fillText(`${pi + 1} / ${pages.length}`, cw - 30, ch - 26);
+        ctx.restore();
+    }
+
+    function drawTutorialCorners() {
+        const cw = G.canvasWidth || 780;
+        Tutorial._btns = [];
+        const items = [];
+        if (Tutorial.active) items.push({ id: 'skip', label: '⏭ 跳过教程 →', color: '#8ab3d0' });
+        else items.push({ id: 'replay', label: '⟲ 重看教程', color: '#5f7f9f' });
+        items.push({ id: 'codex', label: '📖 H 机制图鉴', color: '#5f7f9f' });
+
+        ctx.save();
+        ctx.font = `12px ${TUTORIAL_FONT}`;
+        ctx.textBaseline = 'middle';
+        let x = cw - 10;
+        for (const it of items) {
+            const tw = ctx.measureText(it.label).width;
+            const bw = tw + 20, bh = 24, by = 8;
+            x -= bw;
+            ctx.globalAlpha = 0.75;
+            ctx.fillStyle = '#0a0e17';
+            tutorialRoundRect(ctx, x, by, bw, bh, 6);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = it.color + '66';
+            ctx.lineWidth = 1;
+            tutorialRoundRect(ctx, x, by, bw, bh, 6);
+            ctx.stroke();
+            ctx.fillStyle = it.color;
+            ctx.textAlign = 'left';
+            ctx.fillText(it.label, x + 10, by + bh / 2);
+            Tutorial._btns.push({ id: it.id, x, y: by, w: bw, h: bh });
+            x -= 6;
+        }
+        ctx.restore();
+    }
+
+    function drawTutorial() {
+        if (G.gameOver) return;
+        if (Tutorial.codexOpen) { drawCodex(); return; }
+
+        const step = Tutorial.text ? Tutorial.text.step : null;
+        if (step && step.point) drawTutorialPointer(step.point);
+
+        if (Tutorial.banner) {
+            const b = Tutorial.banner;
+            const cw = G.canvasWidth || 780, ch = G.canvasHeight || 560;
+            const a = Math.max(0, Math.min(1, b.life / 25, (b.maxLife - b.life) / 12));
+            ctx.save();
+            ctx.globalAlpha = a;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = `bold 28px ${TUTORIAL_FONT}`;
+            ctx.lineWidth = 6;
+            ctx.strokeStyle = 'rgba(4,8,16,0.92)';
+            ctx.strokeText(b.text, cw / 2, ch / 2 - 40);
+            ctx.fillStyle = '#f5c542';
+            ctx.fillText(b.text, cw / 2, ch / 2 - 40);
+            ctx.restore();
+        }
+
+        if (step && step.kind !== 'banner') drawTutorialSubtitle(Tutorial.text.text);
+
+        if (Tutorial.hint && Tutorial.hint.text) {
+            const cw = G.canvasWidth || 780, ch = G.canvasHeight || 560;
+            ctx.save();
+            ctx.font = `bold 14px ${TUTORIAL_FONT}`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const tw = ctx.measureText(Tutorial.hint.text).width;
+            ctx.globalAlpha = 0.92;
+            ctx.fillStyle = '#2a1d05';
+            tutorialRoundRect(ctx, cw / 2 - tw / 2 - 16, ch / 2 + 60, tw + 32, 34, 8);
+            ctx.fill();
+            ctx.strokeStyle = '#f5c542';
+            ctx.lineWidth = 1.5;
+            tutorialRoundRect(ctx, cw / 2 - tw / 2 - 16, ch / 2 + 60, tw + 32, 34, 8);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = '#f5c542';
+            ctx.fillText(Tutorial.hint.text, cw / 2, ch / 2 + 77);
+            ctx.restore();
+        }
+
+        drawTutorialCorners();
+    }
+
+    // ---------- 核心游戏逻辑 ----------
+    function startWave() {
+        // 教程关：走脚本出怪，不走随机数量 + 加权随机
+        if (!Tutorial.seen && TUTORIAL_WAVES[G.wave]) {
+            Tutorial.startWave(G.wave);
+            G.monstersToSpawn = Tutorial.spawnQueue.length;
+            addScore(G.wave * 5);
+            G.bossPending = false;
+            G.bossSpawned = false;
+            G.spawnTimer = getSpawnInterval();
+            setFeedback(`🌊 第 ${G.wave} 波 · 教程 (${G.monstersToSpawn}只)`, '#7bb3ff');
+            return;
+        }
+        // 教程关已走完（第 5 波结束），补一次收尾：置 seen 并给出结束反馈。
+        // 若直接 active=false，玩家在收尾横幅期间点「跳过整顿期」就会让 seen 永远不置位，
+        // 导致 ↺ 重开时教程又从头播一遍。
+        if (Tutorial.active) Tutorial.finish();
+
+        const count = getMonsterCount();
+        G.monstersToSpawn = count;
+        G.spawnTimer = 0;
+        addScore(G.wave * 5);
+        G.bossPending = false; G.bossSpawned = false;
+        const isBossWave = (G.wave % 10 === 0);
+        const diff = getDifficultyMultiplier();
+        if (isBossWave) {
+            spawnBoss();
+            G.bossPending = true; G.bossSpawned = true;
+            setFeedback(`🌊 第 ${G.wave} 波 (${count}只) 👑BOSS率先登场! 难度×${diff.toFixed(2)}`, '#ff3366');
+        } else {
+            setFeedback(`🌊 第 ${G.wave} 波 (${count}只) 难度×${diff.toFixed(2)}`, '#ffb347');
+        }
+    }
+
+    function autoShoot() {
+        if (G.gameOver) return;
+        if (G.monsters.length === 0) return;
+        const p = G.player;
+        if (p.shootCooldown > 0) return;
+
+        let priorityTargets = G.monsters.filter(m => m.isBoss || m.isHealer || m.isElite);
+        let targets = priorityTargets.length > 0 ? priorityTargets : G.monsters;
+        let nearest = null,
+            nearestDist = Infinity;
+        for (const m of targets) {
+            const d = dist(p, m);
+            if (d < nearestDist) { nearestDist = d;
+                nearest = m; }
+        }
+        if (!nearest) return;
+        G.target = nearest;
+
+        const angle = angleTo(p, nearest);
+        const spread = 0.08;
+        const speed = 7;
+        const atk = (p.atk + G.buffs.atkUp) * (1 + G.buffs.multUp);
+        G.bullets.push({
+            x: p.x + Math.cos(angle) * 22,
+            y: p.y + Math.sin(angle) * 22,
+            vx: Math.cos(angle + rand(-spread, spread)) * speed,
+            vy: Math.sin(angle + rand(-spread, spread)) * speed,
+            r: 4,
+            damage: atk,
+            life: 60,
+            hit: false,
+        });
+        p.shootCooldown = Math.max(6, 12 - G.wave * 0.08);
+    }
+
+    function getTrailDamage() {
+        return G.buffs.trailDmg + Math.log2(G.wave + 1) * 0.5;
+    }
+
+    function getTrailWidth() {
+        return G.buffs.trailWidth;
+    }
+
+    function addTrail(x1, y1, x2, y2) {
+        G.trails.push({ x1, y1, x2, y2, life: 360, layer: 1 });
+        if (G.trails.length > 120) G.trails.shift();
+    }
+
+    function explodeTrails(cx, cy, radius) {
+        let count = 0;
+        for (let i = G.trails.length - 1; i >= 0; i--) {
+            const t = G.trails[i];
+            const mx = (t.x1 + t.x2) / 2,
+                my = (t.y1 + t.y2) / 2;
+            if (dist({ x: mx, y: my }, { x: cx, y: cy }) < radius) {
+                const dmg = 15 + G.buffs.trailDmg * 2;
+                G.monsters.forEach(m => {
+                    if (dist(m, { x: mx, y: my }) < 60) {
+                        m.hp -= dmg;
+                        spawnParticles(m.x, m.y, '#ff8844', 6);
+                        showFloatingText(m.x, m.y - m.r, '-' + dmg, '#ff6633');
+                    }
+                });
+                G.trails.splice(i, 1);
+                count++;
+                spawnParticles(mx, my, '#ffaa44', 8);
+            }
+        }
+        return count;
+    }
+
+    function spawnParticles(x, y, color, count = 5) {
+        if (G.particles.length + count > PARTICLE_MAX) {
+            G.particles.splice(0, G.particles.length + count - PARTICLE_MAX); // 丢最旧的
+        }
+        for (let i = 0; i < count; i++) {
+            const angle = rand(0, Math.PI * 2);
+            const speed = rand(1, 4);
+            G.particles.push({
+                x,
+                y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                life: rand(20, 50),
+                maxLife: 50,
+                r: rand(2, 5),
+                color,
+            });
+        }
+    }
+
+    // ---------- 组合密文 ----------
+    function combineCards() {
+        if (G.combineCooldown || !G.triggerSlot || !G.effectSlot || G.gameOver || G.selectingActive) return;
+        const trigger = G.triggerSlot;
+        const effect = G.effectSlot;
+        const triggerId = trigger.id;
+        const effectId = effect.id;
+
+        G.triggerSlot = null;
+        G.effectSlot = null;
+        G.combineCooldown = true;
+        setTimeout(() => { G.combineCooldown = false; }, 600);
+
+        addPassive(triggerId, effectId);
+        Tutorial.emit('combine');
+
+        let msg = `${trigger.emoji}${trigger.label} + ${effect.emoji}${effect.label}`;
+        msg += ` → 永久被动！`;
+        let color = '#ffb347';
+
+        if (triggerId === 'T01') { triggerPassive('T01');
+            msg += ' (立即)'; }
+        if (triggerId === 'T02') { triggerPassive('T02');
+            msg += ' (立即)'; }
+        if (triggerId === 'T10' && G.player.hp < G.player.maxHp * 0.3) { triggerPassive('T10');
+            msg += ' (残血)'; }
+
+        setFeedback(msg, color);
+        updateUI();
+    }
+
+    // ---------- 更新 ----------
+    function update() {
+        if (G.gameOver) return;
+        if (G.selectingActive) return; // 三选一时暂停游戏逻辑
+        G.frame++;
+        Tutorial.tick(); // 教程调度（只在教程波生效）
+
+        const p = G.player;
+
+        let playerSpeedMult = G.buffs.speedUp;
+        if (G.playerSlowTimer > 0) {
+            G.playerSlowTimer--;
+            playerSpeedMult *= (1 - G.playerSlowAmount * 0.3);
+        }
+        const speed = p.speed * playerSpeedMult;
+
+        let dx = 0,
+            dy = 0;
+        if (G.keys.w) dy = -1;
+        if (G.keys.s) dy = 1;
+        if (G.keys.a) dx = -1;
+        if (G.keys.d) dx = 1;
+        if (dx !== 0 && dy !== 0) { dx *= 0.707;
+            dy *= 0.707; }
+        const newX = p.x + dx * speed;
+        const newY = p.y + dy * speed;
+        p.x = clamp(newX, 20, 760);
+        p.y = clamp(newY, 20, 540);
+
+        if (G.frame % 2 === 0 && (dx !== 0 || dy !== 0)) {
+            const trailLen = 6;
+            addTrail(p.x - dx * trailLen, p.y - dy * trailLen, p.x + dx * trailLen, p.y + dy * trailLen);
+        }
+
+        // 自动射击
+        if (G.monsters.length > 0) {
+            G.fireCounter++;
+            if (G.fireCounter >= G.fireRate) {
+                G.fireCounter = 0;
+                autoShoot();
+            }
+        } else {
+            G.fireCounter = 0;
+            G.target = null;
+        }
+        if (p.shootCooldown > 0) p.shootCooldown--;
+
+        // 子弹
+        for (let i = G.bullets.length - 1; i >= 0; i--) {
+            const b = G.bullets[i];
+            b.x += b.vx;
+            b.y += b.vy;
+            b.life--;
+            if (b.x < -10 || b.x > 790 || b.y < -10 || b.y > 570 || b.life <= 0) {
+                G.bullets.splice(i, 1);
+                continue;
+            }
+            let hit = false;
+            for (const m of G.monsters) {
+                if (dist(b, m) < b.r + m.r) {
+                    m.hp -= b.damage;
+                    spawnParticles(b.x, b.y, '#ff8844', 5);
+                    showFloatingText(m.x, m.y - m.r, '-' + Math.floor(b.damage), '#ff8844');
+                    hit = true;
+                    if (!b.hit) {
+                        b.hit = true;
+                        triggerPassive('T07');
+                        addScore(1);
+                    }
+                    break;
+                }
+            }
+            if (hit) G.bullets.splice(i, 1);
+        }
+
+        // 治疗
+        applyHealing();
+
+        // 怪物更新
+        for (let i = G.monsters.length - 1; i >= 0; i--) {
+            const m = G.monsters[i];
+            // 停-走交替（1:2 停走比），持续移动怪免除停顿
+            if (!m.alwaysMoving) {
+                m.moveTimer--;
+                const cycleLen = (m.moveInterval || 60) * 2;
+                if (m.moveTimer <= 0) m.moveTimer = cycleLen;
+                const moveLen = Math.floor(cycleLen * 2 / 3);
+                m.isMoving = m.moveTimer <= moveLen;
+            } else {
+                m.isMoving = true;
+            }
+            const angle = angleTo(m, G.core);
+            const baseSpd = m.speed * (1 - G.buffs.slowAll);
+            const spd = m.isMoving ? baseSpd * 2 : 0;
+            m.x += Math.cos(angle) * spd;
+            m.y += Math.sin(angle) * spd;
+
+            // 轨迹伤害
+            if (m.trailDamageCooldown <= 0) {
+                let onTrail = false;
+                for (const t of G.trails) {
+                    const mx = (t.x1 + t.x2) / 2,
+                        my = (t.y1 + t.y2) / 2;
+                    if (dist(m, { x: mx, y: my }) < getTrailWidth() + m.r + 10) {
+                        onTrail = true;
+                        break;
+                    }
+                }
+                if (onTrail) {
+                    const td = getTrailDamage();
+                    m.hp -= td;
+                    m.trailDamageCooldown = 15;
+                    showFloatingText(m.x, m.y - m.r, '-' + Math.floor(td), '#ffaa44');
+                    triggerPassive('T06');
+                    addScore(1);
+                }
+            } else {
+                m.trailDamageCooldown--;
+            }
+
+            // 攻击核心 → 先扣玩家HP（护盾），再扣核心
+            if (dist(m, G.core) < m.r + G.core.r) {
+                if (m.hitCooldown <= 0) {
+                    const dmg = m.atk * 0.35;
+                    if (G.player.hp > 0) {
+                        G.player.hp = Math.max(0, G.player.hp - dmg);
+                        spawnParticles(G.player.x, G.player.y, '#ff6644', 6);
+                        showFloatingText(G.player.x, G.player.y - G.player.r, '-' + Math.floor(dmg), '#ff6644');
+                        if (G.player.hp <= 0) {
+                            setFeedback('🛡️ 护盾耗尽！核心暴露！', '#ff4444');
+                        }
+                    } else {
+                        G.core.hp -= dmg;
+                        spawnParticles(G.core.x, G.core.y, '#ff3333', 8);
+                        showFloatingText(G.core.x, G.core.y - G.core.r, '-' + Math.floor(dmg), '#ff3333');
+                    }
+                    m.hitCooldown = 30;
+                    Tutorial.emit('hit');
+                    if (m.isSlow) {
+                        G.playerSlowTimer = 60;
+                        G.playerSlowAmount = Math.min(G.playerSlowAmount + m.slowAmount * 0.1, 0.6);
+                        setFeedback(`🐌 被减速！`, '#bb88dd');
+                    }
+                    if (G.core.hp <= 0) {
+                        G.core.hp = 0;
+                        G.gameOver = true;
+                        setFeedback('💀 核心被毁 · 游戏结束', '#d44');
+                    }
+                }
+            }
+            if (m.hitCooldown > 0) m.hitCooldown--;
+
+            // 死亡
+            if (m.hp <= 0) {
+                if (m.isBoss) {
+                    spawnParticles(m.x, m.y, '#ff2266', 40);
+                    spawnParticles(m.x, m.y, '#ffaa44', 25);
+                    addScore(m.scoreValue || 300);
+                    G.killCount++; G.killStreak++;
+                    triggerPassive('T08'); addScore(G.killStreak * 5);
+                    G.bossPending = false; G.bossSpawned = false;
+                    const drops = 2 + Math.floor(Math.random() * 2);
+                    for (let d = 0; d < drops; d++) dropBalancedCard();
+                    G.monsters.splice(i, 1);
+                    setFeedback(`👑 BOSS击杀！+${Math.floor(m.scoreValue)}分 · 掉落${drops}张牌`, '#ff3366');
+                    continue;
+                }
+                spawnParticles(m.x, m.y, '#ffaa44', 12);
+                if (m.isSplitter && m.canSplit && !m.isChild) {
+                    splitMonster(m);
+                    spawnParticles(m.x, m.y, '#ffaa44', 15);
+                    Tutorial.emit('split');
+                }
+                addScore(m.scoreValue || 5);
+                G.killCount++;
+                G.killStreak++;
+                if (G.killStreak >= 2) {
+                    triggerPassive('T08');
+                    addScore(G.killStreak * 2);
+                }
+                G.monsters.splice(i, 1);
+                if (Tutorial.active) {
+                    Tutorial.emit('kill', m); // 教程关：掉落走脚本队列
+                } else if (Math.random() < Math.min(0.2 + G.wave * 0.005, 0.5)) {
+                    dropBalancedCard();
+                }
+                continue;
+            }
+
+            // 反噬
+            if (G.buffs.trailDmg > 5) {
+                for (const other of G.monsters) {
+                    if (other === m) continue;
+                    if (dist(m, other) < m.r + other.r + 10) {
+                        other.hp -= 1;
+                        spawnParticles(other.x, other.y, '#ff6644', 2);
+                        showFloatingText(other.x, other.y - other.r, '-1', '#cc6644');
+                    }
+                }
+            }
+        }
+
+        // T10 残血
+        if (G.player.hp < G.player.maxHp * 0.3 && G.frame % 30 === 0) {
+            triggerPassive('T10');
+        }
+
+        // 轨迹消失
+        for (let i = G.trails.length - 1; i >= 0; i--) {
+            G.trails[i].life--;
+            if (G.trails[i].life <= 0) G.trails.splice(i, 1);
+        }
+
+        // 粒子
+        for (let i = G.particles.length - 1; i >= 0; i--) {
+            const p2 = G.particles[i];
+            p2.x += p2.vx;
+            p2.y += p2.vy;
+            p2.vx *= 0.97;
+            p2.vy *= 0.97;
+            p2.life--;
+            if (p2.life <= 0) G.particles.splice(i, 1);
+        }
+
+        // 浮动数值
+        for (let i = G.floatingTexts.length - 1; i >= 0; i--) {
+            const ft = G.floatingTexts[i];
+            ft.x += ft.vx;
+            ft.y += ft.vy;
+            ft.life--;
+            if (ft.life <= 0) G.floatingTexts.splice(i, 1);
+        }
+
+        // 真空期倒计时
+        if (G.vacuumActive) {
+            G.vacuumTimer--;
+            updateVacuumUI();
+            if (G.vacuumTimer <= 0) {
+                G.vacuumActive = false;
+                const bar = document.getElementById('vacuumBar');
+                if (bar) bar.classList.remove('active');
+                advanceWave();
+            }
+        }
+
+        // 生成（教程关：门未开时先不出怪，给玩家读字的时间）
+        if (G.monstersToSpawn > 0 && !Tutorial.gateClosed()) {
+            G.spawnTimer--;
+            if (G.spawnTimer <= 0) {
+                const spawnCount = Math.min(1 + Math.floor(G.wave / 12), 3);
+                for (let s = 0; s < spawnCount && G.monstersToSpawn > 0; s++) {
+                    spawnMonster();
+                    G.monstersToSpawn--;
+                }
+                G.spawnTimer = getSpawnInterval();
+            }
+        }
+        // BOSS 召唤爪牙
+        for (const m of G.monsters) {
+            if (!m.isBoss) continue;
+            m.spawnTimer = (m.spawnTimer || 100) - 1;
+            if (m.spawnTimer <= 0) {
+                m.spawnTimer = Math.max(50, 150 - G.wave * 2);
+                const cnt = 1 + Math.floor(G.wave / 15);
+                for (let i = 0; i < cnt; i++) spawnBossMinion(m);
+            }
+        }
+        // 波次清空
+        if (G.monsters.length === 0 && G.monstersToSpawn === 0 && !G.vacuumActive && !G.selectingActive && !G.bossPending) {
+            // 教程字幕还在播时，先别弹三选一遮罩
+            if (!Tutorial.holdSelection()) showCardSelection();
+        }
+
+        updateUI();
+        if (G.core.hp <= 0) {
+            G.core.hp = 0;
+            G.gameOver = true;
+            setFeedback('💀 核心被毁 · 游戏结束', '#d44');
+        }
+    }
+
+    // ---------- 渲染 ----------
+    function draw() {
+        const w = G.canvasWidth || 780;
+        const h = G.canvasHeight || 560;
+        ctx.clearRect(0, 0, w, h);
+
+        // 背景
+        const grad = ctx.createRadialGradient(390, 280, 50, 390, 280, 400);
+        grad.addColorStop(0, '#162030');
+        grad.addColorStop(1, '#0a101a');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+
+        // 网格
+        ctx.strokeStyle = 'rgba(40,70,100,0.2)';
+        ctx.lineWidth = 0.5;
+        for (let x = 0; x < w; x += 40) { ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, h);
+            ctx.stroke(); }
+        for (let y = 0; y < h; y += 40) { ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(w, y);
+            ctx.stroke(); }
+
+        // 轨迹
+        for (const t of G.trails) {
+            const alpha = Math.min(1, t.life / 120);
+            const width = getTrailWidth() + t.layer * 2;
+            ctx.beginPath();
+            ctx.moveTo(t.x1, t.y1);
+            ctx.lineTo(t.x2, t.y2);
+            const hue = 200 + t.layer * 15;
+            ctx.strokeStyle = `hsla(${hue}, 80%, 60%, ${alpha * 0.7})`;
+            ctx.lineWidth = width;
+            ctx.shadowColor = `hsla(${hue}, 90%, 60%, ${alpha * 0.3})`;
+            ctx.shadowBlur = 20;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
+
+        // 核心
+        ctx.beginPath();
+        ctx.arc(G.core.x, G.core.y, G.core.r, 0, Math.PI * 2);
+        const coreColor = G.core.hp > 50 ? '#4a9eff' : '#ff6644';
+        ctx.fillStyle = `rgba(74, 158, 255, 0.15)`;
+        ctx.fill();
+        ctx.strokeStyle = coreColor;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.fillStyle = '#e8f0ff';
+        ctx.font = '16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🏰', G.core.x, G.core.y - 2);
+        const cw = 40;
+        ctx.fillStyle = '#1a2a3a';
+        ctx.fillRect(G.core.x - cw / 2, G.core.y - G.core.r - 12, cw, 4);
+        const coreHpRatio = Math.min(1, Math.max(0, G.core.hp / G.core.maxHp));
+        ctx.fillStyle = coreHpRatio > 0.5 ? '#4a9eff' : '#ff6644';
+        ctx.fillRect(G.core.x - cw / 2, G.core.y - G.core.r - 12, cw * coreHpRatio, 4);
+
+        // 玩家
+        ctx.shadowColor = '#4a9eff44';
+        ctx.shadowBlur = 20;
+        ctx.beginPath();
+        ctx.arc(G.player.x, G.player.y, G.player.r, 0, Math.PI * 2);
+        ctx.fillStyle = '#5ac8fa';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = '#8ad4ff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        let aimAngle = 0;
+        if (G.target) aimAngle = angleTo(G.player, G.target);
+        else if (G.monsters.length > 0) {
+            let nearest = null,
+                nd = Infinity;
+            for (const m of G.monsters) { const d = dist(G.player, m); if (d < nd) { nd = d;
+                    nearest = m; } }
+            if (nearest) aimAngle = angleTo(G.player, nearest);
+        }
+        ctx.beginPath();
+        ctx.moveTo(G.player.x + Math.cos(aimAngle) * 18, G.player.y + Math.sin(aimAngle) * 18);
+        ctx.lineTo(G.player.x + Math.cos(aimAngle + 0.5) * 12, G.player.y + Math.sin(aimAngle + 0.5) * 12);
+        ctx.lineTo(G.player.x + Math.cos(aimAngle - 0.5) * 12, G.player.y + Math.sin(aimAngle - 0.5) * 12);
+        ctx.closePath();
+        ctx.fillStyle = '#ffdd88';
+        ctx.fill();
+
+        const playerHpRatio = Math.min(1, Math.max(0, G.player.hp / G.player.maxHp));
+        ctx.fillStyle = '#1a2a3a';
+        ctx.fillRect(G.player.x - 20, G.player.y - G.player.r - 10, 40, 4);
+        ctx.fillStyle = playerHpRatio > 0.5 ? '#44dd88' : '#ff6644';
+        ctx.fillRect(G.player.x - 20, G.player.y - G.player.r - 10, 40 * playerHpRatio, 4);
+
+        // 怪物
+        for (const m of G.monsters) {
+            if (m.isBoss) {
+                const pulse = 0.7 + 0.3 * Math.sin(G.frame * 0.05);
+                ctx.shadowColor = `rgba(255,40,80,${0.6 * pulse})`;
+                ctx.shadowBlur = 35;
+                const bg = ctx.createRadialGradient(m.x, m.y, m.r * 0.3, m.x, m.y, m.r);
+                bg.addColorStop(0, '#ff4466'); bg.addColorStop(1, '#881122');
+                ctx.fillStyle = bg; ctx.beginPath();
+                ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = '#ff6688'; ctx.lineWidth = 3;
+                ctx.setLineDash([6, 3]); ctx.beginPath();
+                ctx.arc(m.x, m.y, m.r + 8, 0, Math.PI * 2); ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = '#fff'; ctx.font = '24px sans-serif';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText('👑', m.x, m.y);
+                const bhpw = m.r * 2.5;
+                ctx.fillStyle = '#1a1a2a';
+                ctx.fillRect(m.x - bhpw / 2, m.y - m.r - 20, bhpw, 7);
+                const hr = Math.min(1, Math.max(0, m.hp / m.maxHp));
+                ctx.fillStyle = hr > 0.5 ? '#ff4466' : hr > 0.25 ? '#ff8844' : '#ff2222';
+                ctx.fillRect(m.x - bhpw / 2, m.y - m.r - 20, bhpw * hr, 7);
+                ctx.fillStyle = '#fff'; ctx.font = '9px sans-serif';
+                ctx.fillText(`👑BOSS ${Math.floor(Math.max(0, m.hp))}`, m.x, m.y - m.r - 26);
+            } else {
+                ctx.shadowColor = m.isElite ? '#ff664466' : '#ff444433';
+                ctx.shadowBlur = 15;
+                ctx.beginPath();
+                ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+                ctx.fillStyle = m.color || '#cc6633';
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = m.isElite ? '#ff8866' : '#ffaa66';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                ctx.fillStyle = '#fff';
+                ctx.font = `${Math.max(m.r * 0.7, 8)}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(m.typeEmoji || '👾', m.x, m.y + 1);
+
+                const bw = m.r * 2;
+                const mHpRatio = Math.min(1, Math.max(0, m.hp / m.maxHp));
+            ctx.fillStyle = '#1a1a2a';
+            ctx.fillRect(m.x - bw / 2, m.y - m.r - 8, bw, 3);
+            ctx.fillStyle = mHpRatio > 0.5 ? '#44dd88' : '#ff6644';
+            ctx.fillRect(m.x - bw / 2, m.y - m.r - 8, bw * mHpRatio, 3);
+            }
+
+            if (m.isElite) {
+                ctx.strokeStyle = '#ff8844';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([3, 4]);
+                ctx.beginPath();
+                ctx.arc(m.x, m.y, m.r + 5, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            if (m.isHealer) {
+                ctx.strokeStyle = '#44ff88';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([2, 4]);
+                ctx.beginPath();
+                ctx.arc(m.x, m.y, m.r + 8, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            if (m.isSplitter && m.canSplit) {
+                ctx.strokeStyle = '#ffaa44';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([2, 4]);
+                ctx.beginPath();
+                ctx.arc(m.x, m.y, m.r + 10, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            if (m.isSlow) {
+                ctx.strokeStyle = '#bb88dd';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([2, 4]);
+                ctx.beginPath();
+                ctx.arc(m.x, m.y, m.r + 10, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            if (m === G.target) {
+                ctx.strokeStyle = '#ffdd44';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([4, 6]);
+                ctx.beginPath();
+                ctx.arc(m.x, m.y, m.r + 12, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+        }
+
+        // 子弹
+        for (const b of G.bullets) {
+            ctx.shadowColor = '#ffdd44aa';
+            ctx.shadowBlur = 12;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffdd44';
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        // 粒子
+        for (const p of G.particles) {
+            const alpha = p.life / p.maxLife;
+            ctx.globalAlpha = alpha;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r * alpha, 0, Math.PI * 2);
+            ctx.fillStyle = p.color;
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+
+        // 浮动数值（font/对齐方式在循环外设置一次：每帧重复赋 font 会触发字体匹配，很贵）
+        if (G.floatingTexts.length > 0) {
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            for (const ft of G.floatingTexts) {
+                ctx.globalAlpha = ft.life / ft.maxLife;
+                ctx.fillStyle = ft.color;
+                ctx.fillText(ft.text, ft.x, ft.y);
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        // 准星
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(G.mouse.x, G.mouse.y, 6, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // 信息
+        ctx.fillStyle = 'rgba(255,255,255,0.10)';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        const typeCounts = {};
+        for (const m of G.monsters) {
+            const label = m.typeLabel || '未知';
+            typeCounts[label] = (typeCounts[label] || 0) + 1;
+        }
+        let typeStr = Object.entries(typeCounts).map(([k, v]) => `${k}:${v}`).join(' ');
+        ctx.fillText(`被动:${Object.keys(G.passives).length} | 连击:${G.comboCount} | ${typeStr}`, 12, h - 12);
+
+        const diff = getDifficultyMultiplier();
+        ctx.fillStyle = 'rgba(255,136,68,0.3)';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(`难度 ×${diff.toFixed(2)}`, w - 12, h - 12);
+
+        // 游戏结束
+        if (G.gameOver) {
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = '#ff6644';
+            ctx.font = 'bold 48px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('💀 游戏结束', w / 2, h / 2 - 60);
+            ctx.font = '24px sans-serif';
+            ctx.fillStyle = '#f5c542';
+            ctx.fillText(`得分: ${G.score}  |  波次: ${G.wave}`, w / 2, h / 2 + 10);
+            ctx.font = '18px sans-serif';
+            ctx.fillStyle = '#b8d0ea';
+            ctx.fillText(`击杀: ${G.killCount}  |  最高连击: ${G.maxCombo}`, w / 2, h / 2 + 50);
+            ctx.font = '16px sans-serif';
+            ctx.fillStyle = '#ff8844';
+            ctx.fillText(`最终难度系数: ×${getDifficultyMultiplier().toFixed(2)}`, w / 2, h / 2 + 90);
+        }
+        drawTutorial();
+    }
+
+    // ---------- UI ----------
+    // 面板元素只查一次，避免每帧 10 次 getElementById
+    const UI = {};
+    ['coreDisplay', 'waveDisplay', 'scoreDisplay', 'hpDisplay', 'atkDisplay',
+     'multDisplay', 'monsterCount', 'killDisplay', 'diffDisplay', 'combineBtn',
+     'handContainer', 'triggerSlot', 'effectSlot', 'passiveList'].forEach(id => {
+        UI[id] = document.getElementById(id);
+    });
+
+    function updateUI() {
+        if (UI.coreDisplay) UI.coreDisplay.textContent = Math.round(G.core.hp) + '%';
+        if (UI.waveDisplay) UI.waveDisplay.textContent = G.wave;
+        if (UI.scoreDisplay) UI.scoreDisplay.textContent = G.score;
+        if (UI.hpDisplay) UI.hpDisplay.textContent = Math.round(G.player.hp);
+        if (UI.atkDisplay) UI.atkDisplay.textContent = Math.round(G.player.atk + G.buffs.atkUp);
+        if (UI.multDisplay) UI.multDisplay.textContent = `x${(1 + G.buffs.multUp).toFixed(1)}`;
+        if (UI.monsterCount) UI.monsterCount.textContent = G.monsters.length +
+            (G.monstersToSpawn > 0 ? ` (+${G.monstersToSpawn})` : '');
+        if (UI.killDisplay) UI.killDisplay.textContent = G.killCount;
+        if (UI.diffDisplay) UI.diffDisplay.textContent = `×${getDifficultyMultiplier().toFixed(2)}`;
+        updateHandCount();
+        renderHandUI();
+        renderSlotsUI();
+        updatePassiveUI();
+        if (UI.combineBtn) UI.combineBtn.disabled =
+            G.combineCooldown || !G.triggerSlot || !G.effectSlot || G.gameOver;
+    }
+
+    // 三个面板都按「内容签名」重绘：内容没变就直接跳过。
+    // 之前每帧无条件 innerHTML 重建（手牌最多 20 个节点 + 逐个挂监听），是掉帧的主因。
+    let _handSig = null, _slotSig = null, _passiveSig = null;
+
+    function updatePassiveUI() {
+        const container = UI.passiveList;
+        if (!container) return;
+        const keys = Object.keys(G.passives);
+        const sig = keys.map(k => k + ':' + G.passives[k].map(p => p.effectId + p.count).join(',')).join('|');
+        if (sig === _passiveSig) return;
+        _passiveSig = sig;
+        if (keys.length === 0) {
+            container.innerHTML = '<div style="color:#5a7a9a;font-size:10px;">暂无被动</div>';
+            return;
+        }
+        let html = '';
+        for (const triggerId of keys) {
+            const trigger = TRIGGERS.find(t => t.id === triggerId);
+            const label = trigger ? trigger.label : triggerId;
+            const emoji = trigger ? trigger.emoji : '❓';
+            for (const p of G.passives[triggerId]) {
+                const effect = EFFECTS.find(e => e.id === p.effectId);
+                const effectLabel = effect ? effect.label : p.effectId;
+                html += `<div class="item"><span>${emoji} ${label} + ${effectLabel}</span><span class="count">×${p.count}</span></div>`;
+            }
+        }
+        container.innerHTML = html;
+    }
+
+    function renderHandUI() {
+        const container = UI.handContainer;
+        if (!container) return;
+        const sig = G.hand.map(c => c.id + c.type).join('|');
+        if (sig === _handSig) return;
+        _handSig = sig;
+        if (G.hand.length === 0) {
+            container.innerHTML = '<span style="color:#5a7a9a;font-size:10px;">手牌为空</span>';
+            return;
+        }
+        container.innerHTML = G.hand.map((c, i) =>
+            `<div class="hand-card ${c.type === 'trigger' ? 'trigger-card' : 'effect-card'}" data-idx="${i}">
+                ${c.emoji} ${c.label} <span class="tag">${c.type === 'trigger' ? '触发' : '效果'}</span>
+            </div>`
+        ).join('');
+        // 事件委托：容器上只挂一次，重绘不再逐个绑定
+        if (!container._delegated) {
+            container._delegated = true;
+            container.addEventListener('mousedown', function(e) {
+                const card = e.target.closest ? e.target.closest('.hand-card') : null;
+                if (!card) return;
+                e.preventDefault();
+                e.stopPropagation();
+                fillSlot(parseInt(card.dataset.idx));
+            });
+        }
+    }
+
+    function renderSlotsUI() {
+        const ts = UI.triggerSlot;
+        const es = UI.effectSlot;
+        if (!ts || !es) return;
+        const sig = (G.triggerSlot ? G.triggerSlot.id : '-') + '/' + (G.effectSlot ? G.effectSlot.id : '-');
+        if (sig === _slotSig) return;
+        _slotSig = sig;
+        ts.innerHTML = G.triggerSlot ?
+            `${G.triggerSlot.emoji} ${G.triggerSlot.label}` :
+            '⬅ 触发<br><span class="sub">点击选择</span>';
+        ts.className = 'slot' + (G.triggerSlot ? ' filled' : '');
+        es.innerHTML = G.effectSlot ?
+            `${G.effectSlot.emoji} ${G.effectSlot.label}` :
+            '效果 ➡<br><span class="sub">点击选择</span>';
+        es.className = 'slot' + (G.effectSlot ? ' filled' : '');
+        ts.onmousedown = (e) => { e.preventDefault();
+            e.stopPropagation(); if (G.triggerSlot) { returnToHand(G.triggerSlot);
+                G.triggerSlot = null;
+                updateUI(); } };
+        es.onmousedown = (e) => { e.preventDefault();
+            e.stopPropagation(); if (G.effectSlot) { returnToHand(G.effectSlot);
+                G.effectSlot = null;
+                updateUI(); } };
+    }
+
+    function setFeedback(msg, color = '#7bb3ff') {
+        const el = document.getElementById('feedbackBox');
+        if (!el) return;
+        el.innerHTML = `<span class="tag" style="background:${color}33;color:${color};">✦</span> ${msg}`;
+    }
+
+    // ---------- 平衡掉落 ----------
+    function dropBalancedCard() {
+        const trigCount = G.hand.filter(c => c.type === 'trigger').length;
+        const effCount = G.hand.filter(c => c.type === 'effect').length;
+        let dropType;
+        if (trigCount < effCount) dropType = 'trigger';
+        else if (effCount < trigCount) dropType = 'effect';
+        else dropType = Math.random() < 0.5 ? 'trigger' : 'effect';
+        const pool = dropType === 'trigger' ? TRIGGERS : EFFECTS;
+        const card = pool[Math.floor(Math.random() * pool.length)];
+        if (G.hand.length >= 20) {
+            const old = G.hand.shift();
+            setFeedback(`📥 ${old.emoji}→${card.emoji}${card.label} (替换)`, '#8ab3d0');
+        } else {
+            setFeedback(`📥 拾取 ${card.emoji} ${card.label}`, '#8ab3d0');
+        }
+        G.hand.push({ ...card, type: dropType });
+        updateUI();
+    }
+
+    function drawCardFromLib(type, cardData) {
+        const trigCount = G.hand.filter(c => c.type === 'trigger').length;
+        const effCount = G.hand.filter(c => c.type === 'effect').length;
+        if (type === 'trigger' && trigCount > effCount) {
+            setFeedback('⚠️ 触发板过多，请先拿效果板', '#b8860b');
+            return;
+        }
+        if (type === 'effect' && effCount > trigCount) {
+            setFeedback('⚠️ 效果板过多，请先拿触发板', '#b8860b');
+            return;
+        }
+        if (G.hand.length >= 20) {
+            const old = G.hand.shift();
+            setFeedback(`📥 ${old.emoji}→${cardData.emoji}${cardData.label} (替换)`, '#6b8');
+        } else {
+            setFeedback(`✅ 获得 ${cardData.emoji} ${cardData.label}`, '#6b8');
+        }
+        G.hand.push({ ...cardData, type: type });
+        updateUI();
+    }
+
+    // ---------- 密文操作 ----------
+    function fillSlot(handIndex) {
+        if (handIndex === undefined || handIndex === null) return;
+        const card = G.hand[handIndex];
+        if (!card) return;
+        if (card.type === 'trigger' && G.triggerSlot) { returnToHand(G.triggerSlot);
+            G.triggerSlot = null; }
+        if (card.type === 'effect' && G.effectSlot) { returnToHand(G.effectSlot);
+            G.effectSlot = null; }
+        if (card.type === 'trigger') {
+            if (G.triggerSlot) returnToHand(G.triggerSlot);
+            G.triggerSlot = { ...card };
+            G.hand.splice(handIndex, 1);
+        } else {
+            if (G.effectSlot) returnToHand(G.effectSlot);
+            G.effectSlot = { ...card };
+            G.hand.splice(handIndex, 1);
+        }
+        updateUI();
+        renderLibrary();
+    }
+
+    function returnToHand(card) {
+        G.hand.push({ ...card });
+        updateUI();
+        renderLibrary();
+    }
+
+    // ---------- 牌库 ----------
+    function renderLibrary() {
+        const grid = document.getElementById('libraryGrid');
+        if (!grid) return;
+        let html = '';
+        TRIGGERS.forEach(t => {
+            html += `<div class="lib-card lib-trigger" data-type="trigger" data-id="${t.id}" data-label="${t.label}" data-emoji="${t.emoji}">
+                ${t.emoji} ${t.label} <span class="badge">触发</span><span class="count-badge">∞</span>
+            </div>`;
+        });
+        EFFECTS.forEach(e => {
+            html += `<div class="lib-card lib-effect" data-type="effect" data-id="${e.id}" data-label="${e.label}" data-emoji="${e.emoji}">
+                ${e.emoji} ${e.label} <span class="badge">效果</span><span class="count-badge">∞</span>
+            </div>`;
+        });
+        grid.innerHTML = html;
+        grid.querySelectorAll('.lib-card').forEach(el => {
+            el.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const type = this.dataset.type;
+                const id = this.dataset.id;
+                const label = this.dataset.label;
+                const emoji = this.dataset.emoji;
+                const pool = type === 'trigger' ? TRIGGERS : EFFECTS;
+                const card = pool.find(c => c.id === id);
+                if (!card) return;
+                drawCardFromLib(type, { id: card.id, label: card.label, emoji: card.emoji });
+            });
+        });
+    }
+
+    // ---------- 波间选择与真空 ----------
+    function showCardSelection() {
+        if (G.selectingActive) return;
+        G.selectingActive = true;
+        G.selectionCards = [];
+        const preset = Tutorial.active ? Tutorial.selectionPreset : null;
+        if (preset && preset.length) {
+            // 教程关：固定的三选一，保证流派指引
+            G.selectionCards = preset.map(id => {
+                const t = TRIGGERS.find(c => c.id === id);
+                if (t) return { ...t, type: 'trigger' };
+                const e = EFFECTS.find(c => c.id === id);
+                if (e) return { ...e, type: 'effect' };
+                return null;
+            }).filter(Boolean);
+        } else {
+            const allCards = [];
+            TRIGGERS.forEach(t => allCards.push({ ...t, type: 'trigger' }));
+            EFFECTS.forEach(e => allCards.push({ ...e, type: 'effect' }));
+            for (let i = allCards.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [allCards[i], allCards[j]] = [allCards[j], allCards[i]];
+            }
+            G.selectionCards = allCards.slice(0, 3);
+        }
+
+        const overlay = document.getElementById('selectionOverlay');
+        const row = document.getElementById('selectionRow');
+        if (!overlay || !row) return;
+
+        row.innerHTML = G.selectionCards.map((c, i) =>
+            `<div class="selection-card ${c.type === 'trigger' ? 'sel-trigger' : 'sel-effect'}" data-idx="${i}">
+                <span class="s-emoji">${c.emoji}</span>
+                <span class="s-label">${c.label}</span>
+                <span class="s-type">${c.type === 'trigger' ? '触发板' : '效果板'}</span>
+            </div>`
+        ).join('');
+
+        overlay.classList.add('active');
+
+        row.querySelectorAll('.selection-card').forEach(el => {
+            el.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const idx = parseInt(this.dataset.idx);
+                selectCard(idx);
+            });
+        });
+    }
+
+    function selectCard(index) {
+        const card = G.selectionCards[index];
+        if (!card) return;
+        G.hand.push({ ...card });
+        G.selectingActive = false;
+        G.selectionCards = [];
+
+        const overlay = document.getElementById('selectionOverlay');
+        if (overlay) overlay.classList.remove('active');
+
+        setFeedback(`✅ 获得 ${card.emoji} ${card.label}`, '#6b8');
+        addScore(15);
+
+        startVacuum();
+        updateUI();
+    }
+
+    function startVacuum() {
+        G.vacuumActive = true;
+        G.vacuumTimer = 300;
+        Tutorial.emit('vacuumStart');
+        const bar = document.getElementById('vacuumBar');
+        if (bar) bar.classList.add('active');
+        updateVacuumUI();
+    }
+
+    function skipVacuum() {
+        G.vacuumActive = false;
+        G.vacuumTimer = 0;
+        const bar = document.getElementById('vacuumBar');
+        if (bar) bar.classList.remove('active');
+        advanceWave();
+    }
+
+    function updateVacuumUI() {
+        const label = document.getElementById('vacuumLabel');
+        const fill = document.getElementById('vacuumFill');
+        if (!label || !fill) return;
+        const sec = Math.ceil(G.vacuumTimer / 60);
+        label.textContent = `⏳ 整顿 ${sec}s`;
+        fill.style.width = (G.vacuumTimer / 300 * 100) + '%';
+    }
+
+    function advanceWave() {
+        const prevWave = G.wave;
+        G.wave++;
+        if (prevWave % 5 === 0) {
+            addScore(G.wave * 15);
+            setFeedback(`🎉 第 ${prevWave} 波 cleared! 奖励得分!`, '#f5c542');
+        }
+        addScore(G.wave * 10);
+        startWave(); // startWave 的 BOSS/波次反馈最终显示
+    }
+
+    // ---------- 重置 ----------
+    function resetGame() {
+        G.player.x = 390;
+        G.player.y = 280;
+        G.player.hp = 100;
+        G.player.atk = 10;
+        G.player.mult = 1.0;
+        G.player.shootCooldown = 0;
+        G.playerSlowTimer = 0;
+        G.playerSlowAmount = 0;
+        G.core.hp = 100;
+        G.bullets = [];
+        G.monsters = [];
+        G.trails = [];
+        G.particles = [];
+        G.hand = [];
+        G.triggerSlot = null;
+        G.effectSlot = null;
+        G.wave = 1;
+        G.monstersToSpawn = 0;
+        G.spawnTimer = 0;
+        G.combineCooldown = false;
+        G.buffs = { atkUp: 0, multUp: 0, trailDmg: 1, trailWidth: 6, speedUp: 1, slowAll: 0 };
+        G.passives = {};
+        G.killCount = 0;
+        G.killStreak = 0;
+        G.gameOver = false;
+        G.fireCounter = 0;
+        G.target = null;
+        G.score = 0;
+        G.comboCount = 0;
+        G.maxCombo = 0;
+        G.scoreMultiplier = 1;
+        G.vacuumActive = false;
+        G.vacuumTimer = 0;
+        G.selectingActive = false;
+        G.selectionCards = [];
+        G.bossPending = false;
+        G.bossSpawned = false;
+        G.floatingTexts = [];
+        G.debug = false;
+        Tutorial.reset();
+        document.getElementById('vacuumBar').classList.remove('active');
+        document.getElementById('selectionOverlay').classList.remove('active');
+        startWave();
+        updateUI();
+        renderLibrary();
+        setFeedback('🔄 指数增长模式 · 每波提升8%', '#f5c542');
+        setTimeout(() => {
+            if (G.hand.length < 3) {
+                const t = TRIGGERS[Math.floor(Math.random() * TRIGGERS.length)];
+                const e = EFFECTS[Math.floor(Math.random() * EFFECTS.length)];
+                G.hand.push({ ...t, type: 'trigger' });
+                G.hand.push({ ...e, type: 'effect' });
+                updateUI();
+                renderLibrary();
+            }
+        }, 200);
+    }
+
+    // ---------- 主循环 ----------
+    let _fps = 60, _fpsFrames = 0, _fpsMark = 0;
+    function drawFps() {
+        if (!_fpsMark) _fpsMark = performance.now();
+        _fpsFrames++;
+        const now = performance.now();
+        if (now - _fpsMark >= 500) {
+            _fps = Math.round(_fpsFrames * 1000 / (now - _fpsMark));
+            _fpsFrames = 0;
+            _fpsMark = now;
+        }
+        // 低于 50 帧标黄，低于 30 帧标红——用来判断卡顿出在哪
+        const color = _fps >= 50 ? 'rgba(120,150,180,0.55)' : (_fps >= 30 ? '#f5c542' : '#ff5544');
+        ctx.save();
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = color;
+        ctx.fillText(`${_fps} FPS`, 8, 8);
+        ctx.restore();
+    }
+
+    function gameLoop() {
+        update();
+        draw();
+        drawFps();
+        requestAnimationFrame(gameLoop);
+    }
+
+    // ---------- 事件 ----------
+    // 键位归一化：优先读 e.code（物理键位）。
+    // 中文输入法激活时浏览器把 e.key 报成 'Process'，只认 e.key 会让 WASD 整个失效。
+    const KEY_CODE_MAP = {
+        KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd', KeyH: 'h', KeyP: 'p',
+        Space: ' ', Enter: 'enter', Backquote: '`', Escape: 'escape',
+        ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down',
+        Digit1: '1', Digit2: '2', Digit3: '3', Digit4: '4', Digit5: '5',
+        Digit6: '6', Digit7: '7', Digit8: '8', Digit9: '9', Digit0: '0',
+        Numpad1: '1', Numpad2: '2', Numpad3: '3', Numpad4: '4', Numpad5: '5',
+        Numpad6: '6', Numpad7: '7', Numpad8: '8', Numpad9: '9', Numpad0: '0',
+    };
+    function keyOf(e) {
+        if (e.code && KEY_CODE_MAP[e.code]) return KEY_CODE_MAP[e.code];
+        return (e.key || '').toLowerCase();
+    }
+
+    // 嵌入 iframe 时父页面持有焦点，按键不会到达本页
+    window.addEventListener('mousedown', () => { try { window.focus(); } catch (err) {} });
+
+    document.addEventListener('keydown', e => {
+        const k = keyOf(e);
+        // 机制图鉴（H）
+        if (k === 'h') {
+            e.preventDefault();
+            Tutorial.codexOpen = !Tutorial.codexOpen;
+            Tutorial.codexPage = 0;
+            return;
+        }
+        if (Tutorial.codexOpen) {
+            e.preventDefault();
+            if (e.key === 'ArrowRight') Tutorial.codexPage = Math.min(Tutorial.codexPage + 1, CODEX_PAGES.length - 1);
+            else if (e.key === 'ArrowLeft') Tutorial.codexPage = Math.max(Tutorial.codexPage - 1, 0);
+            else Tutorial.codexOpen = false;
+            return;
+        }
+        // 调试模式：按键1~7生成对应怪物（教程期间禁用，避免打乱脚本）
+        if (k === '`' || k === 'backquote') {
+            e.preventDefault();
+            if (Tutorial.active) { setFeedback('🎓 教程期间不可用调试模式', '#8ab3d0'); return; }
+            G.debug = !G.debug;
+            setFeedback(G.debug ? '🐛 调试模式开启！按键1~7生成怪物' : '🐛 调试模式关闭', '#88ccff'); return; }
+        if (G.debug) {
+            const num = parseInt(k);
+            if (num >= 1 && num <= 7) { e.preventDefault();
+                spawnDebugMonster(DEBUG_TYPE_KEYS[num - 1]); return; }
+        }
+        if (k === 'w' || k === 'a' || k === 's' || k === 'd') { e.preventDefault();
+            G.keys[k] = true; }
+        if (k === ' ' || k === 'enter') { e.preventDefault();
+            if (!G.selectingActive) combineCards(); }
+    });
+    document.addEventListener('keyup', e => {
+        const k = keyOf(e);
+        if (k === 'w' || k === 'a' || k === 's' || k === 'd') { e.preventDefault();
+            G.keys[k] = false; }
+    });
+
+    canvas.addEventListener('mousemove', e => {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        G.mouse.x = clamp((e.clientX - rect.left) * scaleX, 0, 780);
+        G.mouse.y = clamp((e.clientY - rect.top) * scaleY, 0, 560);
+        // 角落按钮的指针反馈
+        const over = Tutorial._btns.some(b =>
+            G.mouse.x >= b.x && G.mouse.x <= b.x + b.w &&
+            G.mouse.y >= b.y && G.mouse.y <= b.y + b.h);
+        canvas.style.cursor = (over || Tutorial.codexOpen) ? 'pointer' : 'default';
+    });
+
+    // 教程角落按钮 / 图鉴翻页（只在画布内处理，不影响手牌与槽位）
+    canvas.addEventListener('mousedown', e => {
+        const rect = canvas.getBoundingClientRect();
+        const mx = clamp((e.clientX - rect.left) * (canvas.width / rect.width), 0, 780);
+        const my = clamp((e.clientY - rect.top) * (canvas.height / rect.height), 0, 560);
+        if (Tutorial.handleClick(mx, my)) { e.preventDefault(); e.stopPropagation(); return; }
+        if (Tutorial.codexOpen) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (mx > 780 * 0.6) Tutorial.codexPage = Math.min(Tutorial.codexPage + 1, CODEX_PAGES.length - 1);
+            else if (mx < 780 * 0.4) Tutorial.codexPage = Math.max(Tutorial.codexPage - 1, 0);
+            else Tutorial.codexOpen = false;
+        }
+    });
+
+    const combineBtn = document.getElementById('combineBtn');
+    if (combineBtn) {
+        combineBtn.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            combineCards();
+        });
+    }
+    const resetBtn = document.getElementById('resetBtn');
+    if (resetBtn) {
+        resetBtn.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            resetGame();
+        });
+    }
+    const skipBtn = document.getElementById('skipBtn');
+    if (skipBtn) {
+        skipBtn.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            skipVacuum();
+        });
+    }
+
+    // ---------- 启动 ----------
+    tutorialCheckBalance();
+    startWave();
+    updateUI();
+    renderLibrary();
+    setFeedback('🎯 指数增长 · 怪物属性每波×1.08 · 极限挑战', '#f5c542');
+    setTimeout(() => {
+        if (G.hand.length < 3) {
+            const t = TRIGGERS[Math.floor(Math.random() * TRIGGERS.length)];
+            const e = EFFECTS[Math.floor(Math.random() * EFFECTS.length)];
+            G.hand.push({ ...t, type: 'trigger' });
+            G.hand.push({ ...e, type: 'effect' });
+            updateUI();
+            renderLibrary();
+        }
+    }, 200);
+
+    // 启动游戏循环
+    gameLoop();
+</script>
+</body>
+</html>
