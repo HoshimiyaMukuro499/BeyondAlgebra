@@ -28,8 +28,8 @@
 
 | 系列 | 定位 | 最新版本 | 文件 |
 |:--|:--|:--|:--|
-| **2.x** | 经典版 · 无限波次生存 | **v2.19** | [密文轨迹demo2.19.html](密文轨迹demo2.19.html) |
-| **9.x** | AI 拓展版 · Roguelike 重构 | **v9.13** | [密文轨迹demo9.13.html](密文轨迹demo9.13.html) |
+| **2.x** | 经典版 · 无限波次生存 | **v2.20** | [密文轨迹demo2.20.html](密文轨迹demo2.20.html) |
+| **9.x** | AI 拓展版 · Roguelike 重构 | **v9.14** | [密文轨迹demo9.14.html](密文轨迹demo9.14.html) |
 
 ### 版本规则
 
@@ -100,5 +100,5 @@ npx wrangler login
 ## 开发文档
 
 - [策划案精简版](BeyondAlgebra/README.md) — 核心规则、7 种怪物数值表、指数增长公式、密文板全表、得分系统
-- [版本记录](BeyondAlgebra/EDITION.md) — 从 v2.0 到 v9.13 的完整改动史
+- [版本记录](BeyondAlgebra/EDITION.md) — 从 v2.0 到 v9.14 的完整改动史
 - [CLAUDE.md](BeyondAlgebra/CLAUDE.md) — 单文件代码结构索引、数值改动联动检查清单
