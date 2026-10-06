@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const file = process.argv[2] || '密文轨迹demo9.18.html';
+const file = process.argv[2] || '密文轨迹demo9.19.html';
 const html = fs.readFileSync(path.join(ROOT, file), 'utf8');
 const m = html.match(/<script>([\s\S]*?)<\/script>\s*<\/body>/);
 if (!m) throw new Error('没找到 <script>');
@@ -60,7 +60,12 @@ const factory = new Function(
   ' refreshMerchantStock: (typeof refreshMerchantStock !== "undefined") ? refreshMerchantStock : null,' +
   ' STAT_CHOICES: (typeof STAT_CHOICES !== "undefined") ? STAT_CHOICES : null,' +
   ' advanceFloor: (typeof advanceFloor !== "undefined") ? advanceFloor : null,' +
-  ' simDoBuy: (typeof simDoBuy !== "undefined") ? simDoBuy : null };'
+  ' simDoBuy: (typeof simDoBuy !== "undefined") ? simDoBuy : null,' +
+  // v9.19
+  ' EFFECTS: (typeof EFFECTS !== "undefined") ? EFFECTS : null,' +
+  ' addPassive: (typeof addPassive !== "undefined") ? addPassive : null,' +
+  ' triggerPassive: (typeof triggerPassive !== "undefined") ? triggerPassive : null,' +
+  ' spawnMonster: (typeof spawnMonster !== "undefined") ? spawnMonster : null };'
 );
 const api = factory(
   windowStub, documentStub, noop, noop, noop, noop, noop, noop,
@@ -71,6 +76,8 @@ const { G, resetGame, update, draw, checkTrailLoop, nearestTurret } = api;
 const { getEssenceCap, addCombatEssence, getMerchantStock, getShopRefreshCost,
         refreshMerchantStock, STAT_CHOICES, advanceFloor } = api;
 const HAS_ECON = !!(getEssenceCap && addCombatEssence && getMerchantStock);
+const { EFFECTS, addPassive } = api;
+const HAS_FEEL = !!(EFFECTS && EFFECTS.some(e => e.id === 'E14'));
 
 let pass = 0, fail = 0;
 const ok = (cond, label, extra = '') => {
@@ -481,6 +488,135 @@ if (!HAS_ECON) {
   }
   ok(worst === 0, `12000 帧里本层精华从未突破上限`, worst ? `第 ${worstFloor} 层拿到 ${worst}` : '');
   console.log(`    终局：floor=${G.floor} 精华=${G.essence} 本层=${G.essenceThisFloor}/${getEssenceCap()} 存活塔=${G.turrets.length}`);
+}
+
+// ---------- 13. v9.19 子弹 / 延缓 / 伤害流转 ----------
+section('13. 子弹手感 + E14「延缓」+ 伤害流转动画');
+if (!HAS_FEEL) {
+  console.log('  （跳过：这是 9.18 及更早的产物，没有 E14）');
+} else {
+  const mkM = (x, y) => ({ x, y, r: 12, hp: 1e6, maxHp: 1e6, speed: 1, atk: 0, type: 'basic',
+    isBoss: false, isElite: false, isChild: false, frozen: 0, stunned: 0, slowTimer: 0,
+    trailDamageCooldown: 9999, hitCooldown: 0, vx_prev: 0, vy_prev: 0, _fireCounter: 0 });
+
+  // 13a 射速：两道闸门都 ×4
+  fresh();
+  ok(G.fireRate === 40, 'resetGame 后 G.fireRate = 40（原 10）', `got ${G.fireRate}`);
+  G.floor = 1; G.player.atk = 10; G.buffs.atkUp = 0;
+  api.startFloor();
+  const mm = mkM(G.player.x + 30, G.player.y); G.monsters = [mm];
+  G.player.shootCooldown = 0;
+  api.autoShoot();
+  ok(Math.abs(G.player.shootCooldown - 47.68) < 1e-6,
+     '1 层冷却 = max(24, 48-1×0.32) = 47.68', `got ${G.player.shootCooldown}`);
+
+  // 13b 伤害 +15%
+  fresh();
+  G.floor = 1; G.player.atk = 10;
+  G.buffs.atkUp = 0; G.buffs.multUp = 0;
+  G.fateBuffs.atkMul = 1; G.fateBuffs.bulletDmgMul = 1; G.extraBullets = 0;
+  G.monsters = [mkM(G.player.x + 30, G.player.y)];
+  G.player.shootCooldown = 0;
+  api.autoShoot();
+  const bd = G.bullets[0].damage;
+  ok(Math.abs(bd - 11.5) < 1e-6, '单发伤害 = 10 × 1.15 = 11.5', `got ${bd}`);
+
+  // 13c 中弹停顿 18 帧，且停顿期间不移动
+  fresh();
+  const st = mkM(300, 300);
+  G.monsters = [st];
+  G.bullets = [{ x: 290, y: 300, vx: 10, vy: 0, r: 4, damage: 1, life: 60, hit: false }];
+  // 把子弹直接停在怪物身上触发命中
+  G.bullets[0].x = st.x; G.bullets[0].y = st.y;
+  update();
+  ok(st.stunned >= 17, '命中后 stunned ≈ 18 帧', `got ${st.stunned}`);
+  const posBefore = st.x + ',' + st.y;
+  G.monstersToSpawn = 0;
+  for (let i = 0; i < 10; i++) { G.bullets = []; update(); }
+  ok(st.x + ',' + st.y === posBefore, '停顿期间怪物一步没动', `moved to ${st.x},${st.y}`);
+
+  // 13d E14「延缓」：挂上 slowTimer，移速 ×0.8
+  fresh();
+  ok(EFFECTS.some(e => e.id === 'E14' && e.label === '延缓'), 'EFFECTS 里有 E14「延缓」');
+  G.terrain = []; G.trails = []; G.sprintTrails = [];
+  const slowA = mkM(200, 200), slowB = mkM(200, 400);
+  G.monsters = [slowA, slowB];
+  addPassive('T06', 'E14');   // isInitial=true 只是登记，不触发（与 E13 一致）
+  ok(slowA.slowTimer === 0, 'addPassive 只登记、不立即触发（isInitial 语义与 E13 一致）', `got ${slowA.slowTimer}`);
+  api.triggerPassive('T06');  // T06 是高频触发 → 30 帧
+  ok(slowA.slowTimer >= 29 && slowB.slowTimer >= 29,
+     'triggerPassive 后全场怪物挂上 slowTimer（T06 高频 → 30 帧）', `got ${slowA.slowTimer}`);
+  // 对照：A 带延缓，B 手动清掉，跑同样帧数比位移。
+  // 必须先把 selectingActive 清掉——update() 在 !simMode 且 selectingActive 时直接 return，
+  // 而 resetGame() 结尾的 initClassSelection() 会把它置真。
+  api.simAutoSelectClass();
+  G.simMode = false; G.gameOver = false; G.paused = false;
+  // resetGame() 不清 G.keys，前一个用例 autoPilot 按下的键会留在这里——不清掉玩家会自己走
+  G.keys = { w: false, a: false, s: false, d: false, shift: false };
+  const a0 = { x: slowA.x, y: slowA.y }, b0 = { x: slowB.x, y: slowB.y };
+  G.monstersToSpawn = 0;
+  for (let i = 0; i < 20; i++) { slowA.slowTimer = 30; slowA.frozen = 0; slowA.stunned = 0;
+                                 slowB.slowTimer = 0; slowB.frozen = 0; slowB.stunned = 0;
+                                 slowA.hp = slowB.hp = 1e6; update(); }
+  const dA = Math.hypot(slowA.x - a0.x, slowA.y - a0.y);
+  const dB = Math.hypot(slowB.x - b0.x, slowB.y - b0.y);
+  ok(dB > 0 && Math.abs(dA / dB - 0.8) < 0.05,
+     `延缓中的怪位移是正常怪的 0.8 倍`, `got ${(dA / dB).toFixed(3)} (${dA.toFixed(1)} vs ${dB.toFixed(1)})`);
+
+  // 13e slowTimer 会自然衰减
+  fresh();
+  const dec = mkM(300, 300); dec.slowTimer = 5;
+  G.monsters = [dec];
+  G.monstersToSpawn = 0;
+  for (let i = 0; i < 8; i++) { dec.hp = 1e6; update(); }
+  ok(dec.slowTimer === 0, 'slowTimer 到期归零', `got ${dec.slowTimer}`);
+
+  // 13f E13 冰冻时长 −10%
+  fresh();
+  G.monsters = [mkM(200, 200), mkM(300, 300), mkM(400, 300)];
+  addPassive('T06', 'E13');          // 高频 → 18 帧
+  api.triggerPassive('T06');         // isInitial 只是登记，真正冻住要走触发
+  const fr = G.monsters.map(m => m.frozen).filter(v => v > 0);
+  ok(fr.length > 0, 'E13 冻住了怪');
+  ok(fr.every(v => v <= 18), '高频触发冰冻 ≤ 18 帧（原 20）', `got ${JSON.stringify(fr)}`);
+
+  // 13g 伤害流转动画：火焰烧到玩家 → 冒出一条飞向核心的流
+  fresh();
+  // 关掉 simMode 的 autoPilot，否则玩家会被拖着跑，流的起点就漂了
+  api.simAutoSelectClass();
+  G.simMode = false; G.gameOver = false; G.paused = false;
+  // resetGame() 不清 G.keys，前一个用例 autoPilot 按下的键会留在这里——不清掉玩家会自己走
+  G.keys = { w: false, a: false, s: false, d: false, shift: false };
+  G.monsters = []; G.monstersToSpawn = 0;
+  G.player.x = 200; G.player.y = 200; G.player.hp = 100;
+  G.fireTrails = [{ x1: 200, y1: 200, x2: 200, y2: 200, life: 300 }];
+  G.damageFlows = [];
+  G.frame = 0;
+  for (let i = 0; i < 12; i++) { G.frame = i; G.player.x = 200; G.player.y = 200; G.player.hp = 100; update(); }
+  ok(G.damageFlows.length > 0, '火焰烧到玩家时冒出了伤害流', `got ${G.damageFlows.length}`);
+  const df = G.damageFlows[0];
+  ok(df.x1 === 200 && df.y1 === 200, '流的起点是玩家', `got ${df.x1},${df.y1}`);
+  ok(df.x2 === G.core.x && df.y2 === G.core.y, '流的终点是核心', `got ${df.x2},${df.y2}`);
+  ok(G.damageFlows.length <= 3, '每 6 帧一条，做了节流', `got ${G.damageFlows.length}`);
+  // 跑够帧数后应当全部消散
+  G.fireTrails = [];
+  for (let i = 0; i < 40; i++) update();
+  ok(G.damageFlows.length === 0, '动画跑完后自动清空（不泄漏）', `got ${G.damageFlows.length}`);
+
+  // 13h 火焰照旧扣护盾（表现层改了，逻辑没改）
+  fresh();
+  api.simAutoSelectClass();
+  G.simMode = false; G.gameOver = false; G.paused = false;
+  // resetGame() 不清 G.keys，前一个用例 autoPilot 按下的键会留在这里——不清掉玩家会自己走
+  G.keys = { w: false, a: false, s: false, d: false, shift: false };
+  G.monsters = []; G.monstersToSpawn = 0;
+  G.player.x = 200; G.player.y = 200; G.player.hp = 100;
+  G.fireTrails = [{ x1: 200, y1: 200, x2: 200, y2: 200, life: 300 }];
+  for (let i = 0; i < 10; i++) { G.frame = i; G.player.x = 200; G.player.y = 200; update(); }
+  ok(G.player.hp < 100, '火焰仍然扣护盾（只是显示位置变了）', `got ${G.player.hp.toFixed(1)}`);
+
+  // 13i 护盾条与核心条都画在核心头顶，渲染不抛异常
+  ok((() => { try { draw(); return true; } catch (e) { return false; } })(), 'draw() 带双血条正常');
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);

@@ -56,7 +56,8 @@
         const angle = angleTo(p, nearest);
         const spread = 0.08;
         const speed = 7;
-        let atk = (p.atk + G.buffs.atkUp) * (1 + G.buffs.multUp) * G.fateBuffs.atkMul * G.fateBuffs.bulletDmgMul;
+        // v9.19: 射速降到 1/4，单发伤害补 15%，免得整体输出腰斩
+        let atk = (p.atk + G.buffs.atkUp) * (1 + G.buffs.multUp) * G.fateBuffs.atkMul * G.fateBuffs.bulletDmgMul * 1.15;
         // v9.4: 低血量狂暴
         if (G.relicBuffs.lowHpBerserk && G.player.hp < G.player.maxHp * 0.3) atk *= 2;
         // v9.4: 暴击
@@ -78,7 +79,8 @@
                 r: 3, damage: atk * 0.6, life: 50, hit: false, isCrit: false,
             });
         }
-        p.shootCooldown = Math.max(6, 12 - G.floor * 0.08);
+        // v9.19: 闸门整体 ×4——只改 G.fireRate 不改这里的话，冷却会卡住射速，改动不生效
+        p.shootCooldown = Math.max(24, 48 - G.floor * 0.32);
     }
 
     function getTrailDamage() {

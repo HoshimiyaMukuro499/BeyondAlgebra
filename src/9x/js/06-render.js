@@ -214,6 +214,31 @@
             ctx.shadowBlur = 0;
         }
 
+        // v9.19: 火焰伤害的转移粒子——从玩家飞向核心的护盾。
+        // 画在玩家之后，且带拖尾，让「伤害被核心吸走了」这件事看得见。
+        for (const df of G.damageFlows) {
+            const p = df.t / df.life;
+            const x = df.x1 + (df.x2 - df.x1) * p;
+            const y = df.y1 + (df.y2 - df.y1) * p;
+            const a = 1 - p;
+            // 从玩家出发的一小段拖尾（p 越小拖尾越长，像被拉过去的）
+            const tx = df.x1 + (df.x2 - df.x1) * Math.max(0, p - 0.18);
+            const ty = df.y1 + (df.y2 - df.y1) * Math.max(0, p - 0.18);
+            ctx.beginPath();
+            ctx.moveTo(tx, ty);
+            ctx.lineTo(x, y);
+            ctx.strokeStyle = df.toShield ? `rgba(255,140,60,${a * 0.9})` : `rgba(255,60,60,${a * 0.9})`;
+            ctx.lineWidth = 2.5;
+            ctx.shadowColor = ctx.strokeStyle;
+            ctx.shadowBlur = 10;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            ctx.beginPath();
+            ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+            ctx.fillStyle = df.toShield ? `rgba(120,255,180,${a})` : `rgba(255,120,120,${a})`;
+            ctx.fill();
+        }
+
         // v9.3: 环境危险区
         for (const hz of G.hazardZones) {
             const alpha = hz.life / hz.maxLife;
@@ -243,12 +268,34 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('🏰', G.core.x, G.core.y - 2);
-        const cw = 40;
+        // v9.19: 两条血条都画在核心头顶。护盾在上（外层防御），核心血量在下。
+        // 护盾条原来挂在玩家头顶——但玩家是会跑的，而打的是核心，读的人找不到。
+        const cw = 44;
+        const barX = G.core.x - cw / 2;
+        const shieldY = G.core.y - G.core.r - 22;
+        const coreY = G.core.y - G.core.r - 13;
+
+        // 护盾（= G.player.hp）
+        const shieldRatio = Math.min(1, Math.max(0, G.player.hp / G.player.maxHp));
         ctx.fillStyle = '#1a2a3a';
-        ctx.fillRect(G.core.x - cw / 2, G.core.y - G.core.r - 12, cw, 4);
+        ctx.fillRect(barX - 1, shieldY - 1, cw + 2, 6);
+        ctx.fillStyle = shieldRatio > 0.5 ? '#44dd88' : shieldRatio > 0.25 ? '#ffcc44' : '#ff5544';
+        ctx.fillRect(barX, shieldY, cw * shieldRatio, 4);
+        ctx.fillStyle = '#8fd9b0';
+        ctx.font = '9px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🛡' + Math.ceil(G.player.hp), barX + cw + 4, shieldY + 2);
+
+        // 核心血量
         const coreHpRatio = Math.min(1, Math.max(0, G.core.hp / G.core.maxHp));
+        ctx.fillStyle = '#1a2a3a';
+        ctx.fillRect(barX - 1, coreY - 1, cw + 2, 6);
         ctx.fillStyle = coreHpRatio > 0.5 ? '#4a9eff' : '#ff6644';
-        ctx.fillRect(G.core.x - cw / 2, G.core.y - G.core.r - 12, cw * coreHpRatio, 4);
+        ctx.fillRect(barX, coreY, cw * coreHpRatio, 4);
+        ctx.fillStyle = '#9dc4ff';
+        ctx.fillText('🏰' + Math.ceil(G.core.hp), barX + cw + 4, coreY + 2);
+        ctx.textAlign = 'center';
 
         // 玩家
         ctx.shadowColor = '#4a9eff44';
@@ -279,11 +326,8 @@
         ctx.fillStyle = '#ffdd88';
         ctx.fill();
 
-        const playerHpRatio = Math.min(1, Math.max(0, G.player.hp / G.player.maxHp));
-        ctx.fillStyle = '#1a2a3a';
-        ctx.fillRect(G.player.x - 20, G.player.y - G.player.r - 10, 40, 4);
-        ctx.fillStyle = playerHpRatio > 0.5 ? '#44dd88' : '#ff6644';
-        ctx.fillRect(G.player.x - 20, G.player.y - G.player.r - 10, 40 * playerHpRatio, 4);
+        // v9.19: 玩家头顶的血条挪到核心头顶了（见上面的护盾条）——玩家只是操作对象，
+        // 护盾保的是核心，条子就该跟着核心走。
 
         // 怪物
         for (const m of G.monsters) {

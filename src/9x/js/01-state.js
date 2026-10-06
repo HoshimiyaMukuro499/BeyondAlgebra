@@ -9,12 +9,15 @@
         passives: {},
         buffs: { atkUp: 0, multUp: 0, trailDmg: 1, trailWidth: 6, speedUp: 1, slowAll: 0 },
         keys: { w: false, a: false, s: false, d: false, shift: false }, mouse: { x: 390, y: 280 },
-        frame: 0, gameOver: false, fireRate: 10, fireCounter: 0, target: null,
+        // v9.19: fireRate 是「几帧打一发」。10 → 40（射速变成原来的 1/4），
+        // 与 autoShoot() 里的 p.shootCooldown 是两道独立闸门，两处都得改才生效。
+        frame: 0, gameOver: false, fireRate: 40, fireCounter: 0, target: null,
         killCount: 0, killStreak: 0, score: 0, maxCombo: 0, lastKillFrame: 0, difficulty: 1,
         playerSlowTimer: 0, playerSlowAmount: 0, handTriggerCount: 0, handEffectCount: 0,
         vacuumActive: false, vacuumTimer: 0, selectingActive: false, selectionCards: [],
         bossPending: false, bossSpawned: false, floatingTexts: [], debug: false,
-        fireTrails: [], ultimateGauge: 0, ultimateMax: 100, ultimateChargeMult: 1.0,
+        fireTrails: [], damageFlows: [],   // v9.19: 火焰伤害「玩家→核心」的转移动画
+        ultimateGauge: 0, ultimateMax: 100, ultimateChargeMult: 1.0,
         ultimateActive: false, ultimateTimer: 0, screenFlash: 0, notifications: [], chainCooldown: 0,
         paused: false, maxSlots: 4, hazardZones: [], hazardTimer: 0,
         fateBuffs: { trailDmgMul: 1, bulletDmgMul: 1, speedMul: 1, dropRateMul: 1, monsterCountMul: 1, vampHeal: 0, atkMul: 1, damageTakenMul: 1 },

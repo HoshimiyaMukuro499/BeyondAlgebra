@@ -98,7 +98,8 @@
                 break;
             case 'E13': {
                 if (!isInitial) {
-                    const freezeDuration = isHighFreq ? 20 : 60;
+                    // v9.19: 冰冻时长 −10%（20→18 / 60→54）
+                    const freezeDuration = isHighFreq ? 18 : 54;
                     let frozenCount = 0;
                     for (const m of G.monsters) {
                         if (!m.isBoss && Math.random() < 0.65) {
@@ -109,6 +110,24 @@
                     }
                     if (frozenCount > 0) {
                         setFeedback(`❄️ 冰冻${frozenCount}只怪物 ${Math.floor(freezeDuration / 60)}秒`, '#aaddff');
+                    }
+                }
+                break;
+            }
+            case 'E14': {
+                // v9.19「延缓」：降低怪物 20% 移动速度 1 秒。
+                // 和 E04（slowAll，全局永久减速）不是一回事——这个是限时的，
+                // 所以挂在怪物自己的 slowTimer 上，在速度公式里乘一次。
+                if (!isInitial) {
+                    const slowDuration = isHighFreq ? 30 : 60;   // 0.5s / 1s
+                    let slowedCount = 0;
+                    for (const m of G.monsters) {
+                        m.slowTimer = Math.max(m.slowTimer || 0, slowDuration);
+                        slowedCount++;
+                    }
+                    if (slowedCount > 0) {
+                        setFeedback(`⏳ 延缓${slowedCount}只怪物 ${(slowDuration / 60).toFixed(1)}秒`, '#c9b3ff');
+                        spawnParticles(G.core.x, G.core.y, '#c9b3ff', 14);
                     }
                 }
                 break;
@@ -285,6 +304,7 @@
             affixes: affixes,
             frozen: 0,
             stunned: 0,
+            slowTimer: 0,   // v9.19: E14「延缓」的剩余帧数，>0 时移速 ×0.8
             vx_prev: 0,
             vy_prev: 0,
             _fireCounter: 0,
@@ -347,6 +367,7 @@
             affixes: affixes,
             frozen: 0,
             stunned: 0,
+            slowTimer: 0,   // v9.19: E14「延缓」的剩余帧数，>0 时移速 ×0.8
             vx_prev: 0,
             vy_prev: 0,
             _fireCounter: 0,

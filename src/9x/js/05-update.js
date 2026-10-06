@@ -88,6 +88,11 @@
                 if (dist(b, m) < b.r + m.r) {
                     const bulletDmg = b.damage * (1 - (m.bulletResist || 0));
                     m.hp -= bulletDmg;
+                    // v9.19: 中弹停顿 0.3 秒（18 帧）。复用现成的 stunned 字段——
+                    // 递减、禁用移动、头顶 💫 标记都是现成的，不需要新机制。
+                    // 注意这确实是照着「所有怪」来的，BOSS 也吃；40 帧一发的射速下
+                    // 停顿占空比约 45%，属于「难但打得动」。真把 BOSS 钉死了再说。
+                    m.stunned = Math.max(m.stunned || 0, 18);
                     spawnParticles(b.x, b.y, '#ff8844', 5);
                     showFloatingText(m.x, m.y - m.r, '-' + Math.floor(bulletDmg), '#ff8844');
                     // v9.1: 终极技能充能
@@ -121,6 +126,7 @@
             // v9.1: 冰冻/眩晕处理
             if (m.frozen > 0) m.frozen--;
             if (m.stunned > 0) m.stunned--;
+            if (m.slowTimer > 0) m.slowTimer--;   // v9.19: E14 延缓
             const disabled = m.frozen > 0 || m.stunned > 0;
 
             if (!disabled) {
@@ -129,7 +135,8 @@
                 const dCore = dist(m, G.core);
                 const target = (nT && nT.d < dCore) ? nT.t : G.core;
                 const angle = angleTo(m, target);
-                const spd = m.speed * (1 - G.buffs.slowAll) * 1.33;
+                // v9.19: E14 延缓只在速度公式里乘一次（不像 slowAll 那样在生成时也乘）
+                const spd = m.speed * (1 - G.buffs.slowAll) * (m.slowTimer > 0 ? 0.8 : 1) * 1.33;
                 let mx = Math.cos(angle) * spd;
                 let my = Math.sin(angle) * spd;
                 const nx = m.x + mx, ny = m.y + my;
@@ -372,9 +379,27 @@
             const ft = G.fireTrails[i];
             const fmx = (ft.x1 + ft.x2) / 2, fmy = (ft.y1 + ft.y2) / 2;
             if (dist(G.player, { x: fmx, y: fmy }) < G.player.r + 14) {
+                // v9.19: 火焰仍然扣护盾，但视觉上表现为「伤害从玩家飞向核心的护盾」。
+                // 节流到每 6 帧一条——每帧 0.8 伤害的话，不节流就是满屏飞线。
+                const hadShield = G.player.hp > 0;
                 G.player.hp = Math.max(0, G.player.hp - 0.8);
+                if (G.frame % 6 === 0) {
+                    G.damageFlows.push({
+                        x1: G.player.x, y1: G.player.y,
+                        x2: G.core.x, y2: G.core.y,
+                        t: 0, life: 14, toShield: hadShield,
+                    });
+                    if (G.damageFlows.length > 40) G.damageFlows.shift();
+                }
                 if (G.frame % 5 === 0) spawnParticles(G.player.x, G.player.y, '#ff6622', 1);
             }
+        }
+
+        // v9.19: 伤害流转动画推进（纯表现层，封顶 40 条）
+        for (let i = G.damageFlows.length - 1; i >= 0; i--) {
+            const df = G.damageFlows[i];
+            df.t++;
+            if (df.t >= df.life) G.damageFlows.splice(i, 1);
         }
 
         // v9.1: 终极技能计时器

@@ -18,7 +18,7 @@
         G.selectingActive = false; G.selectionCards = [];
         G.bossPending = false; G.bossSpawned = false;
         G.floatingTexts = [];
-        G.fireTrails = []; G.ultimateGauge = 0; G.ultimateChargeMult = 1.0;
+        G.fireTrails = []; G.damageFlows = []; G.ultimateGauge = 0; G.ultimateChargeMult = 1.0;
         G.ultimateActive = false; G.ultimateTimer = 0; G.screenFlash = 0;
         G.notifications = []; G.chainCooldown = 0;
         G.paused = false; G.maxSlots = 4;
@@ -33,7 +33,7 @@
         G.pathHistory = []; G.sprintTrails = []; G.mapMode = false;
         G.turrets = []; G.turretLoops = {}; G.turretHpBonus = 0;
         G.essenceThisFloor = 0; G.shopRefreshCount = 1;   // v9.18 经济
-        G._revived = false; G.fireRate = 10; G.stage = 1;
+        G._revived = false; G.fireRate = 40; G.stage = 1;   // v9.19: 10 → 40，与 01-state.js 保持一致
         G.gameLog = []; G.floorKills = 0; G.floorCardsObtained = 0;
         Tutorial.reset();
         document.getElementById('pauseOverlay').classList.remove('active');

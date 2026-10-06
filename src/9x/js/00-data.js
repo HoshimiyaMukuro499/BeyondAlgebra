@@ -25,6 +25,7 @@
         { id: 'E11', label: '自速暴涨', emoji: '💨' },
         { id: 'E12', label: '闪电链', emoji: '⚡' },
         { id: 'E13', label: '冰冻', emoji: '❄️' },
+        { id: 'E14', label: '延缓', emoji: '⏳' },   // v9.19
     ];
 
     // ---------- 怪物类型定义 ----------
@@ -201,7 +202,9 @@
         { threshold: 50,  label: '过载',   emoji: '⚡', color: '#ff8844',
           trigger() { G.buffs.atkUp += 15;
             G.buffs.multUp += 0.3;
-            G.fireRate = Math.max(3, G.fireRate - 2); setFeedback('⚡ 50连杀！过载！攻击+15,倍率+0.3,射速↑', '#ff8844'); spawnParticles(G.player.x, G.player.y, '#ff8844', 40); } },
+            // v9.19: fireRate 是「几帧一枪」，基数 10→40 后 -2 只剩 5% 效果，
+            // 按同样的比例放大到 -8，连杀奖励的手感才和 9.18 之前一致
+            G.fireRate = Math.max(12, G.fireRate - 8); setFeedback('⚡ 50连杀！过载！攻击+15,倍率+0.3,射速↑', '#ff8844'); spawnParticles(G.player.x, G.player.y, '#ff8844', 40); } },
         { threshold: 100, label: '天罚',   emoji: '☄️', color: '#ff3366',
           trigger() { for (const m of G.monsters) { m.hp *= 0.7;
             m.frozen = Math.max(m.frozen || 0, 60); } G.ultimateGauge = G.ultimateMax;
@@ -232,7 +235,7 @@
     // ---------- v9.6 轮椅组合 ----------
     const CHAIR_COMBOS = [
         { id:'trailRevenge', trigger:'T06', effect:'E10', name:'轨迹反噬', emoji:'🐾🔥', desc:'轨迹→反噬→全怪互伤', trailType:'fire', bonus(G){ G.buffs.trailDmg+=4; } },
-        { id:'chainStorm', trigger:'T07', effect:'E12', name:'连锁风暴', emoji:'⚡🎯', desc:'射击→闪电链→清场', trailType:'lightning', bonus(G){ G.fireRate=Math.max(1,G.fireRate-2); } },
+        { id:'chainStorm', trigger:'T07', effect:'E12', name:'连锁风暴', emoji:'⚡🎯', desc:'射击→闪电链→清场', trailType:'lightning', bonus(G){ G.fireRate=Math.max(12,G.fireRate-8); } },   // v9.19: -2→-8，见 SURGE 的注释
         { id:'iceTrail', trigger:'T06', effect:'E13', name:'冰轨永冻', emoji:'❄️🐾', desc:'触轨→冰冻→罚站', trailType:'ice', bonus(G){ G.buffs.trailWidth+=4; G.buffs.slowAll=Math.min(0.7,G.buffs.slowAll+0.15); } },
         { id:'trailExplosion', trigger:'T02', effect:'E07', name:'爆轨清场', emoji:'💣🐾', desc:'对敌群→引爆轨迹→AOE', trailType:'fire', bonus(G){ G.buffs.trailDmg+=5; } },
         { id:'vampLord', trigger:'T08', effect:'E03', name:'吸血领主', emoji:'🩸💚', desc:'连杀→回血→永生', trailType:'basic', bonus(G){ G.fateBuffs.vampHeal+=16; } },
