@@ -29,7 +29,9 @@
         sprintActive: false,      // 冲刺轨迹开关
         sprintTrails: [],         // 冲刺轨迹（更宽更亮）
         enclosureBonus: 0,
-        turrets: [], maxTurrets: 3,        // 围剿加成计时
+        turrets: [],              // v9.17: 图腾改血量制，无数量上限
+        turretLoops: {},          // v9.17: 已出过塔的环 key——塔碎后删除，环重新武装
+        turretHpBonus: 0,         // v9.17: 图腾血量加成（商店/每层奖励购买）
         mapMode: false,           // 地图模式（canvas绘制地图）
         canvasWidth: 780, canvasHeight: 560,
         // v9.10: 对局记录

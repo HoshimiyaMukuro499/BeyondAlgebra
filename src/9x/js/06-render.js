@@ -163,8 +163,8 @@
         }
 
         
-        // v9.11图腾渲染
-        for(const t of G.turrets){const a=Math.min(1,t.life/100),s=t.r;
+        // v9.11图腾渲染（v9.17: 血量制，不再按 t.life 淡出）
+        for(const t of G.turrets){const a=Math.min(1,(20-t.spawnAnim)/10),s=t.r;
             ctx.fillStyle='rgba(0,0,0,'+(.3*a)+')';ctx.beginPath();ctx.ellipse(t.x,t.y+s*.5,s,s*.25,0,0,Math.PI*2);ctx.fill();
             ctx.fillStyle='#2a2030';ctx.beginPath();ctx.moveTo(t.x,t.y-s);ctx.lineTo(t.x+s*.9,t.y);ctx.lineTo(t.x,t.y+s*.4);ctx.lineTo(t.x-s*.9,t.y);ctx.closePath();ctx.fill();ctx.strokeStyle='#4a3a4a';ctx.lineWidth=2;ctx.stroke();
             ctx.beginPath();ctx.arc(t.x,t.y,s*.55,0,Math.PI*2);ctx.fillStyle='#140e18';ctx.fill();ctx.strokeStyle=t.color;ctx.lineWidth=2;ctx.stroke();
@@ -176,6 +176,13 @@
             if(t.spawnAnim>0){const r=s*(1+(20-t.spawnAnim)*.3);ctx.beginPath();ctx.arc(t.x,t.y,r,0,Math.PI*2);ctx.strokeStyle=t.color+Math.floor(t.spawnAnim/20*15).toString(16);ctx.lineWidth=2.5;ctx.stroke();}
             // 攻击光束（最近0.3秒内发射过）
             if(t._lastFire&&G.frame-t._lastFire<18){const n=t._lastTarget;if(n){ctx.beginPath();ctx.moveTo(t.x,t.y);ctx.lineTo(n.x,n.y);ctx.strokeStyle=t.color;ctx.lineWidth=1.5;ctx.globalAlpha=(18-G.frame+t._lastFire)/18;ctx.stroke();ctx.globalAlpha=1;}}
+            // v9.17: 塔上方血条（放在基座上方，避开射程虚线圈）
+            const bw=s*2,bh=4,bx=t.x-bw/2,by=t.y-s-14;
+            const hpFrac=Math.max(0,t.hp/t.maxHp);
+            ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(bx-1,by-1,bw+2,bh+2);
+            ctx.fillStyle=hpFrac>.5?'#66dd88':hpFrac>.25?'#ffcc44':'#ff5544';
+            ctx.fillRect(bx,by,bw*hpFrac,bh);
+            if(t.hp<t.maxHp){ctx.fillStyle='#cfe4ff';ctx.font='9px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText(Math.ceil(t.hp)+'/'+t.maxHp,t.x,by-2);ctx.textBaseline='middle';}
         }
 
         // v9.7: 冲刺轨迹（更宽更亮）

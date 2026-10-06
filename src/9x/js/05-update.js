@@ -124,7 +124,11 @@
             const disabled = m.frozen > 0 || m.stunned > 0;
 
             if (!disabled) {
-                const angle = angleTo(m, G.core);
+                // v9.17: 索敌「图腾与核心中离自己更近的那一个」
+                const nT = nearestTurret(m);
+                const dCore = dist(m, G.core);
+                const target = (nT && nT.d < dCore) ? nT.t : G.core;
+                const angle = angleTo(m, target);
                 const spd = m.speed * (1 - G.buffs.slowAll) * 1.33;
                 let mx = Math.cos(angle) * spd;
                 let my = Math.sin(angle) * spd;
@@ -162,7 +166,7 @@
                     m._fireCounter = (m._fireCounter || 0) + 1;
                     if (m._fireCounter >= (m.fireTrailInterval || 8)) {
                         m._fireCounter = 0;
-                        const ang = angleTo(m, G.core);
+                        const ang = angleTo(m, target);
                         const tl = 8;
                         G.fireTrails.push({ x1: m.x - Math.cos(ang) * tl, y1: m.y - Math.sin(ang) * tl, x2: m.x + Math.cos(ang) * tl, y2: m.y + Math.sin(ang) * tl, life: (m.fireTrailLife || 150) });
                         if (G.fireTrails.length > 80) G.fireTrails.shift();
@@ -204,45 +208,64 @@
                 m.trailDamageCooldown--;
             }
 
-            // 攻击核心 → 先扣玩家HP（护盾），再扣核心
-            if (dist(m, G.core) < m.r + G.core.r) {
+            // v9.17: 打「图腾与核心中更近的那一个」。图腾直接掉血（不经过核心护盾），
+            // 每次被命中掉 max(1, atk*0.05) —— 1 级怪打 1 点，血厚的怪最多 4 点，
+            // 这样 5/12/20 的血量刻度才有意义。
+            const nTA = nearestTurret(m);
+            const dCoreA = dist(m, G.core);
+            const onTurret = nTA && nTA.d < dCoreA;
+            const reach = onTurret ? nTA.t.r + m.r : G.core.r + m.r;
+            const reachDist = onTurret ? nTA.d : dCoreA;
+            if (reachDist < reach) {
                 if (m.hitCooldown <= 0) {
-                    Tutorial.emit('hit');
-                    breakKillStreak(); // v9.15: 核心挨打就断连
-                    const dmg = m.atk * 0.35 * G.fateBuffs.damageTakenMul;
-                    if (G.player.hp > 0) {
-                        G.player.hp = Math.max(0, G.player.hp - dmg);
-                        spawnParticles(G.player.x, G.player.y, '#ff6644', 6);
-                        showFloatingText(G.player.x, G.player.y - G.player.r, '-' + Math.floor(dmg), '#ff6644');
-                        if (G.player.hp <= 0) {
-                            setFeedback('🛡️ 护盾耗尽！核心暴露！', '#ff4444');
-                        }
+                    if (onTurret) {
+                        const t = nTA.t;
+                        const tDmg = Math.max(1, Math.round(m.atk * 0.05));
+                        t.hp -= tDmg;
+                        spawnParticles(t.x, t.y, '#ff6644', 6);
+                        showFloatingText(t.x, t.y - t.r - 6, '-' + tDmg, '#ff6644');
+                        // 碎裂的提示留给下面的移除分支去飘字/放粒子——
+                        // 塔一多会同时碎好几座，不该每一座都去刷面板反馈
+                        m.hitCooldown = 24;
                     } else {
-                        G.core.hp -= dmg;
-                        spawnParticles(G.core.x, G.core.y, '#ff3333', 8);
-                        showFloatingText(G.core.x, G.core.y - G.core.r, '-' + Math.floor(dmg), '#ff3333');
-                    }
-                    // v9.1: 吸血词缀
-                    if (m.affixes && m.affixes.includes('vampiric') && G.player.hp <= 0) {
-                        const vampHeal = dmg * (0.15 + G.floor * 0.01);
-                        m.hp = Math.min(m.maxHp, m.hp + vampHeal);
-                        showFloatingText(m.x, m.y - m.r, '+' + Math.floor(vampHeal), '#ff3366');
-                    }
-                    m.hitCooldown = 24;
-                    // v9.4: 荆棘光环遗物反伤
-                    if (G.relicBuffs.thornsDmg) {
-                        m.hp -= G.relicBuffs.thornsDmg;
-                        showFloatingText(m.x, m.y - m.r, '↩' + G.relicBuffs.thornsDmg, '#ffaa44');
-                    }
-                    if (m.isSlow) {
-                        G.playerSlowTimer = 60;
-                        G.playerSlowAmount = Math.min(G.playerSlowAmount + m.slowAmount * 0.1, 0.6);
-                        setFeedback(`🐌 被减速！`, '#bb88dd');
-                    }
-                    if (G.core.hp <= 0) {
-                        G.core.hp = 0;
-                        G.gameOver = true;
-                        setFeedback('💀 核心被毁 · 游戏结束', '#d44');
+                        // 攻击核心 → 先扣玩家HP（护盾），再扣核心
+                        Tutorial.emit('hit');
+                        breakKillStreak(); // v9.15: 核心挨打就断连
+                        const dmg = m.atk * 0.35 * G.fateBuffs.damageTakenMul;
+                        if (G.player.hp > 0) {
+                            G.player.hp = Math.max(0, G.player.hp - dmg);
+                            spawnParticles(G.player.x, G.player.y, '#ff6644', 6);
+                            showFloatingText(G.player.x, G.player.y - G.player.r, '-' + Math.floor(dmg), '#ff6644');
+                            if (G.player.hp <= 0) {
+                                setFeedback('🛡️ 护盾耗尽！核心暴露！', '#ff4444');
+                            }
+                        } else {
+                            G.core.hp -= dmg;
+                            spawnParticles(G.core.x, G.core.y, '#ff3333', 8);
+                            showFloatingText(G.core.x, G.core.y - G.core.r, '-' + Math.floor(dmg), '#ff3333');
+                        }
+                        // v9.1: 吸血词缀
+                        if (m.affixes && m.affixes.includes('vampiric') && G.player.hp <= 0) {
+                            const vampHeal = dmg * (0.15 + G.floor * 0.01);
+                            m.hp = Math.min(m.maxHp, m.hp + vampHeal);
+                            showFloatingText(m.x, m.y - m.r, '+' + Math.floor(vampHeal), '#ff3366');
+                        }
+                        m.hitCooldown = 24;
+                        // v9.4: 荆棘光环遗物反伤
+                        if (G.relicBuffs.thornsDmg) {
+                            m.hp -= G.relicBuffs.thornsDmg;
+                            showFloatingText(m.x, m.y - m.r, '↩' + G.relicBuffs.thornsDmg, '#ffaa44');
+                        }
+                        if (m.isSlow) {
+                            G.playerSlowTimer = 60;
+                            G.playerSlowAmount = Math.min(G.playerSlowAmount + m.slowAmount * 0.1, 0.6);
+                            setFeedback(`🐌 被减速！`, '#bb88dd');
+                        }
+                        if (G.core.hp <= 0) {
+                            G.core.hp = 0;
+                            G.gameOver = true;
+                            setFeedback('💀 核心被毁 · 游戏结束', '#d44');
+                        }
                     }
                 }
             }
@@ -361,11 +384,17 @@
         // v9.1: 闪电链冷却
         if (G.chainCooldown > 0) G.chainCooldown--;
 
-        // v9.11图腾更新
+        // v9.17图腾更新（血量制：不再计存留时间，只有被打光才会消失）
         for(let i=G.turrets.length-1;i>=0;i--){
             const t=G.turrets[i];
-            if(t.spawnAnim>0)t.spawnAnim--;t.life--;
-            if(t.life<=0){spawnParticles(t.x,t.y,'#888888',6);G.turrets.splice(i,1);continue;}
+            if(t.spawnAnim>0)t.spawnAnim--;
+            if(t.hp<=0){
+                spawnParticles(t.x,t.y,'#888888',10);
+                showFloatingText(t.x,t.y-t.r-6,'🗼 碎裂','#88aacc');
+                // 塔碎了，同一个环重新武装——再画一次同样的闭环就能重新召唤
+                if(t.loopKey)delete G.turretLoops[t.loopKey];
+                G.turrets.splice(i,1);continue;
+            }
             t.fireTimer++;if(t.fireTimer>=t.fireRate&&G.monsters.length>0){t.fireTimer=0;
                 let n=null,nd=Infinity;for(const m of G.monsters){const d=dist(t,m);if(d<t.range&&d<nd){nd=d;n=m;}}
                 if(n){n.hp-=t.damage;t._lastFire=G.frame;t._lastTarget={x:n.x,y:n.y};showFloatingText(n.x,n.y-n.r-5,t.emoji+'-'+Math.floor(t.damage),t.color);spawnParticles(n.x,n.y,t.color,8);spawnParticles(t.x,t.y,'#ffffff',4);

@@ -29,13 +29,13 @@
 | 系列 | 定位 | 最新版本 | 文件 |
 |:--|:--|:--|:--|
 | **2.x** | 经典版 · 无限波次生存 | **v2.20** | [密文轨迹demo2.20.html](密文轨迹demo2.20.html) |
-| **9.x** | AI 拓展版 · Roguelike 重构 | **v9.16** | [密文轨迹demo9.16.html](密文轨迹demo9.16.html) |
+| **9.x** | AI 拓展版 · Roguelike 重构 | **v9.17** | [密文轨迹demo9.17.html](密文轨迹demo9.17.html) |
 
 ### 版本规则
 
 **新版本不更改旧版本文件**——每次修改都创建新的独立版本文件，任何版本都可直接双击打开。完整改动记录见 [BeyondAlgebra/EDITION.md](BeyondAlgebra/EDITION.md)。
 
-> 从 v9.16 起，9.x 的**源码**拆到了 [src/9x/](src/9x/)（分模块），根目录的 `密文轨迹demo9.16.html` 是 `npm run build:game` **拼装出的产物**。产物仍是自包含单文件、可直接双击。改 9.x 请改 `src/9x/`，**不要直接编辑根目录的 HTML**——下次构建会覆盖掉（`npm run build:game -- --check` 可校验两者是否一致）。2.x 与 v9.15 及更早的 9.x 仍是手写的单文件。
+> 从 v9.16 起，9.x 的**源码**拆到了 [src/9x/](src/9x/)（分模块），根目录的 `密文轨迹demo9.XX.html` 是 `npm run build:game` **拼装出的产物**。产物仍是自包含单文件、可直接双击。改 9.x 请改 `src/9x/`，**不要直接编辑根目录的 HTML**——下次构建会覆盖掉（`npm run build:game -- --check` 可校验两者是否一致）。2.x 与 v9.15 及更早的 9.x 仍是手写的单文件。
 
 ---
 
@@ -60,7 +60,8 @@ BeyondAlgebra/
 ├── sim.bat                    # Windows 快捷脚本
 ├── web/                       # 网页版构建与 Cloudflare 部署
 │   ├── bundle-game.mjs        # 把 src/9x/ 拼装成单文件 HTML
-│   └── build.mjs              # 自动挑选 2.x / 9.x 最新版本生成静态站点
+│   ├── build.mjs              # 自动挑选 2.x / 9.x 最新版本生成静态站点
+│   └── probe-9x.mjs           # 无头回归探针（假 DOM 驱动构建产物，无需 Puppeteer）
 ├── BeyondAlgebra/             # 策划案与开发文档（Obsidian 仓库）
 │   ├── README.md              # 策划案精简版：规则 / 怪物 / 公式 / 密文板全表
 │   ├── EDITION.md             # 版本记录（按时间倒序）

@@ -51,6 +51,27 @@ src/9x/
 - 加新模块只需放进 `js/`，文件名前缀数字决定拼装顺序（两位数字）
 - v9.15 及更早的 9.x、以及全部 2.x 仍是手写的单文件，不走这套构建
 
+### 无头回归探针 `web/probe-9x.mjs`
+
+把构建产物塞进一个假 DOM（stub 掉 `document` / canvas / `requestAnimationFrame`）里直接断言，
+**不需要 Puppeteer**——所以 `npm install` 永远是空的。默认跑最新的 9.x：
+
+```bash
+node web/probe-9x.mjs                              # 跑当前 9.x
+node web/probe-9x.mjs 密文轨迹demo9.16.html         # 拿旧版本当对照组
+```
+
+探针靠 `window.__SIM_MODE__ = true` 打开模拟模式绕过 DOM 相关分支，再手动驱动
+`update()` / `draw()`。**两个坑**（都踩过）：
+
+- `update()` 在 simMode 下**自己会调 `autoPilot()`**，别再手动调一遍
+- `G.frame++` 是在 `update()` **里面**做的，外面设帧号要留出这个增量
+- 直接循环调 `update()` 时，若 `G.gameOver` / `G.selectingActive` 为真则立即返回——
+  测性能前要先把核心血量拉满并清掉这些标志位，否则会测出假的 0.00ms
+
+`G.selectingActive` 还有一个坑：`resetGame()` 结尾会调 `initClassSelection()` 把它置真，
+正常开局由 `simAutoSelectClass()` 清掉。手搓的测试要做完整开局就得走 `simAutoSelectClass()`。
+
 ## 单文件结构（以 v9.8 为例）
 
 ## 单文件结构（以 v9.8 为例）

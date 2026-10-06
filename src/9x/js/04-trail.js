@@ -117,35 +117,90 @@
     }
 
 
-    // ---------- v9.12 网格判环 ----------
-    const GRID=20;let _grid={},_path=[],_loopCD=0;
-    function checkTrailLoop(){
-        if(_loopCD>0){_loopCD--;return;}
-        const p=G.player;
-        const gx=Math.floor(p.x/GRID),gy=Math.floor(p.y/GRID),gk=gx+','+gy;
-        if(G.frame%3===0){_path.push({x:p.x,y:p.y,f:G.frame});while(_path.length>200)_path.shift();}
-        if(!_grid[gk]){_grid[gk]=G.frame;return;}
-        if(_path.length<20)return;
-        const oldF=_grid[gk];if(G.frame-oldF<60)return;
-        let oi=-1;for(let i=0;i<_path.length;i++){if(Math.abs(_path[i].f-oldF)<10){oi=i;break;}}
-        if(oi<0||_path.length-oi<15)return;
-        const lp=_path.slice(oi);let sa=0;for(let i=0;i<lp.length;i++){const j=(i+1)%lp.length;sa+=lp[i].x*lp[j].y-lp[j].x*lp[i].y;}
-        const a=Math.abs(sa)/2;if(a<800)return;
-        _loopCD=90;_grid={};for(const pt of _path.slice(-10)){_grid[Math.floor(pt.x/GRID)+','+Math.floor(pt.y/GRID)]=pt.f;}
-        const t=a<2000?{t:'小环',m:.6,b:'🥉小闭环'}:a<8000?{t:'中环',m:1,b:'🥈闭环'}:{t:'大环',m:1.5,b:'🥇大闭环！'};
-        let cx=0,cy=0;for(let i=0;i<lp.length;i++){const j=(i+1)%lp.length;const c=lp[i].x*lp[j].y-lp[j].x*lp[i].y;cx+=(lp[i].x+lp[j].x)*c;cy+=(lp[i].y+lp[j].y)*c;}
-        cx=cx/(3*sa);cy=cy/(3*sa);
-        if(G.turrets.length>=G.maxTurrets)G.turrets.shift();
-        let ty='basic';if(G.passives['T12']){for(const p of G.passives['T12']){if(p.effectId==='E01')ty='rapid';else if(p.effectId==='E12')ty='lightning';else if(p.effectId==='E13')ty='frost';else if(p.effectId==='E06')ty='trail';}}
-        const T={basic:{e:'🗼',c:'#88aacc',fr:25,d:30,rg:140,l:600},rapid:{e:'🎯',c:'#ff8844',fr:8,d:18,rg:120,l:450},lightning:{e:'⚡',c:'#ffdd44',fr:40,d:50,rg:180,l:500},frost:{e:'❄️',c:'#88ccff',fr:20,d:10,rg:120,l:700},trail:{e:'🐾',c:'#66dd88',fr:15,d:35,rg:160,l:550}};
-        const d=T[ty];
-        G.turrets.push({x:clamp(cx,60,720),y:clamp(cy,60,500),r:14*t.m,type:ty,emoji:d.e,color:d.c,fireRate:Math.floor(d.fr/t.m),fireTimer:0,damage:Math.floor(d.d*t.m*(1+getDifficultyMultiplier()*.3)),range:d.rg*t.m,life:d.l,maxLife:d.l,tier:t.t,spawnAnim:20});
-        triggerPassive('T12');addScore(Math.floor(a/100));
-        Tutorial.emit('loop', { tier: t.t, area: Math.floor(a) });
-        setFeedback('⭕'+t.b+'!'+Math.floor(a)+'px²','#ffaa00');
-        spawnParticles(cx,cy,'#ffaa00',18);
-        showFloatingText(cx,cy-10,t.b,'#ffaa00');
-        logEvent('turret',{type:ty,tier:t.t});
+    // ---------- v9.17 轨迹判环 ----------
+    // 判的是「当前存留的轨迹」本身（G.trails），不再是玩家走过的路径。
+    // 轨迹是玩家连续画出来的一条链，所以数组顺序就是路径顺序：取每段中点，
+    // 按 LOOP_GRID 吸附成节点，第一次撞见重复节点即认为环闭合。
+    const LOOP_GRID = 10;      // 节点吸附粒度(px)
+    const LOOP_MIN_NODES = 8;  // 环至少 8 个节点，滤掉来回抖动
+    const LOOP_MIN_AREA = 800; // 沿用 v9.12 的面积阈值(px²)
+    let _loopCD = 0;
+
+    function checkTrailLoop() {
+        if (_loopCD > 0) { _loopCD--; return; }
+        if (G.frame % 6 !== 0) return;   // 每 6 帧查一次足够——轨迹每 2 帧才加一段
+        const segs = G.trails;
+        if (segs.length < LOOP_MIN_NODES) return;
+
+        const poly = segs.map(s => ({ x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2 }));
+        const first = new Map();
+        const cands = [];
+        for (let i = 0; i < poly.length; i++) {
+            const k = Math.round(poly[i].x / LOOP_GRID) + ',' + Math.round(poly[i].y / LOOP_GRID);
+            if (first.has(k)) {
+                const j = first.get(k);
+                if (i - j >= LOOP_MIN_NODES) cands.push([j, i]);
+            } else first.set(k, i);
+        }
+        if (cands.length === 0) return;
+
+        // 从最近的候选环往前找：玩家刚画完的那个环优先。
+        // 不能只看第一个候选——轨迹里可能残留一条又细又扁的旧自交，
+        // 它面积不够，会永远挡在真正的大环前面。
+        let found = null;
+        for (let ci = cands.length - 1; ci >= 0 && ci >= cands.length - 12; ci--) {
+            const lp = poly.slice(cands[ci][0], cands[ci][1] + 1);   // 环上的点，首尾同一个节点
+            let sa = 0;
+            for (let i = 0; i < lp.length; i++) { const j = (i + 1) % lp.length; sa += lp[i].x * lp[j].y - lp[j].x * lp[i].y; }
+            const ar = Math.abs(sa) / 2;
+            if (ar < LOOP_MIN_AREA) continue;
+            let px = 0, py = 0;
+            for (let i = 0; i < lp.length; i++) { const j = (i + 1) % lp.length; const c = lp[i].x * lp[j].y - lp[j].x * lp[i].y; px += (lp[i].x + lp[j].x) * c; py += (lp[i].y + lp[j].y) * c; }
+            found = { area: ar, cx: px / (3 * sa), cy: py / (3 * sa) };
+            break;
+        }
+        if (!found) return;
+        const area = found.area, cx = found.cx, cy = found.cy;
+
+        const tier = area < 2000 ? { t: '小环', m: .6, hp: 5, b: '🥉小闭环' }
+            : area < 8000 ? { t: '中环', m: 1, hp: 12, b: '🥈闭环' }
+                : { t: '大环', m: 1.5, hp: 20, b: '🥇大闭环！' };
+
+        // 同一个环只出一座塔；塔碎了才会把这个 key 删掉，环于是重新武装
+        const loopKey = Math.round(cx / 24) + ',' + Math.round(cy / 24) + ',' + tier.t;
+        if (G.turretLoops[loopKey]) return;
+
+        let turType = 'basic';
+        if (G.passives['T12']) {
+            for (const pv of G.passives['T12']) {
+                if (pv.effectId === 'E01') turType = 'rapid';
+                else if (pv.effectId === 'E12') turType = 'lightning';
+                else if (pv.effectId === 'E13') turType = 'frost';
+                else if (pv.effectId === 'E06') turType = 'trail';
+            }
+        }
+        const T = { basic: { e: '🗼', c: '#88aacc', fr: 25, d: 30, rg: 140 }, rapid: { e: '🎯', c: '#ff8844', fr: 8, d: 18, rg: 120 }, lightning: { e: '⚡', c: '#ffdd44', fr: 40, d: 50, rg: 180 }, frost: { e: '❄️', c: '#88ccff', fr: 20, d: 10, rg: 120 }, trail: { e: '🐾', c: '#66dd88', fr: 15, d: 35, rg: 160 } };
+        const d = T[turType];
+        const maxHp = tier.hp + (G.turretHpBonus || 0);
+        G.turrets.push({ x: clamp(cx, 60, 720), y: clamp(cy, 60, 500), r: 14 * tier.m, type: turType, emoji: d.e, color: d.c, fireRate: Math.floor(d.fr / tier.m), fireTimer: 0, damage: Math.floor(d.d * tier.m * (1 + getDifficultyMultiplier() * .3)), range: d.rg * tier.m, hp: maxHp, maxHp: maxHp, tier: tier.t, loopKey: loopKey, spawnAnim: 20 });
+        G.turretLoops[loopKey] = true;
+        _loopCD = 30;
+        triggerPassive('T12'); addScore(Math.floor(area / 100));
+        Tutorial.emit('loop', { tier: tier.t, area: Math.floor(area) });
+        setFeedback('⭕' + tier.b + '!' + Math.floor(area) + 'px²', '#ffaa00');
+        spawnParticles(cx, cy, '#ffaa00', 18);
+        showFloatingText(cx, cy - 10, tier.b, '#ffaa00');
+        logEvent('turret', { type: turType, tier: tier.t });
+    }
+
+    // 离 m 最近的图腾，没有则 null。怪物在「图腾 / 核心」之间挑更近的那个打。
+    function nearestTurret(m) {
+        let best = null, bd = Infinity;
+        for (const t of G.turrets) {
+            const d = dist(m, t);
+            if (d < bd) { bd = d; best = t; }
+        }
+        return best ? { t: best, d: bd } : null;
     }
 
     // ---------- v9.1 终极技能 ----------
