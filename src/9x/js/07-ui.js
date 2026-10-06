@@ -1,0 +1,667 @@
+    // ---------- UI ----------
+    function updateUI() {
+        if (G.simMode) return;
+        document.getElementById('coreDisplay').textContent = Math.round(G.core.hp) + '%';
+        document.getElementById('waveDisplay').textContent = G.floor;
+        document.getElementById('scoreDisplay').textContent = fmtScore(G.score);
+        document.getElementById('hpDisplay').textContent = Math.round(G.player.hp);
+        document.getElementById('atkDisplay').textContent = Math.round(G.player.atk + G.buffs.atkUp);
+        document.getElementById('multDisplay').textContent = `x${(1 + G.buffs.multUp).toFixed(1)}`;
+        document.getElementById('monsterCount').textContent = G.monsters.length + (G.monstersToSpawn > 0 ? ` (+${G.monstersToSpawn})` : '');
+        document.getElementById('killDisplay').textContent = G.killCount;
+        document.getElementById('essenceDisplay').textContent = G.essence;
+        document.getElementById('diffDisplay').textContent = `×${getDifficultyMultiplier().toFixed(2)}`;
+        updateHandCount();
+        renderHandUI();
+        renderSlotsUI();
+        updatePassiveUI();
+        const btn = document.getElementById('combineBtn');
+        if (btn) btn.disabled = G.combineCooldown || !G.triggerSlot || !G.effectSlot || G.gameOver;
+    }
+
+    // v9.3: 移除被动
+    function removePassive(triggerId, effectId) {
+        if (!G.passives[triggerId]) return;
+        const idx = G.passives[triggerId].findIndex(p => p.effectId === effectId);
+        if (idx === -1) return;
+        const removed = G.passives[triggerId][idx];
+        G.passives[triggerId].splice(idx, 1);
+        if (G.passives[triggerId].length === 0) delete G.passives[triggerId];
+        const isHF = (triggerId === 'T06' || triggerId === 'T07' || triggerId === 'T08');
+        // 回退被动效果（与applyPassiveEffect中的isInitial值保持一致）
+        if (effectId === 'E01') G.buffs.atkUp -= removed.count * (isHF ? 5 : 12);
+        if (effectId === 'E02') G.buffs.multUp -= removed.count * 0.25;
+        if (effectId === 'E04') G.buffs.slowAll = Math.max(0, G.buffs.slowAll - removed.count * 0.07);
+        if (effectId === 'E06') { G.buffs.trailDmg -= removed.count * 1;
+            G.buffs.trailWidth -= removed.count * 2; }
+        if (effectId === 'E11') G.buffs.speedUp -= removed.count * 0.35;
+        setFeedback(`🗑 移除 ${removed.count}层被动`, '#8aa3c0');
+        updatePassiveUI();
+        updateUI();
+    }
+
+    function updatePassiveUI() {
+        if (G.simMode) return;
+        const container = document.getElementById('passiveList');
+        if (!container) return;
+        const keys = Object.keys(G.passives);
+        let usedSlots = 0;
+        for (const tid of keys) usedSlots += G.passives[tid].length;
+        const slotInfo = `<span style="font-size:9px;color:#ffb347;">${usedSlots}/${G.maxSlots}槽</span>`;
+        document.getElementById('passiveSlotInfo').innerHTML = slotInfo;
+        if (keys.length === 0) {
+            container.innerHTML = '<div style="color:#5a7a9a;font-size:10px;">暂无被动</div>';
+            return;
+        }
+        let html = '';
+        for (const triggerId of keys) {
+            const trigger = TRIGGERS.find(t => t.id === triggerId);
+            const label = trigger ? trigger.label : triggerId;
+            const emoji = trigger ? trigger.emoji : '❓';
+            for (const p of G.passives[triggerId]) {
+                const effect = EFFECTS.find(e => e.id === p.effectId);
+                const effectLabel = effect ? effect.label : p.effectId;
+                html += `<div class="item"><span>${emoji} ${label}+${effectLabel}</span><span class="count">×${p.count}</span><span style="cursor:pointer;color:#ff6644;margin-left:4px;font-size:9px;" data-tid="${triggerId}" data-eid="${p.effectId}">✕</span></div>`;
+            }
+        }
+        container.innerHTML = html;
+        container.querySelectorAll('[data-tid]').forEach(el => {
+            el.addEventListener('mousedown', function(e) {
+                e.preventDefault(); e.stopPropagation();
+                removePassive(this.dataset.tid, this.dataset.eid);
+            });
+        });
+    }
+
+    function renderHandUI() {
+        const container = document.getElementById('handContainer');
+        if (!container) return;
+        if (G.hand.length === 0) {
+            container.innerHTML = '<span style="color:#5a7a9a;font-size:10px;">手牌为空</span>';
+            return;
+        }
+        container.innerHTML = G.hand.map((c, i) =>
+            `<div class="hand-card ${c.type === 'trigger' ? 'trigger-card' : 'effect-card'}" data-idx="${i}">
+                ${c.emoji} ${c.label} <span class="tag">${c.type === 'trigger' ? '触发' : '效果'}</span>
+            </div>`
+        ).join('');
+        container.querySelectorAll('.hand-card').forEach(el => {
+            el.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const idx = parseInt(this.dataset.idx);
+                fillSlot(idx);
+            });
+        });
+    }
+
+    function renderSlotsUI() {
+        const ts = document.getElementById('triggerSlot');
+        const es = document.getElementById('effectSlot');
+        if (!ts || !es) return;
+        ts.innerHTML = G.triggerSlot ?
+            `${G.triggerSlot.emoji} ${G.triggerSlot.label}` :
+            '⬅ 触发<br><span class="sub">点击选择</span>';
+        ts.className = 'slot' + (G.triggerSlot ? ' filled' : '');
+        es.innerHTML = G.effectSlot ?
+            `${G.effectSlot.emoji} ${G.effectSlot.label}` :
+            '效果 ➡<br><span class="sub">点击选择</span>';
+        es.className = 'slot' + (G.effectSlot ? ' filled' : '');
+        ts.onmousedown = (e) => { e.preventDefault();
+            e.stopPropagation(); if (G.triggerSlot) { returnToHand(G.triggerSlot);
+                G.triggerSlot = null;
+                updateUI(); } };
+        es.onmousedown = (e) => { e.preventDefault();
+            e.stopPropagation(); if (G.effectSlot) { returnToHand(G.effectSlot);
+                G.effectSlot = null;
+                updateUI(); } };
+    }
+
+    function setFeedback(msg, color = '#7bb3ff') {
+        if (G.simMode) return;
+        const el = document.getElementById('feedbackBox');
+        if (!el) return;
+        el.innerHTML = `<span class="tag" style="background:${color}33;color:${color};">✦</span> ${msg}`;
+    }
+
+    // ---------- 平衡掉落 ----------
+    function dropBalancedCard() {
+        const trigCount = G.hand.filter(c => c.type === 'trigger').length;
+        const effCount = G.hand.filter(c => c.type === 'effect').length;
+        let dropType;
+        if (trigCount < effCount) dropType = 'trigger';
+        else if (effCount < trigCount) dropType = 'effect';
+        else dropType = Math.random() < 0.5 ? 'trigger' : 'effect';
+        const pool = dropType === 'trigger' ? TRIGGERS : EFFECTS;
+        const card = pool[Math.floor(Math.random() * pool.length)];
+        if (G.hand.length >= 20) {
+            const old = G.hand.shift();
+            setFeedback(`📥 ${old.emoji}→${card.emoji}${card.label} (替换)`, '#8ab3d0');
+        } else {
+            setFeedback(`📥 拾取 ${card.emoji} ${card.label}`, '#8ab3d0');
+        }
+        G.hand.push({ ...card, type: dropType });
+        G.floorCardsObtained++;
+        logEvent('card_drop', { card: card.id, cardLabel: card.label, cardType: dropType, source: 'kill' });
+        updateUI();
+    }
+
+    // ---------- v9.4 遗物系统 ----------
+    function dropRelic() {
+        const available = RELICS.filter(r => !G.relics.find(r2 => r2.id === r.id));
+        if (available.length === 0) return;
+        const weights = available.map(r => r.rarity === 'epic' ? 15 : r.rarity === 'rare' ? 35 : 50);
+        const totalW = weights.reduce((a, b) => a + b, 0);
+        let r = Math.random() * totalW;
+        let selected = available[0];
+        for (let i = 0; i < available.length; i++) { r -= weights[i]; if (r <= 0) { selected = available[i]; break; } }
+        G.relics.push(selected);
+        selected.apply(G);
+        logEvent('relic_get', { relicName: selected.name, rarity: selected.rarity });
+        setFeedback(`🏺 获得遗物：${selected.emoji} ${selected.name} — ${selected.desc}`, '#ffb347');
+        showNotification(`🏺 ${selected.name}！`, '#ffb347', 200);
+        updateRelicUI();
+        updateUI();
+    }
+
+    function updateRelicUI() {
+        if (G.simMode) return;
+        const container = document.getElementById('relicList');
+        const countEl = document.getElementById('relicCount');
+        if (!container) return;
+        if (countEl) countEl.textContent = G.relics.length + '个';
+        if (G.relics.length === 0) {
+            container.innerHTML = '<div style="color:#5a7a9a;font-size:10px;">暂无遗物</div>';
+            return;
+        }
+        container.innerHTML = G.relics.map(r =>
+            `<div class="relic-icon">
+                ${r.emoji}
+                <div class="relic-tooltip">${r.name}: ${r.desc}</div>
+            </div>`
+        ).join('');
+    }
+
+    // ---------- v9.4 商人系统 ----------
+    function showMerchant() {
+        G.merchantStock = getMerchantStock();
+        G.shopSoldOut = [];
+        const overlay = document.getElementById('merchantOverlay');
+        const row = document.getElementById('merchantRow');
+        const essenceEl = document.getElementById('merchantEssence');
+        if (!overlay || !row) return;
+        G.selectingActive = true;
+        essenceEl.textContent = '💎 精华: ' + G.essence;
+        row.innerHTML = G.merchantStock.map((item, i) =>
+            `<div class="merchant-item" data-idx="${i}">
+                <span class="mi-emoji">${item.emoji}</span>
+                <span class="mi-label">${item.label}</span>
+                <span class="mi-cost">💎 ${item.cost}</span>
+                <span class="mi-desc">${item.desc}</span>
+            </div>`
+        ).join('');
+        overlay.classList.add('active');
+        row.querySelectorAll('.merchant-item').forEach(el => {
+            el.addEventListener('mousedown', function(e) {
+                e.preventDefault(); e.stopPropagation();
+                const idx = parseInt(this.dataset.idx);
+                buyMerchantItem(idx);
+            });
+        });
+        document.getElementById('leaveShopBtn').onmousedown = function(e) {
+            e.preventDefault(); e.stopPropagation();
+            leaveShop();
+        };
+    }
+
+    function buyMerchantItem(idx) {
+        if (G.shopSoldOut.includes(idx)) return;
+        const item = G.merchantStock[idx];
+        if (!item || G.essence < item.cost) { setFeedback('💎 精华不足！', '#ff6644'); return; }
+        G.essence -= item.cost;
+        G.shopSoldOut.push(idx);
+        logEvent('merchant_buy', { itemType: item.type, itemLabel: item.label, cost: item.cost });
+        if (item.type === 'card') {
+            G.hand.push({ ...item.card, type: item.card.cardType });
+            setFeedback(`🛒 购买 ${item.emoji} ${item.label} (剩余精华:${G.essence})`, '#ffb347');
+        } else if (item.type === 'relic') {
+            G.relics.push(item.relic);
+            item.relic.apply(G);
+            setFeedback(`🏺 购买遗物：${item.emoji} ${item.label}`, '#ffb347');
+            updateRelicUI();
+        } else if (item.type === 'heal') {
+            G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.player.maxHp * 0.4);
+            setFeedback(`💚 治疗40%护盾 (剩余精华:${G.essence})`, '#44ff88');
+        } else if (item.type === 'essence') {
+            const bonus = 15 + Math.floor(Math.random() * 11);
+            G.essence += bonus;
+            setFeedback(`💎 获得${bonus}精华 (剩余精华:${G.essence})`, '#c0a0ff');
+        }
+        // Update UI
+        const essenceEl = document.getElementById('merchantEssence');
+        if (essenceEl) essenceEl.textContent = '💎 精华: ' + G.essence;
+        const row = document.getElementById('merchantRow');
+        if (row) {
+            row.querySelectorAll('.merchant-item').forEach((el, i) => {
+                if (G.shopSoldOut.includes(i)) el.classList.add('sold-out');
+            });
+        }
+        updateUI();
+    }
+
+    function leaveShop() {
+        G.selectingActive = false;
+        document.getElementById('merchantOverlay').classList.remove('active');
+        advanceFloor();
+    }
+
+    // ---------- v9.4 地图选择 ----------
+    // ---------- v9.7 可视化蜿蜒地图 ----------
+    function showNodeMap() {
+        G.selectingActive = true; G.mapMode = true;
+        canvas.style.pointerEvents = 'auto';
+        canvas.parentElement.style.pointerEvents = 'auto'; // 两层都要解禁
+        const pool = [...NODE_POOL];
+        const available = pool.filter(n => {
+            if (n.id === 'boss') return (G.floor % 10 === 9);
+            if (n.id === 'merchant') return (G.floor % 4 === 0 || G.floor % 4 === 3);
+            return true;
+        });
+        const shuffled = available.sort(() => Math.random() - 0.5);
+        G.mapChoices = shuffled.slice(0, 3);
+        if (G.floor % 10 === 9) {
+            const bossNode = pool.find(n => n.id === 'boss');
+            if (bossNode && !G.mapChoices.find(c => c.id === 'boss')) G.mapChoices[2] = bossNode;
+        }
+    }
+
+    function selectNode(idx, dir) {
+        const node = G.mapChoices[idx];
+        if (!node) return;
+        logEvent('node_select', { nodeId: node.id, nodeLabel: node.label, dir: dir || 'center' });
+        // 教程第 5 层选完路 → 下一层播收尾字幕
+        if (Tutorial.active) Tutorial.outroPending = true;
+        // v9.7: 记录路径历史（用于蜿蜒地图）
+        G.pathHistory.push({ dir: dir || 'center', nodeId: node.id, floor: G.floor });
+        G.mapMode = false; G.selectingActive = false;
+        canvas.style.pointerEvents = 'none';
+        canvas.parentElement.style.pointerEvents = 'none';
+        if (node.isMerchant || node.isRest) { handleNonCombatNode(node.id); return; }
+        G.stageType = node.stageType || 'mixed';
+        advanceFloor();
+        updateUI();
+    }
+
+    // ---------- v9.4 职业选择 ----------
+    function initClassSelection() {
+        const overlay = document.getElementById('classOverlay');
+        const row = document.getElementById('classRow');
+        if (!overlay || !row) return;
+        G.selectingActive = true; G.paused = true;
+        overlay.classList.add('active');
+        row.innerHTML = CLASSES.map((c, i) =>
+            `<div class="class-card" data-idx="${i}">
+                <span class="c-emoji">${c.emoji}</span>
+                <span class="c-name">${c.name}</span>
+                <span class="c-desc">${c.desc}</span>
+                <span class="c-stats">${c.stats}</span>
+            </div>`
+        ).join('');
+        row.querySelectorAll('.class-card').forEach(el => {
+            el.addEventListener('mousedown', function(e) {
+                e.preventDefault(); e.stopPropagation();
+                const idx = parseInt(this.dataset.idx);
+                selectClass(idx);
+            });
+        });
+
+        // 教程：开局遮罩上的说明 + 跳过教程（只看没看过教程的那一次）
+        if (Tutorial.seen) {
+            const h = document.getElementById('tutorialClassHint');
+            const s = document.getElementById('tutorialSkipBtn');
+            if (h) h.remove();
+            if (s) s.remove();
+            return;
+        }
+        if (!document.getElementById('tutorialClassHint')) {
+            const hint = document.createElement('div');
+            hint.id = 'tutorialClassHint';
+            hint.style.cssText = 'color:#8ab3d0;font-size:13px;max-width:640px;text-align:center;' +
+                'line-height:1.7;margin-top:-6px;';
+            hint.innerHTML =
+                '<b style="color:#f5c542;">古老的石板-1 · 选一个开局流派。</b>' +
+                '教程期间选哪个都能过关，之后每次开局都能重选。<br>' +
+                '🐾 <b>轨迹编织者</b> 最适合新手：轨迹更宽、更持久。';
+            const h2 = overlay.querySelector('h2');
+            if (h2) h2.insertAdjacentElement('afterend', hint);
+
+            const skip = document.createElement('button');
+            skip.id = 'tutorialSkipBtn';
+            skip.textContent = '跳过教程 →';
+            skip.style.cssText = 'position:absolute;right:26px;bottom:22px;background:transparent;' +
+                'border:1px solid #33506e;color:#6a8aaa;padding:6px 16px;border-radius:16px;' +
+                'font-size:12px;cursor:pointer;font-family:inherit;';
+            skip.addEventListener('mousedown', function(e) {
+                e.preventDefault(); e.stopPropagation();
+                if (!G.playerClass) selectClass(0);
+                Tutorial.skip();
+            });
+            overlay.style.position = 'fixed';
+            overlay.appendChild(skip);
+        }
+    }
+
+    function selectClass(idx) {
+        const cls = CLASSES[idx];
+        if (!cls) return;
+        logEvent('class_select', { className: cls.name });
+        G.playerClass = cls;
+        cls.apply(G);
+        document.getElementById('classOverlay').classList.remove('active');
+        document.getElementById('classDisplay').textContent = `${cls.emoji} ${cls.name}`;
+        G.selectingActive = false; G.paused = false;
+        setFeedback(`🧙 选择职业：${cls.emoji} ${cls.name}！`, '#f5c542');
+        showNotification(`🧙 ${cls.name}！${cls.desc.substring(0, 20)}...`, '#f5c542', 240);
+        addScore(10);
+        startFloor();
+        updateUI();
+    }
+
+    function drawCardFromLib(type, cardData) {
+        // v9.2: 移除手牌平衡限制，自由抽取
+        if (G.hand.length >= 20) {
+            const old = G.hand.shift();
+            setFeedback(`📥 ${old.emoji}→${cardData.emoji}${cardData.label} (替换)`, '#6b8');
+        } else {
+            setFeedback(`✅ 获得 ${cardData.emoji} ${cardData.label}`, '#6b8');
+        }
+        G.hand.push({ ...cardData, type: type });
+        updateUI();
+    }
+
+    // ---------- 密文操作 ----------
+    function fillSlot(handIndex) {
+        if (handIndex === undefined || handIndex === null) return;
+        const card = G.hand[handIndex];
+        if (!card) return;
+        if (card.type === 'trigger' && G.triggerSlot) { returnToHand(G.triggerSlot);
+            G.triggerSlot = null; }
+        if (card.type === 'effect' && G.effectSlot) { returnToHand(G.effectSlot);
+            G.effectSlot = null; }
+        if (card.type === 'trigger') {
+            if (G.triggerSlot) returnToHand(G.triggerSlot);
+            G.triggerSlot = { ...card };
+            G.hand.splice(handIndex, 1);
+        } else {
+            if (G.effectSlot) returnToHand(G.effectSlot);
+            G.effectSlot = { ...card };
+            G.hand.splice(handIndex, 1);
+        }
+        updateUI();
+        renderLibrary();
+    }
+
+    function returnToHand(card) {
+        G.hand.push({ ...card });
+        updateUI();
+        renderLibrary();
+    }
+
+    // ---------- 牌库 ----------
+    function renderLibrary() {
+        const grid = document.getElementById('libraryGrid');
+        if (!grid) return;
+        let html = '';
+        TRIGGERS.forEach(t => {
+            html += `<div class="lib-card lib-trigger" data-type="trigger" data-id="${t.id}" data-label="${t.label}" data-emoji="${t.emoji}">
+                ${t.emoji} ${t.label} <span class="badge">触发</span><span class="count-badge">∞</span>
+            </div>`;
+        });
+        EFFECTS.forEach(e => {
+            html += `<div class="lib-card lib-effect" data-type="effect" data-id="${e.id}" data-label="${e.label}" data-emoji="${e.emoji}">
+                ${e.emoji} ${e.label} <span class="badge">效果</span><span class="count-badge">∞</span>
+            </div>`;
+        });
+        grid.innerHTML = html;
+        grid.querySelectorAll('.lib-card').forEach(el => {
+            el.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const type = this.dataset.type;
+                const id = this.dataset.id;
+                const label = this.dataset.label;
+                const emoji = this.dataset.emoji;
+                const pool = type === 'trigger' ? TRIGGERS : EFFECTS;
+                const card = pool.find(c => c.id === id);
+                if (!card) return;
+                drawCardFromLib(type, { id: card.id, label: card.label, emoji: card.emoji });
+            });
+        });
+    }
+
+    // ---------- v9.10 属性提升选择（替代密文版三选一）----------
+    const STAT_CHOICES = [
+        { id: 'atkUp',     label: '攻击强化', emoji: '⚔️', desc: '永久攻击+3',        color: '#ff8844',
+          apply() { G.buffs.atkUp = Math.min(G.buffs.atkUp + 3, 2000); setFeedback('⚔️ 攻击力永久+3！', '#ff8844'); } },
+        { id: 'heal',      label: '生命复苏', emoji: '💚', desc: '回复30%最大护盾',   color: '#44ff88',
+          apply() { const healAmt = Math.floor(G.player.maxHp * 0.3); G.player.hp = Math.min(G.player.maxHp, G.player.hp + healAmt);
+                    spawnParticles(G.player.x, G.player.y, '#44ff88', 12);
+                    showFloatingText(G.player.x, G.player.y - G.player.r, '+' + healAmt, '#44ff88');
+                    setFeedback('💚 回复' + healAmt + '护盾！', '#44ff88'); } },
+        { id: 'speedUp',   label: '疾步',     emoji: '💨', desc: '永久移速+5%',       color: '#88ddff',
+          apply() { G.buffs.speedUp += 0.05; setFeedback('💨 移速永久+5%！', '#88ddff'); } },
+        { id: 'trailUp',   label: '轨迹淬炼', emoji: '🐾', desc: '永久轨迹伤害+1',    color: '#ffdd44',
+          apply() { G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1, 400); setFeedback('🐾 轨迹伤害永久+1！', '#ffdd44'); } },
+    ];
+
+    function showStatChoice() {
+        if (G.selectingActive) return;
+        G.selectingActive = true;
+        // 随机选3个
+        const shuffled = [...STAT_CHOICES].sort(() => Math.random() - 0.5);
+        G.selectionCards = shuffled.slice(0, 3); // 复用 selectionCards 存储
+
+        const overlay = document.getElementById('selectionOverlay');
+        const row = document.getElementById('selectionRow');
+        if (!overlay || !row) return;
+
+        overlay.querySelector('h3').textContent = '✨ 选择一项属性提升（替代密文版奖励）';
+
+        row.innerHTML = G.selectionCards.map((c, i) =>
+            `<div class="selection-card" data-idx="${i}" style="border-left:4px solid ${c.color};">
+                <span class="s-emoji">${c.emoji}</span>
+                <span class="s-label">${c.label}</span>
+                <span class="s-type">${c.desc}</span>
+            </div>`
+        ).join('');
+
+        overlay.classList.add('active');
+
+        row.querySelectorAll('.selection-card').forEach(el => {
+            el.addEventListener('mousedown', function(e) {
+                e.preventDefault(); e.stopPropagation();
+                const idx = parseInt(this.dataset.idx);
+                selectStat(idx);
+            });
+        });
+    }
+
+    function selectStat(index) {
+        const choice = G.selectionCards[index];
+        if (!choice) return;
+        logEvent('stat_choice', { choice: choice.label, desc: choice.desc });
+        choice.apply();
+        G.selectingActive = false;
+        G.selectionCards = [];
+
+        const overlay = document.getElementById('selectionOverlay');
+        if (overlay) { overlay.classList.remove('active'); overlay.querySelector('h3').textContent = '🎴 选择一张密文版加入手牌'; }
+        addScore(15);
+        // 属性选择后进入地图选关
+        showNodeMap();
+        updateUI();
+    }
+
+    // ---------- 波间选择与真空 ----------
+    function showCardSelection() {
+        if (G.selectingActive) return;
+        G.selectingActive = true;
+        G.selectionCards = [];
+        const allCards = [];
+        TRIGGERS.forEach(t => allCards.push({ ...t, type: 'trigger' }));
+        EFFECTS.forEach(e => allCards.push({ ...e, type: 'effect' }));
+        for (let i = allCards.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [allCards[i], allCards[j]] = [allCards[j], allCards[i]];
+        }
+        G.selectionCards = allCards.slice(0, 3);
+
+        const overlay = document.getElementById('selectionOverlay');
+        const row = document.getElementById('selectionRow');
+        if (!overlay || !row) return;
+
+        row.innerHTML = G.selectionCards.map((c, i) =>
+            `<div class="selection-card ${c.type === 'trigger' ? 'sel-trigger' : 'sel-effect'}" data-idx="${i}">
+                <span class="s-emoji">${c.emoji}</span>
+                <span class="s-label">${c.label}</span>
+                <span class="s-type">${c.type === 'trigger' ? '触发板' : '效果板'}</span>
+            </div>`
+        ).join('');
+
+        overlay.classList.add('active');
+
+        row.querySelectorAll('.selection-card').forEach(el => {
+            el.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const idx = parseInt(this.dataset.idx);
+                selectCard(idx);
+            });
+        });
+    }
+
+    function selectCard(index) {
+        const card = G.selectionCards[index];
+        if (!card) return;
+        G.hand.push({ ...card });
+        G.selectingActive = false;
+        G.selectionCards = [];
+
+        const overlay = document.getElementById('selectionOverlay');
+        if (overlay) overlay.classList.remove('active');
+
+        setFeedback(`✅ 获得密文版 ${card.emoji} ${card.label}`, '#6b8');
+        addScore(15);
+        // v9.6: 选完卡→可视化地图（每层都有选择！）
+        showNodeMap();
+        updateUI();
+    }
+
+    // ---------- v9.2 命运抉择 ----------
+    function showFateChoice() {
+        G.fateChoosing = true;
+        G.selectingActive = true; // 暂停游戏
+        // 随机选2个不同的命运选项
+        const shuffled = [...FATE_CHOICES].sort(() => Math.random() - 0.5);
+        G.fateOptions = shuffled.slice(0, 2);
+
+        const overlay = document.getElementById('selectionOverlay');
+        const row = document.getElementById('selectionRow');
+        if (!overlay || !row) { G.fateChoosing = false; G.selectingActive = false; advanceFloor(); return; }
+
+        overlay.querySelector('h3').textContent = `🔮 命运抉择 · 第${G.floor}层`;
+        row.innerHTML = G.fateOptions.map((f, i) =>
+            `<div class="selection-card" data-idx="${i}" style="border-left:4px solid ${f.id === 'trailMaster' ? '#66ddff' : f.id === 'speedDemon' ? '#88ddff' : f.id === 'ironWall' ? '#88aadd' : '#ff8844'};">
+                <span class="s-emoji">${f.emoji}</span>
+                <span class="s-label">${f.label}</span>
+                <span class="s-type">${f.desc}</span>
+            </div>`
+        ).join('');
+
+        overlay.classList.add('active');
+
+        row.querySelectorAll('.selection-card').forEach(el => {
+            el.addEventListener('mousedown', function(e) {
+                e.preventDefault(); e.stopPropagation();
+                const idx = parseInt(this.dataset.idx);
+                selectFate(idx);
+            });
+        });
+    }
+
+    function selectFate(index) {
+        const fate = G.fateOptions[index];
+        if (!fate) return;
+        logEvent('fate_choice', { fateName: fate.label, fateDesc: fate.desc, snapshot: snapshotStats() });
+        fate.apply();
+        G.fateChoosing = false;
+        G.selectingActive = false;
+        G.fateOptions = [];
+
+        const overlay = document.getElementById('selectionOverlay');
+        if (overlay) { overlay.classList.remove('active'); overlay.querySelector('h3').textContent = '🎴 选择一张密文版加入手牌'; }
+        setFeedback(`🔮 命运抉择：${fate.emoji} ${fate.label} — ${fate.desc}`, '#ff8844');
+        showNotification(`🔮 ${fate.label}！${fate.desc}`, '#ff8844', 240);
+        addScore(25);
+        startFloor(); // 命运选择后开始当前楼层（不递增）
+        updateUI();
+    }
+
+    function startVacuum() {
+        G.vacuumActive = true;
+        G.vacuumTimer = 300;
+        const bar = document.getElementById('vacuumBar');
+        if (bar) bar.classList.add('active');
+        updateVacuumUI();
+    }
+
+    function skipVacuum() {
+        G.vacuumActive = false;
+        G.vacuumTimer = 0;
+        const bar = document.getElementById('vacuumBar');
+        if (bar) bar.classList.remove('active');
+        advanceFloor();
+    }
+
+    function updateVacuumUI() {
+        if (G.simMode) return;
+        const label = document.getElementById('vacuumLabel');
+        const fill = document.getElementById('vacuumFill');
+        if (!label || !fill) return;
+        const sec = Math.ceil(G.vacuumTimer / 60);
+        label.textContent = `⏳ 整顿 ${sec}s`;
+        fill.style.width = (G.vacuumTimer / 300 * 100) + '%';
+    }
+
+    function advanceFloor() {
+        G.floor++;
+        G.stage = Math.ceil(G.floor / 5);
+        if (G.floor % 5 === 0) { addScore(G.floor * 15); setFeedback(`🎉 阶段${G.stage-1}完成!`, '#f5c542'); }
+        if (G.floor === 20) { G.maxSlots = 5; showNotification('📢 被动槽位+1！', '#ff8844', 300); }
+        if (G.floor === 30) { showNotification('📢 精英双词缀！', '#ffaa44', 300); }
+        if (G.floor === 40) { G.maxSlots = 6; G.ultimateChargeMult = 1.5; showNotification('📢 槽位+1 充能加速！', '#ffdd44', 360); }
+        if (G.floor === 60) { G.maxSlots = 7; showNotification('📢 被动槽位+1！', '#ffdd44', 240); }
+        if (G.floor > 0 && G.floor % 10 === 0) {
+            if (G.simMode) { simAutoFateChoice(); }
+            else { showFateChoice(); }
+        }
+        else { addScore(G.floor * 5); startFloor(); }
+    }
+
+    // v9.6: 非战斗节点处理（不会触发卡牌选择循环）
+    function handleNonCombatNode(nodeId) {
+        const node = NODE_POOL.find(n => n.id === nodeId);
+        if (!node) return;
+        if (node.isMerchant) { showMerchant(); return; }
+        if (node.isRest) {
+            G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.player.maxHp * 0.3);
+            for (let i = 0; i < 2; i++) { const pool = Math.random() < 0.5 ? TRIGGERS : EFFECTS; G.hand.push({ ...pool[Math.floor(Math.random() * pool.length)], type: pool === TRIGGERS ? 'trigger' : 'effect' }); }
+            setFeedback('🏕️ 休整：回复30%护盾+2张密文版', '#44cc88');
+            setTimeout(() => showNodeMap(), 800);
+            return;
+        }
+        // 战斗节点
+        G.stageType = node.stageType || 'mixed';
+        advanceFloor();
+    }
+

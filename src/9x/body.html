@@ -1,0 +1,121 @@
+
+<div class="wrapper">
+    <div class="game-row">
+        <div class="canvas-wrap">
+            <canvas id="gameCanvas" width="780" height="560"></canvas>
+        </div>
+
+        <div class="panel" id="panelRoot">
+            <div class="panel-box">
+                <h4>📊 密文轨迹 demo {{VERSION}} · 新手教程（古老的石板 1-5）</h4>
+                <div class="stat-row"><span>🏰 核心</span><span class="stat-val" id="coreDisplay">100%</span></div>
+                <div class="stat-row"><span>🏢 楼层</span><span class="stat-val wave-display" id="waveDisplay">1</span></div>
+                <div class="stat-row"><span>⭐ 得分</span><span class="stat-val score" id="scoreDisplay">0</span></div>
+                <div class="stat-row"><span>🛡️ 护盾</span><span class="stat-val" id="hpDisplay">100</span></div>
+                <div class="stat-row"><span>⚔️ 攻击</span><span class="stat-val" id="atkDisplay">10</span></div>
+                <div class="stat-row"><span>💥 倍率</span><span class="stat-val" id="multDisplay">x1.0</span></div>
+                <div class="stat-row"><span>🐾 怪物</span><span class="stat-val" id="monsterCount">0</span></div>
+                <div class="stat-row"><span>💀 击杀</span><span class="stat-val" id="killDisplay">0</span></div>
+                <div class="stat-row"><span>💎 精华</span><span class="stat-val" id="essenceDisplay" style="color:#c0a0ff;">0</span></div>
+                <div class="stat-row" style="border-bottom:none;margin-top:2px;font-size:10px;color:#6a8aaa;">
+                    <span>📈 难度系数</span>
+                    <span class="stat-val" id="diffDisplay" style="color:#ff8844;">1.00x</span>
+                </div>
+                <div class="stat-row" style="border-bottom:none;font-size:10px;color:#ffb347;">
+                    <span id="classDisplay">🧙 未选择</span>
+                </div>
+            </div>
+
+            <div class="panel-box">
+                <h4>🃏 手牌 <span style="font-weight:400;font-size:9px;color:#6a85a3;">左键填入 · 满20替旧</span>
+                    <span class="hand-count" id="handCountDisplay">触发:0 效果:0</span>
+                </h4>
+                <div class="hand-row" id="handContainer"></div>
+
+                <div class="slot-group">
+                    <div class="slot" id="triggerSlot">⬅ 触发<br><span class="sub">点击选择</span></div>
+                    <div class="slot" id="effectSlot">效果 ➡<br><span class="sub">点击选择</span></div>
+                </div>
+                <button class="btn-combine" id="combineBtn">🔮 宣读组合</button>
+                <div class="feedback" id="feedbackBox"><span class="tag">✦</span> 永久被动，触发即叠加</div>
+            </div>
+
+            <div class="panel-box">
+                <h4>⚡ 被动 <span id="passiveSlotInfo" style="font-weight:400;font-size:9px;color:#ffb347;">0/4槽</span></h4>
+                <div class="passive-box" id="passiveList">
+                    <div style="color:#5a7a9a;font-size:10px;">暂无被动</div>
+                </div>
+            </div>
+
+            <div class="panel-box">
+                <h4>🏺 遗物 <span id="relicCount" style="font-weight:400;font-size:9px;color:#ffb347;">0个</span></h4>
+                <div class="relic-box" id="relicList">
+                    <div style="color:#5a7a9a;font-size:10px;">暂无遗物</div>
+                </div>
+            </div>
+
+            <div class="panel-box">
+                <h4>📦 批量宣读 <span style="font-weight:400;font-size:9px;color:#ffb347;" id="batchInfo">暂停时可批量组合</span></h4>
+                <div style="max-height:60px;overflow-y:auto;font-size:10px;color:#b8d0ea;" id="batchList">
+                    <div style="color:#5a7a9a;font-size:10px;">暂停后在此排队组合</div>
+                </div>
+                <button class="btn-combine" id="batchCombineBtn" style="margin-top:4px;background:#8b4513;" disabled>📜 宣读全部 (0组)</button>
+            </div>
+
+            <div class="vacuum-bar-wrap" id="vacuumBar">
+                <span class="vacuum-label" id="vacuumLabel">⏳ 整顿 5s</span>
+                <div class="vacuum-bar-fill"><div class="vacuum-bar-fill-inner" id="vacuumFill" style="width:100%"></div></div>
+                <button class="btn-skip" id="skipBtn">⏭ 跳过</button>
+            </div>
+
+            <div class="controls-hint">
+                <span><kbd>W A S D</kbd> 移动</span>
+                <span><kbd>Shift</kbd> 冲刺轨迹</span>
+                <span><kbd>空格</kbd> 宣读</span>
+                <span><kbd>P</kbd> 暂停</span>
+                <span><kbd>Q</kbd> 终极技</span>
+                <span>轨迹阻挡 · 围剿伤害</span>
+                <button class="btn-reset" id="logBtn" style="background:#2a4a3a;border-color:#4a8a5a;color:#aaddbb;">📋 导出记录</button>
+                <button class="btn-reset" id="resetBtn">↺ 重开</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="selection-overlay" id="selectionOverlay">
+    <h3>🎴 选择一张卡牌加入手牌</h3>
+    <div class="selection-row" id="selectionRow"></div>
+</div>
+
+<div class="pause-overlay" id="pauseOverlay">
+    <span class="pause-text">⏸ 已暂停</span>
+</div>
+
+<!-- v9.4 暂停工作台 -->
+<div class="pause-workshop" id="pauseWorkshop">
+    <h4>🔮 密文工作台</h4>
+    <p class="pw-hint">战场已冻结 · 自由组合密文版并宣读</p>
+    <button class="pw-btn" id="pwCombineBtn">🔮 宣读组合 (空格)</button>
+    <button class="pw-btn" id="pwResumeBtn">▶ 继续战斗</button>
+</div>
+
+<!-- v9.4 职业选择 -->
+<div class="class-overlay active" id="classOverlay">
+    <h2>🧙 选择你的密文法师</h2>
+    <div class="class-row" id="classRow"></div>
+</div>
+
+<!-- v9.4 地图选择 -->
+<div class="map-overlay" id="mapOverlay">
+    <h3>🗺️ 选择前进路线</h3>
+    <div class="map-row" id="mapRow"></div>
+</div>
+
+<!-- v9.4 密文商人 -->
+<div class="merchant-overlay" id="merchantOverlay">
+    <h3>🧙‍♂️ 密文商人</h3>
+    <p class="essence-display" id="merchantEssence">💎 精华: 0</p>
+    <div class="merchant-row" id="merchantRow"></div>
+    <button class="btn-leave-shop" id="leaveShopBtn">离开商店</button>
+</div>
+

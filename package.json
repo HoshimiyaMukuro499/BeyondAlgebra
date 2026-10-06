@@ -5,9 +5,10 @@
   "description": "《密文轨迹》——2D 俯视角射击动作 + 轻塔防 HTML5 游戏",
   "type": "module",
   "scripts": {
-    "build:web": "node web/build.mjs",
-    "deploy": "node web/build.mjs && npx wrangler pages deploy web/public --project-name=miwen-guiji --branch=main --commit-dirty=true",
-    "preview": "node web/build.mjs && npx wrangler pages dev web/public",
+    "build:game": "node web/bundle-game.mjs",
+    "build:web": "node web/bundle-game.mjs && node web/build.mjs",
+    "deploy": "node web/bundle-game.mjs && node web/build.mjs && npx wrangler pages deploy web/public --project-name=miwen-guiji --branch=main --commit-dirty=true",
+    "preview": "node web/bundle-game.mjs && node web/build.mjs && npx wrangler pages dev web/public",
     "sim": "node simCore.js"
   }
 }

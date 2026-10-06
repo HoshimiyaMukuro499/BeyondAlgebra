@@ -16,6 +16,9 @@ BeyondAlgebra/
 
 根目录（BeyondAlgebra 外）：
 ├── 密文轨迹demoX.X.html   # 各版本独立 HTML 文件（单文件包含 CSS+JS）
+├── src/9x/                # v9.16 起 9.x 的多文件源码（见下节）
+├── web/bundle-game.mjs    # 把 src/9x/ 拼装成根目录的单文件 HTML
+├── web/build.mjs          # 挑选最新 2.x/9.x 生成静态站点
 ├── 试玩版demo_无限模式X.X.html  # v2.x 早期版本
 ├── 策划案.pdf / 策划案精简版.docx / 密文轨迹.docx  # 策划文档
 └── *.png                  # 截图
@@ -27,6 +30,28 @@ BeyondAlgebra/
 2. 版本号格式：`密文轨迹demoX.X.html`
 3. 当前开发版本见 `EDITION.md` 顶部
 4. 在 `EDITION.md` 中按时间倒序记录每个版本的改动
+
+## 多文件源码（v9.16 起，仅 9.x）
+
+9.16 起 9.x 的源码拆到 `src/9x/`，根目录的 `密文轨迹demo9.XX.html` 是**构建产物**：
+
+```
+src/9x/
+├── template.html    # 外壳，槽位：{{CSS}} {{BODY}} {{JS}} {{VERSION}} {{NOTE}}
+├── styles.css       # 样式
+├── body.html        # 页面结构（版本号用 {{VERSION}} 占位）
+├── meta.json        # 版本号 + 头部注释
+└── js/00-data.js … 10-sim.js   # 11 个模块
+```
+
+**关键：所有模块拼进同一个 `<script>` 标签**，不是 ES modules。这样作用域与拆分前完全一致（不用 import/export），也避开 `file://` 下 `type="module"` 的 CORS 限制，产物仍可双击运行。
+
+- 改 9.x **请改 `src/9x/`**，不要直接编辑根目录的 HTML——下次构建会覆盖
+- `npm run build:game` 拼装；`npm run build:game -- --check` 校验产物与源码是否一致
+- 加新模块只需放进 `js/`，文件名前缀数字决定拼装顺序（两位数字）
+- v9.15 及更早的 9.x、以及全部 2.x 仍是手写的单文件，不走这套构建
+
+## 单文件结构（以 v9.8 为例）
 
 ## 单文件结构（以 v9.8 为例）
 

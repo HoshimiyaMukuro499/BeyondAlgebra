@@ -29,11 +29,13 @@
 | 系列 | 定位 | 最新版本 | 文件 |
 |:--|:--|:--|:--|
 | **2.x** | 经典版 · 无限波次生存 | **v2.20** | [密文轨迹demo2.20.html](密文轨迹demo2.20.html) |
-| **9.x** | AI 拓展版 · Roguelike 重构 | **v9.15** | [密文轨迹demo9.15.html](密文轨迹demo9.15.html) |
+| **9.x** | AI 拓展版 · Roguelike 重构 | **v9.16** | [密文轨迹demo9.16.html](密文轨迹demo9.16.html) |
 
 ### 版本规则
 
 **新版本不更改旧版本文件**——每次修改都创建新的独立版本文件，任何版本都可直接双击打开。完整改动记录见 [BeyondAlgebra/EDITION.md](BeyondAlgebra/EDITION.md)。
+
+> 从 v9.16 起，9.x 的**源码**拆到了 [src/9x/](src/9x/)（分模块），根目录的 `密文轨迹demo9.16.html` 是 `npm run build:game` **拼装出的产物**。产物仍是自包含单文件、可直接双击。改 9.x 请改 `src/9x/`，**不要直接编辑根目录的 HTML**——下次构建会覆盖掉（`npm run build:game -- --check` 可校验两者是否一致）。2.x 与 v9.15 及更早的 9.x 仍是手写的单文件。
 
 ---
 
@@ -46,11 +48,18 @@ BeyondAlgebra/
 ├── 密文轨迹demo9.X.html        # 9.x 系列各版本（单文件，含全部 CSS+JS）
 ├── 密文轨迹demo2.X.html        # 2.12 起的版本
 ├── 试玩版demo_无限模式2.X.html  # 2.0–2.11 早期版本
+├── src/9x/                    # 9.16+ 的多文件源码（拼装成根目录的单文件产物）
+│   ├── template.html          # 外壳，含 {{CSS}} {{BODY}} {{JS}} {{VERSION}} 槽位
+│   ├── styles.css             # 样式
+│   ├── body.html              # 页面结构
+│   ├── meta.json              # 版本号与头部注释
+│   └── js/00-data.js … 10-sim.js   # 11 个模块，按序拼进同一个 <script>
 ├── simCore.js                 # 纯 Node.js 模拟引擎（零依赖）
 ├── analyzeSim.js              # 对局结果分析引擎（10 项指标）
 ├── simRunner.js               # Puppeteer 无头运行器
 ├── sim.bat                    # Windows 快捷脚本
 ├── web/                       # 网页版构建与 Cloudflare 部署
+│   ├── bundle-game.mjs        # 把 src/9x/ 拼装成单文件 HTML
 │   └── build.mjs              # 自动挑选 2.x / 9.x 最新版本生成静态站点
 ├── BeyondAlgebra/             # 策划案与开发文档（Obsidian 仓库）
 │   ├── README.md              # 策划案精简版：规则 / 怪物 / 公式 / 密文板全表
@@ -82,7 +91,8 @@ node analyzeSim.js sim_results.json      # 输出 10 项指标分析
 托管在 **Cloudflare Pages**，项目名 `miwen-guiji`，生产域名为项目级域名 `miwen-guiji.pages.dev`——不含任何账号标识，且国内可直连（`workers.dev` 域名在国内通常需要代理）。
 
 ```bash
-npm run build:web     # 只生成静态站点到 web/public/
+npm run build:game    # 只把 src/9x/ 拼装成根目录的单文件 HTML
+npm run build:web     # 拼装 + 生成静态站点到 web/public/
 npm run preview       # 本地预览（wrangler pages dev）
 npm run deploy        # 构建并发布到 Cloudflare Pages
 ```
@@ -100,5 +110,5 @@ npx wrangler login
 ## 开发文档
 
 - [策划案精简版](BeyondAlgebra/README.md) — 核心规则、7 种怪物数值表、指数增长公式、密文板全表、得分系统
-- [版本记录](BeyondAlgebra/EDITION.md) — 从 v2.0 到 v9.15 的完整改动史
+- [版本记录](BeyondAlgebra/EDITION.md) — 从 v2.0 到 v9.16 的完整改动史
 - [CLAUDE.md](BeyondAlgebra/CLAUDE.md) — 单文件代码结构索引、数值改动联动检查清单
