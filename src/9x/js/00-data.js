@@ -9,7 +9,8 @@
         { id: 'T03', label: '对精英生效', emoji: '⭐' },
         { id: 'T06', label: '怪触轨', emoji: '🐾' },
         { id: 'T07', label: '射击命中', emoji: '🎯' },
-        { id: 'T08', label: '连环击杀', emoji: '🔥' },
+        // v9.23: T08、「连环击杀」出率 -30%（权重 1 → 0.7）。
+        { id: 'T08', label: '连环击杀', emoji: '🔥', weight: 0.7 },
         { id: 'T10', label: '残血触发', emoji: '❤️‍🔥' },
         { id: 'T12', label: '闭环触发', emoji: '⭕' },
         // v9.21: T13「消除」是消耗品而不是被动——宣读即触发，之后整张牌销毁。
@@ -30,17 +31,31 @@
     }
     const EFFECTS = [
         { id: 'E01', label: '攻击增幅', emoji: '⚔️' },
-        { id: 'E02', label: '连环击', emoji: '💥' },
+        // v9.23: E02「连环击」与 E11「自速暴涨」出率 -30%（权重 1 → 0.7）。
+        { id: 'E02', label: '连环击', emoji: '💥', weight: 0.7 },
         { id: 'E03', label: '生命回复', emoji: '💚' },
-        { id: 'E04', label: '移速减慢', emoji: '🐢' },
+        // v9.23: E04「移速减慢」删除。它和 E14「延缓」、轨迹迟缓三套减速
+        // 叠在一起，是同一个效果换了三个来源；`G.buffs.slowAll` 本身保留，
+        // 因为冰轨永冻（+0.15）和时间膨胀器（+0.2）还在用它。
         { id: 'E06', label: '轨迹升级', emoji: '⬆️' },
         { id: 'E07', label: '轨迹爆伤', emoji: '💣' },
         { id: 'E10', label: '怪物反噬', emoji: '🔄' },
-        { id: 'E11', label: '自速暴涨', emoji: '💨' },
+        { id: 'E11', label: '自速暴涨', emoji: '💨', weight: 0.7 },
         { id: 'E12', label: '闪电链', emoji: '⚡' },
         { id: 'E13', label: '冰冻', emoji: '❄️' },
         { id: 'E14', label: '延缓', emoji: '⏳' },   // v9.19
     ];
+
+    // v9.23: 效果板的加权随机，和 randomTrigger() 同款。权重只用来压 E02/E11
+    // 的出率，其余效果板都是 1。凡是「随机发一张效果板」的地方都必须走这里，
+    // 直接下标取 EFFECTS 会绕过权重。（按 id 命中的查找不需要。）
+    function randomEffect() {
+        let total = 0;
+        for (const e of EFFECTS) total += (e.weight || 1);
+        let r = Math.random() * total;
+        for (const e of EFFECTS) { r -= (e.weight || 1); if (r <= 0) return e; }
+        return EFFECTS[EFFECTS.length - 1];
+    }
 
     // ---------- 怪物类型定义 ----------
     const MONSTER_TYPES = {
@@ -210,12 +225,33 @@
     // 在下面的「固定回复速度」之后已经没有意义。
     // 注意 G.killStreak 本身**没有**删——T08「连环击杀」还在用它（见 05-update.js）。
 
+    // v9.23: BOSS 血量整体 −10%（第 10 层 9 万、第 30 层 26 万）。
+    const BOSS_HP_MUL = 0.9;
+    // v9.23: BOSS 召唤爪牙的速率 +5%，于是每次召唤的间隔 ×(1/1.05)。
+    // 初始间隔（type.spawnInterval = 100）和后续的 max(50, 150-层数×2) 都除这一项。
+    const BOSS_SUMMON_RATE_MUL = 1.05;
+    function bossSummonInterval(base) {
+        return Math.max(1, Math.round(base / BOSS_SUMMON_RATE_MUL));
+    }
+
+    // ---------- v9.23 每层清空奖励的卡牌数 ----------
+    // 基础式仍是 2 + 层数/10（第 5 层 2 张、第 50 层 7 张、第 100 层 12 张），
+    // 再按「前期 ×1.1、后期 ×0.9」缩放。拐点沿用难度的 DIFF_KNEE = 30。
+    // 只影响清层奖励——BOSS 掉落、商人、休整那三个来源不动。
+    const CARD_EARLY_MUL = 1.1;
+    const CARD_LATE_MUL = 0.9;
+    function getFloorClearCards() {
+        const base = 2 + Math.floor(G.floor / 10);
+        const mul = G.floor < DIFF_KNEE ? CARD_EARLY_MUL : CARD_LATE_MUL;
+        return Math.max(1, Math.round(base * mul));
+    }
+
     function getBossHp() {
         // v9.15: 和难度曲线同步加拐点，否则 BOSS 自己按 1.7^(层/10) 一路指数涨，
         // 118 层就是 2000 万血——玩家永远打不死，又是一个「假难度」。
-        // 30 层前与原公式完全一致（10/20/30 层仍是 10 万 / 17 万 / 28.9 万）。
+        // v9.23: 整体再 −10%，第 10 / 20 / 30 层是 9 万 / 15.3 万 / 26 万。
         const g = Math.floor(G.floor / 10);
-        return Math.floor(100000
+        return Math.floor(BOSS_HP_MUL * 100000
             * Math.pow(1.7, Math.min(g, 3) - 1)
             * Math.pow(Math.max(1, G.floor / DIFF_KNEE), DIFF_TAIL));
     }
@@ -379,7 +415,7 @@
         desc: '图腾上限+1',
         color: '#ffdd66',
         apply() {
-            G.maxTurrets = (G.maxTurrets || 15) + 1;
+            G.maxTurrets = (G.maxTurrets || 10) + 1;
             setFeedback('🗼 图腾上限 +1 → ' + G.maxTurrets + '！', '#ffdd66');
             showNotification('🗼 图腾上限 +1', '#ffdd66', 200);
         },

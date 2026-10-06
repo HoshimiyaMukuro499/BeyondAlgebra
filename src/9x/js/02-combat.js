@@ -9,16 +9,43 @@
         addScore(10);
     }
 
-    function triggerPassive(triggerId) {
+    // v9.23: target 是「这次触发的生效目标」——T03/T06/T07/T08 传被命中的那只怪。
+    // 只有需要范围效果的 E13/E14 用它（见下面的 effectAoeTargets()），其余效果忽略。
+    function triggerPassive(triggerId, target) {
         if (!G.passives[triggerId]) return;
         for (const p of G.passives[triggerId]) {
             for (let i = 0; i < p.count; i++) {
-                applyPassiveEffect(triggerId, p.effectId, false);
+                applyPassiveEffect(triggerId, p.effectId, false, target);
             }
         }
     }
 
-    function applyPassiveEffect(triggerId, effectId, isInitial) {
+    // ---------- v9.23 E13/E14 的作用范围 ----------
+    // 从「全场」改成「命中目标 + 它周围 90px 内的怪」。
+    // 没有具体目标的触发器（T01 对自身 / T02 对敌群 / T10 残血 / T12 闭环）
+    // 就近兜底：取离玩家最近的那只怪当靶心；场上一只怪都没有时返回空数组。
+    const EFFECT_AOE_RADIUS = 90;
+    function nearestMonsterTo(x, y) {
+        let best = null, bestD = Infinity;
+        for (const m of G.monsters) {
+            const d = dist({ x: x, y: y }, m);
+            if (d < bestD) { bestD = d; best = m; }
+        }
+        return best;
+    }
+    function effectAoeTargets(target) {
+        if (!target || target.hp <= 0) target = nearestMonsterTo(G.player.x, G.player.y);
+        if (!target) return [];
+        const out = [];
+        for (const m of G.monsters) {
+            if (dist(target, m) <= EFFECT_AOE_RADIUS + (m.r || 0)) out.push(m);
+        }
+        // 靶心本身一定要在里面，哪怕它的半径把它挤出了判定圈
+        if (out.indexOf(target) < 0) out.push(target);
+        return out;
+    }
+
+    function applyPassiveEffect(triggerId, effectId, isInitial, target) {
         const p = G.player;
         const isHighFreq = (triggerId === 'T06' || triggerId === 'T07' || triggerId === 'T08');
         switch (effectId) {
@@ -42,10 +69,8 @@
                 setFeedback(`💚 回复${val}生命`, '#44ff88');
                 break;
             }
-            case 'E04':
-                G.buffs.slowAll = Math.min(0.7, G.buffs.slowAll + 0.07);
-                if (!isInitial) setFeedback(`🐢 怪物减速+7% (累计${Math.round(G.buffs.slowAll * 100)}%)`, '#88ccff');
-                break;
+            // v9.23: E04「移速减慢」删除——和 E14「延缓」、轨迹迟缓三套减速重叠。
+            // G.buffs.slowAll 字段本身保留（冰轨永冻 / 时间膨胀器还在写它）。
             case 'E06':
                 G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1, 100);
                 G.buffs.trailWidth = Math.min(G.buffs.trailWidth + 2, 150);
@@ -101,12 +126,12 @@
                     // v9.19: 冰冻时长 −10%（20→18 / 60→54）
                     const freezeDuration = isHighFreq ? 18 : 54;
                     let frozenCount = 0;
-                    for (const m of G.monsters) {
-                        if (!m.isBoss && Math.random() < 0.65) {
-                            m.frozen = Math.min((m.frozen || 0) + freezeDuration, 180);
-                            spawnParticles(m.x, m.y, '#aaddff', 4);
-                            frozenCount++;
-                        }
+                    // v9.23: 作用对象 = 命中目标 + 周围 90px（原来是全场随机 65%）
+                    for (const m of effectAoeTargets(target)) {
+                        if (m.isBoss) continue;   // BOSS 仍然免疫冰冻
+                        m.frozen = Math.min((m.frozen || 0) + freezeDuration, 180);
+                        spawnParticles(m.x, m.y, '#aaddff', 4);
+                        frozenCount++;
                     }
                     if (frozenCount > 0) {
                         setFeedback(`❄️ 冰冻${frozenCount}只怪物 ${Math.floor(freezeDuration / 60)}秒`, '#aaddff');
@@ -116,18 +141,17 @@
             }
             case 'E14': {
                 // v9.19「延缓」：降低怪物 20% 移动速度 1 秒。
-                // 和 E04（slowAll，全局永久减速）不是一回事——这个是限时的，
-                // 所以挂在怪物自己的 slowTimer 上，在速度公式里乘一次。
+                // 减速是限时的，所以挂在怪物自己的 slowTimer 上，在速度公式里乘一次。
+                // v9.23: 作用对象 = 命中目标 + 周围 90px（原来是全场）。
                 if (!isInitial) {
                     const slowDuration = isHighFreq ? 30 : 60;   // 0.5s / 1s
-                    let slowedCount = 0;
-                    for (const m of G.monsters) {
+                    const targets = effectAoeTargets(target);
+                    for (const m of targets) {
                         m.slowTimer = Math.max(m.slowTimer || 0, slowDuration);
-                        slowedCount++;
                     }
-                    if (slowedCount > 0) {
-                        setFeedback(`⏳ 延缓${slowedCount}只怪物 ${(slowDuration / 60).toFixed(1)}秒`, '#c9b3ff');
-                        spawnParticles(G.core.x, G.core.y, '#c9b3ff', 14);
+                    if (targets.length > 0) {
+                        setFeedback(`⏳ 延缓${targets.length}只怪物 ${(slowDuration / 60).toFixed(1)}秒`, '#c9b3ff');
+                        spawnParticles(targets[0].x, targets[0].y, '#c9b3ff', 14);
                     }
                 }
                 break;
@@ -426,7 +450,7 @@
             color: type.color, isHealer: false, healAmount: 0,
             isSplitter: false, canSplit: false,
             healCooldown: 0, isChild: false, isBoss: true,
-            spawnTimer: type.spawnInterval,
+            spawnTimer: bossSummonInterval(type.spawnInterval),   // v9.23: 召唤速率 +5%
             moveInterval: type.moveInterval, moveTimer: rand(0, 120),
             isMoving: true, alwaysMoving: true,
         };

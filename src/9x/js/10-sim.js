@@ -291,8 +291,9 @@
             G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.player.maxHp * 0.3);
             for (let i = 0; i < 2; i++) {
                 // v9.21: 触发板走加权抽取，和 07-ui.js 的休整节点保持一致
+                // v9.23: 效果板同理（E02/E11 出率 -30%）
                 const isT = Math.random() < 0.5;
-                const card = isT ? randomTrigger() : EFFECTS[Math.floor(Math.random() * EFFECTS.length)];
+                const card = isT ? randomTrigger() : randomEffect();
                 G.hand.push({ ...card, type: isT ? 'trigger' : 'effect' });
             }
             logEvent('rest_node', {});
@@ -400,7 +401,7 @@
             { t:'T06', e:'E06', name:'轨迹升级' },
             { t:'T02', e:'E07', name:'爆轨清场' },
             { t:'T08', e:'E11', name:'自速暴涨' },
-            { t:'T07', e:'E04', name:'移速减慢' },
+            // v9.23: E04「移速减慢」已删除，这一对去掉
         ];
 
         for (const pair of priorityPairs) {

@@ -2,6 +2,12 @@
     // 减速倍数不在这里——沿用 slowTimer 那个 0.8，和 E14「延缓」共用。
     const TRAIL_SLOW_FRAMES = 180;
 
+    // v9.23: 火焰轨迹每秒烧图腾多少血（每帧量）。刻意远低于烧玩家的 0.8/帧——
+    // 塔的基础血只有 2/4/6 点，照玩家那个速率小环 3 帧就没了。
+    // 0.012/帧 ≈ 0.72 血/秒：小环泡满一条火焰（150 帧）掉 1.8 血，中环要两条、
+    // 大环要三条。火焰是「持续压制」而不是「秒拆塔」。
+    const FIRE_TURRET_DMG_PER_FRAME = 0.012;
+
     // ---------- v9.22 障碍物绕行 ----------
     // 老做法是「下一步会撞上 → 朝障碍中心 ±1.2 弧度随机偏一下、速度砍到 0.6」，
     // 两个毛病：
@@ -167,8 +173,8 @@
                     hit = true;
                     if (!b.hit) {
                         b.hit = true;
-                        triggerPassive('T07');
-                        if (m.isElite || m.isBoss) triggerPassive('T03');
+                        triggerPassive('T07', m);
+                        if (m.isElite || m.isBoss) triggerPassive('T03', m);
                         addScore(1);
                     }
                     break;
@@ -260,8 +266,8 @@
                     G.player.hp = Math.max(0, G.player.hp - thornDmg);
                     showFloatingText(G.player.x, G.player.y - G.player.r, '-' + Math.floor(thornDmg), '#ff6644');
                 }
-                if (m.isElite || m.isBoss) triggerPassive('T03');
-                triggerPassive('T06');
+                if (m.isElite || m.isBoss) triggerPassive('T03', m);
+                triggerPassive('T06', m);
                 addScore(1);
             }
 
@@ -343,7 +349,7 @@
                     if (G.fateBuffs.vampHeal > 0) {
                         G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.fateBuffs.vampHeal * 3);
                     }
-                    triggerPassive('T08'); addScore(G.killStreak * 5);
+                    triggerPassive('T08', m); addScore(G.killStreak * 5);
                     G.bossPending = false; G.bossSpawned = false;
                     // v9.22: 卡牌数也吃 dropRateMul；飘字改用实际到手的 bossGot
                     // （原来说的是未受本层精华上限钳制的 10+层，跟真掉的对不上）
@@ -395,7 +401,7 @@
                     G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.fateBuffs.vampHeal);
                 }
                 if (G.killStreak >= 2) {
-                    triggerPassive('T08');
+                    triggerPassive('T08', m);
                     addScore(G.killStreak * 2);
                 }
                 G.monsters.splice(i, 1);
@@ -441,6 +447,14 @@
                     if (G.damageFlows.length > 40) G.damageFlows.shift();
                 }
                 if (G.frame % 5 === 0) spawnParticles(G.player.x, G.player.y, '#ff6622', 1);
+            }
+            // v9.23: 火焰同样烧图腾（判定和烧玩家同一套中点+半径）。
+            // 塔的移除在下一次 update 的图腾循环里（hp<=0 → 碎裂 + 环重新武装）。
+            for (const t of G.turrets) {
+                if (dist(t, { x: fmx, y: fmy }) < t.r + 14) {
+                    t.hp -= FIRE_TURRET_DMG_PER_FRAME;
+                    if (G.frame % 10 === 0) spawnParticles(t.x, t.y, '#ff6622', 1);
+                }
             }
         }
 
@@ -585,12 +599,12 @@
                 G.spawnTimer = Tutorial.tookOver ? Tutorial.spawnInterval : getSpawnInterval();
             }
         }
-        // BOSS 召唤爪牙
+        // BOSS 召唤爪牙（v9.23: 召唤速率 +5%，两个间隔都过一遍 bossSummonInterval）
         for (const m of G.monsters) {
             if (!m.isBoss) continue;
-            m.spawnTimer = (m.spawnTimer || 100) - 1;
+            m.spawnTimer = (m.spawnTimer || bossSummonInterval(100)) - 1;
             if (m.spawnTimer <= 0) {
-                m.spawnTimer = Math.max(50, 150 - G.floor * 2);
+                m.spawnTimer = bossSummonInterval(Math.max(50, 150 - G.floor * 2));
                 const cnt = 1 + Math.floor(G.floor / 15);
                 for (let i = 0; i < cnt; i++) spawnBossMinion(m);
             }
@@ -599,7 +613,7 @@
         if (G.monsters.length === 0 && G.monstersToSpawn === 0 && !G.selectingActive && !G.bossPending
             && !Tutorial.pendingScript()) {
             if (Tutorial.holdFloor()) { /* 教程：等清空字幕播完再进下一步 */ }
-            else if(G.floor%5===0){const n=2+Math.floor(G.floor/10);for(let c=0;c<n;c++)dropBalancedCard();G.floorCardsObtained+=n;logEvent('floor_clear',{floorKills:G.floorKills,cardsRewarded:n,stageEnd:true,snapshot:snapshotStats()});if(G.simMode){simAutoStatChoice();}else{showStatChoice();}}else{logEvent('floor_clear',{floorKills:G.floorKills,stageEnd:false,snapshot:snapshotStats()});advanceFloor();}
+            else if(G.floor%5===0){const n=getFloorClearCards();for(let c=0;c<n;c++)dropBalancedCard();G.floorCardsObtained+=n;logEvent('floor_clear',{floorKills:G.floorKills,cardsRewarded:n,stageEnd:true,snapshot:snapshotStats()});if(G.simMode){simAutoStatChoice();}else{showStatChoice();}}else{logEvent('floor_clear',{floorKills:G.floorKills,stageEnd:false,snapshot:snapshotStats()});advanceFloor();}
         }
 
         updateUI();

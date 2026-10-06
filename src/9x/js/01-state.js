@@ -39,7 +39,7 @@
         sprintTrails: [],         // 冲刺轨迹（更宽更亮）
         enclosureBonus: 0,
         turrets: [],              // v9.17: 图腾改血量制
-        maxTurrets: 15,           // v9.21: 图腾数量上限。满了之后闭环不再出塔（环保持已武装），
+        maxTurrets: 10,           // v9.21: 图腾数量上限（v9.23: 15 → 10）。满了之后闭环不再出塔（环保持已武装），
                                   // 等有位置了自动补上；每层奖励有极小概率 +1（见 TURRET_SLOT_CHOICE）
         turretCapHintFrame: -999, // v9.21: 上次提示「图腾已满」的帧号，用来节流
         turretLoops: {},          // v9.17: 已出过塔的环 key——塔碎后删除，环重新武装

@@ -31,7 +31,6 @@
         // 回退被动效果（与applyPassiveEffect中的isInitial值保持一致）
         if (effectId === 'E01') G.buffs.atkUp -= removed.count * (isHF ? 5 : 12);
         if (effectId === 'E02') G.buffs.multUp -= removed.count * 0.25;
-        if (effectId === 'E04') G.buffs.slowAll = Math.max(0, G.buffs.slowAll - removed.count * 0.07);
         if (effectId === 'E06') { G.buffs.trailDmg -= removed.count * 1;
             G.buffs.trailWidth -= removed.count * 2; }
         if (effectId === 'E11') G.buffs.speedUp -= removed.count * 0.35;
@@ -132,9 +131,9 @@
         if (trigCount < effCount) dropType = 'trigger';
         else if (effCount < trigCount) dropType = 'effect';
         else dropType = Math.random() < 0.5 ? 'trigger' : 'effect';
-        // v9.21: 触发板走加权抽取（T13 只有一半概率），效果板仍是等概率
-        const card = dropType === 'trigger' ? randomTrigger()
-            : EFFECTS[Math.floor(Math.random() * EFFECTS.length)];
+        // v9.21: 触发板走加权抽取（T13 只有一半概率）
+        // v9.23: 效果板也开始加权（E02/E11 出率 -30%）
+        const card = dropType === 'trigger' ? randomTrigger() : randomEffect();
         if (G.hand.length >= 20) {
             const old = G.hand.shift();
             setFeedback(`📥 ${old.emoji}→${card.emoji}${card.label} (替换)`, '#8ab3d0');
@@ -617,9 +616,9 @@
         if (node.isRest) {
             G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.player.maxHp * 0.3);
             for (let i = 0; i < 2; i++) {
-                // v9.21: 触发板走加权抽取
+                // v9.21: 触发板走加权抽取（v9.23: 效果板同样是加权）
                 const isT = Math.random() < 0.5;
-                const card = isT ? randomTrigger() : EFFECTS[Math.floor(Math.random() * EFFECTS.length)];
+                const card = isT ? randomTrigger() : randomEffect();
                 G.hand.push({ ...card, type: isT ? 'trigger' : 'effect' });
             }
             setFeedback('🏕️ 休整：回复30%护盾+2张密文版', '#44cc88');

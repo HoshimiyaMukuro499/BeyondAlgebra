@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const file = process.argv[2] || '密文轨迹demo9.22.html';
+const file = process.argv[2] || '密文轨迹demo9.23.html';
 const html = fs.readFileSync(path.join(ROOT, file), 'utf8');
 const m = html.match(/<script>([\s\S]*?)<\/script>\s*<\/body>/);
 if (!m) throw new Error('没找到 <script>');
@@ -90,6 +90,16 @@ const factory = new Function(
   ' fillSlot: (typeof fillSlot !== "undefined") ? fillSlot : null,' +
   ' selectNode: (typeof selectNode !== "undefined") ? selectNode : null,' +
   ' selectStat: (typeof selectStat !== "undefined") ? selectStat : null,' +
+  // v9.23
+  ' randomEffect: (typeof randomEffect !== "undefined") ? randomEffect : null,' +
+  ' effectAoeTargets: (typeof effectAoeTargets !== "undefined") ? effectAoeTargets : null,' +
+  ' nearestMonsterTo: (typeof nearestMonsterTo !== "undefined") ? nearestMonsterTo : null,' +
+  ' EFFECT_AOE_RADIUS: (typeof EFFECT_AOE_RADIUS !== "undefined") ? EFFECT_AOE_RADIUS : null,' +
+  ' getFloorClearCards: (typeof getFloorClearCards !== "undefined") ? getFloorClearCards : null,' +
+  ' getBossHp: (typeof getBossHp !== "undefined") ? getBossHp : null,' +
+  ' bossSummonInterval: (typeof bossSummonInterval !== "undefined") ? bossSummonInterval : null,' +
+  ' spawnBoss: (typeof spawnBoss !== "undefined") ? spawnBoss : null,' +
+  ' FIRE_TURRET_DMG_PER_FRAME: (typeof FIRE_TURRET_DMG_PER_FRAME !== "undefined") ? FIRE_TURRET_DMG_PER_FRAME : null,' +
   // 已删符号的存在性探针——拿 KILL_BURSTS/MAP_NODES 这类名字去断言「确实删干净了」
   ' deletedSymbols: { KILL_BURSTS: typeof KILL_BURSTS !== "undefined",' +
   '  MAP_NODES: typeof MAP_NODES !== "undefined",' +
@@ -112,6 +122,9 @@ const { EFFECTS, addPassive } = api;
 const HAS_FEEL = !!(EFFECTS && EFFECTS.some(e => e.id === 'E14'));
 const { TRIGGERS: TRIG_, randomTrigger, doCombine, triggerEliminate, TURRET_SLOT_CHOICE } = api;
 const HAS_CAP = !!(TRIG_ && TRIG_.some(t => t.id === 'T13') && randomTrigger && doCombine);
+const { randomEffect, effectAoeTargets, nearestMonsterTo, EFFECT_AOE_RADIUS,
+        getFloorClearCards, getBossHp, bossSummonInterval, spawnBoss, FIRE_TURRET_DMG_PER_FRAME } = api;
+const HAS_V923 = !!(randomEffect && effectAoeTargets && getFloorClearCards && getBossHp && FIRE_TURRET_DMG_PER_FRAME);
 
 let pass = 0, fail = 0;
 const ok = (cond, label, extra = '') => {
@@ -585,9 +598,14 @@ if (!HAS_FEEL) {
   G.monsters = [slowA, slowB];
   addPassive('T06', 'E14');   // isInitial=true 只是登记，不触发（与 E13 一致）
   ok(slowA.slowTimer === 0, 'addPassive 只登记、不立即触发（isInitial 语义与 E13 一致）', `got ${slowA.slowTimer}`);
-  api.triggerPassive('T06');  // T06 是高频触发 → 30 帧
-  ok(slowA.slowTimer >= 29 && slowB.slowTimer >= 29,
-     'triggerPassive 后全场怪物挂上 slowTimer（T06 高频 → 30 帧）', `got ${slowA.slowTimer}`);
+  api.triggerPassive('T06', slowA);  // T06 是高频触发 → 30 帧；A 是这次触发的靶心
+  if (HAS_V923) {
+    ok(slowA.slowTimer >= 29, '靶心挂上 slowTimer（T06 高频 → 30 帧）', `got ${slowA.slowTimer}`);
+    ok(slowB.slowTimer === 0, '200px 外的怪不受影响（v9.23 范围收到 90px）', `got ${slowB.slowTimer}`);
+  } else {
+    ok(slowA.slowTimer >= 29 && slowB.slowTimer >= 29,
+       'triggerPassive 后全场怪物挂上 slowTimer（T06 高频 → 30 帧）', `got ${slowA.slowTimer}`);
+  }
   // 对照：A 带延缓，B 手动清掉，跑同样帧数比位移。
   // 必须先把 selectingActive 清掉——update() 在 !simMode 且 selectingActive 时直接 return，
   // 而 resetGame() 结尾的 initClassSelection() 会把它置真。
@@ -615,14 +633,20 @@ if (!HAS_FEEL) {
 
   // 13f E13 冰冻时长 −10%
   fresh();
-  // E13 对每只怪是 65% 概率独立掷骰。3 只时「一只都没冻住」的概率有 4.3%，
-  // 探针会偶发假失败（实测撞到过一次）。放 8 只把它压到 0.02%。
+  // v9.22 及更早：E13 对每只怪是 65% 概率独立掷骰，3 只时「一只都没冻住」的概率
+  // 有 4.3%，会偶发假失败（实测撞到过一次），所以放 8 只压到 0.02%。
+  // v9.23 起改成「就近靶心 + 90px」的确定性范围，不再有随机性（8 只仍然留着，
+  // 因为它同时要验证「范围外的怪没被冻」）。
   G.monsters = Array.from({ length: 8 }, (_, i) => mkM(120 + i * 60, 300 - (i % 3) * 60));
   addPassive('T06', 'E13');          // 高频 → 18 帧
   api.triggerPassive('T06');         // isInitial 只是登记，真正冻住要走触发
   const fr = G.monsters.map(m => m.frozen).filter(v => v > 0);
   ok(fr.length > 0, 'E13 冻住了怪');
   ok(fr.every(v => v <= 18), '高频触发冰冻 ≤ 18 帧（原 20）', `got ${JSON.stringify(fr)}`);
+  if (HAS_V923) {
+    ok(fr.length < G.monsters.length, '不是全场都冻——90px 外的怪站着不动',
+      `${fr.length}/${G.monsters.length} 只被冻`);
+  }
 
   // 13g 伤害流转动画：火焰烧到玩家 → 冒出一条飞向核心的流
   fresh();
@@ -664,32 +688,33 @@ if (!HAS_FEEL) {
 }
 
 // ---------- 14. v9.21 图腾上限 + T13「消除」 ----------
-section('14. 图腾上限 15 + 稀有扩容 + T13「消除」消耗品');
+section('14. 图腾上限 + 稀有扩容 + T13「消除」消耗品（上限 9.22=15 / 9.23=10）');
 if (!HAS_CAP) {
   console.log('  （跳过：这是 9.20 及更早的产物，没有 T13）');
 } else {
-  // 14a 上限的默认值
+  // 14a 上限的默认值（v9.23: 15 → 10）
   fresh();
-  ok(G.maxTurrets === 15, 'resetGame 后图腾上限 = 15', `got ${G.maxTurrets}`);
+  const CAP = HAS_V923 ? 10 : 15;
+  ok(G.maxTurrets === CAP, `resetGame 后图腾上限 = ${CAP}`, `got ${G.maxTurrets}`);
 
   // 14b 满了就不出塔，而且环「保持武装」——腾出位置后不用重画也能补上
   fresh();
-  for (let i = 0; i < 15; i++) {
+  for (let i = 0; i < CAP; i++) {
     G.turrets.push({ x: 100 + i, y: 100, r: 14, type: 'basic', emoji: 'x', color: '#fff',
       fireRate: 999, fireTimer: 0, damage: 0, range: 1, hp: 99, maxHp: 99,
       tier: '中环', loopKey: 'full' + i, spawnAnim: 0 });
-    G.turretLoops['full' + i] = true;   // 这 15 座各自都占着一个 key
+    G.turretLoops['full' + i] = true;   // 这 CAP 座各自都占着一个 key
   }
   drawLoop(400, 280, 20, 40);
   G.frame = 6; checkTrailLoop();
-  ok(G.turrets.length === 15, '满 15 座时闭环不再出塔', `got ${G.turrets.length}`);
-  ok(Object.keys(G.turretLoops).length === 15, '被挡下的环没有登记 key（保持武装）',
+  ok(G.turrets.length === CAP, `满 ${CAP} 座时闭环不再出塔`, `got ${G.turrets.length}`);
+  ok(Object.keys(G.turretLoops).length === CAP, '被挡下的环没有登记 key（保持武装）',
     `got ${Object.keys(G.turretLoops).length}`);
 
   G.turrets.pop();                       // 腾一个位置
   G.frame = 42;                          // 必须是 6 的倍数，checkTrailLoop 每 6 帧才查一次
   checkTrailLoop();
-  ok(G.turrets.length === 15, '腾出位置后同一个环自动补上（不用重画）', `got ${G.turrets.length}`);
+  ok(G.turrets.length === CAP, '腾出位置后同一个环自动补上（不用重画）', `got ${G.turrets.length}`);
 
   // 14c 扩容选项
   fresh();
@@ -705,12 +730,18 @@ if (!HAS_CAP) {
   ok(TRIG_.filter(t => t.id === 'T12').length === 1, 'TRIGGERS 里 T12 不再重复',
     `got ${TRIG_.filter(t => t.id === 'T12').length} 条`);
 
-  // 14e 权重真的生效：抽 60000 次，T13 的次数应约为普通板的一半
+  // 14e 权重真的生效：抽 60000 次，拿一块「权重 1」的板当标尺比次数。
+  // （不能再用「总次数 - T13 次数」求均值——v9.23 起 T08 也有了权重 0.7。）
   const tally = {};
   for (let i = 0; i < 60000; i++) { const t = randomTrigger(); tally[t.id] = (tally[t.id] || 0) + 1; }
-  const normalAvg = (60000 - (tally.T13 || 0)) / (TRIG_.length - 1);
-  const ratio = (tally.T13 || 0) / normalAvg;
-  ok(ratio > 0.42 && ratio < 0.58, '实测 T13 抽中率 ≈ 普通板的一半', `比值 ${ratio.toFixed(3)}（期望 0.5）`);
+  const unit = tally[TRIG_.find(t => !t.weight).id];   // 权重 1 板的实测次数
+  const r13 = (tally.T13 || 0) / unit;
+  ok(r13 > 0.44 && r13 < 0.56, '实测 T13 抽中率 ≈ 权重 1 板的一半', `比值 ${r13.toFixed(3)}（期望 0.5）`);
+  if (HAS_V923) {
+    const r08 = (tally.T08 || 0) / unit;
+    ok(r08 > 0.64 && r08 < 0.76, '实测 T08 抽中率 ≈ 权重 1 板的 0.7（出率 -30%）',
+      `比值 ${r08.toFixed(3)}（期望 0.7）`);
+  }
 
   // 14f 宣读 T13：全场掉血 + 拆掉最早的一座，且不产生被动
   fresh();
@@ -1063,6 +1094,129 @@ if (HAS_TUT) {
   if (stepText.includes('无法穿越轨迹')) stale2.push('无法穿越轨迹');
   if (stepText.includes('充能靠造成伤害')) stale2.push('充能靠造成伤害');
   ok(stale2.length === 0, '逐层教程字幕里也没有过期描述', stale2.join(', '));
+}
+
+// ---------- 17. v9.23 火焰烧塔 / BOSS 调整 / 范围效果 / 出率 ----------
+section('17. v9.23 火焰烧塔 · BOSS 调整 · E13/E14 范围 · 出率');
+if (!HAS_V923) {
+  console.log('  （跳过：这是 9.22 及更早的产物）');
+} else {
+  // 点火场景：塔在火里，玩家和另一座塔都离得远。
+  // 必须留一只怪，否则 update() 会判定「波次清空」直接进下一层。
+  function fireScene(turretHp, farTurret) {
+    fresh();
+    api.simAutoSelectClass();
+    G.simMode = false; G.gameOver = false; G.paused = false;
+    // resetGame() 不清 G.keys，之前 autoPilot 按下的键留着会把玩家自己拖走
+    G.keys = { w: false, a: false, s: false, d: false, shift: false };
+    const mkT = (x, y, hp, key) => ({ x, y, r: 14, type: 'basic', emoji: 'x', color: '#fff',
+      fireRate: 9999, fireTimer: 0, damage: 0, range: 1, hp, maxHp: hp,
+      tier: '中环', loopKey: key, spawnAnim: 0 });
+    const inFire = mkT(300, 200, turretHp, 'inFire');
+    G.turrets = [inFire];
+    G.turretLoops = { inFire: true };
+    let far = null;
+    if (farTurret) { far = mkT(650, 480, 4, 'far'); G.turrets.push(far); G.turretLoops.far = true; }
+    G.fireTrails = [{ x1: 300, y1: 200, x2: 300, y2: 200, life: 9999 }];
+    G.player.x = 700; G.player.y = 60; G.player.hp = 100;
+    // 冻住一只假怪占着场子（否则 update() 判定「波次清空」直接进下一层）。
+    // 冻住是为了它一步都不走——走了的话它会去打远处那座塔，把 17a 的断言搅了。
+    const dummy = mkM(60, 520);
+    dummy.frozen = 1e9;
+    G.monsters = [dummy];
+    G.monstersToSpawn = 0;
+    return { inFire, far };
+  }
+
+  // 17a 火里的塔每帧掉血，但远不到烧玩家的 0.8/帧
+  let sc = fireScene(4, true);
+  for (let i = 1; i <= 100; i++) { G.frame = i; G.player.x = 700; G.player.y = 60; update(); }
+  const expect = 4 - 100 * FIRE_TURRET_DMG_PER_FRAME;
+  ok(Math.abs(sc.inFire.hp - expect) < 1e-6,
+    `100 帧火焰烧掉 ${(100 * FIRE_TURRET_DMG_PER_FRAME).toFixed(2)} 血（0.012/帧）`,
+    `got ${sc.inFire.hp.toFixed(3)}，期望 ${expect.toFixed(3)}`);
+  ok(sc.inFire.hp > 0, '100 帧还烧不穿一座中环（4 血）', `got ${sc.inFire.hp.toFixed(2)}`);
+  ok(sc.far && sc.far.hp === 4, '火外的塔一点血没掉', `got ${sc.far && sc.far.hp}`);
+  ok(FIRE_TURRET_DMG_PER_FRAME < 0.8 / 10, '烧塔速率远低于烧玩家的 0.8/帧',
+    `got ${FIRE_TURRET_DMG_PER_FRAME}`);
+
+  // 17b 泡久了会碎，而且同一个环重新武装
+  sc = fireScene(2, false);
+  for (let i = 1; i <= 300; i++) { G.frame = i; G.player.x = 700; G.player.y = 60; update(); }
+  ok(G.turrets.length === 0, '小环（2 血）泡在火里 300 帧后碎裂', `剩 ${G.turrets.length} 座`);
+  ok(!G.turretLoops.inFire, '碎裂后环 key 被删掉（重新武装）',
+    `got ${JSON.stringify(G.turretLoops)}`);
+
+  // 17c BOSS 血量 −10%
+  fresh();
+  const bossAt = (f) => { G.floor = f; return getBossHp(); };
+  ok(bossAt(10) === 90000, '第 10 层 BOSS 血量 10 万 → 9 万', `got ${bossAt(10)}`);
+  ok(bossAt(20) === 153000, '第 20 层 17 万 → 15.3 万', `got ${bossAt(20)}`);
+  // Math.floor 会截掉浮点尾巴（0.9×2.89×10 万 = 260099.999…），差 1 属于正常
+  ok(Math.abs(bossAt(30) - 260100) <= 1, '第 30 层 28.9 万 → ≈26.01 万', `got ${bossAt(30)}`);
+
+  // 17d BOSS 召唤爪牙速率 +5%（间隔 ×1/1.05）
+  ok(bossSummonInterval(100) === 95, 'bossSummonInterval(100) = 95', `got ${bossSummonInterval(100)}`);
+  ok(bossSummonInterval(150) === 143, 'bossSummonInterval(150) = 143', `got ${bossSummonInterval(150)}`);
+  ok(bossSummonInterval(50) === 48, 'bossSummonInterval(50) = 48', `got ${bossSummonInterval(50)}`);
+  fresh();
+  G.floor = 1;
+  spawnBoss();
+  const bs = G.monsters.find(x => x.isBoss);
+  ok(bs && bs.spawnTimer === 95, 'BOSS 首次召唤间隔 100 → 95 帧', `got ${bs && bs.spawnTimer}`);
+  if (bs) {
+    // 跑满 95 帧刚好触发第一次召唤（初始 95 → 第 95 帧归零并重置）。
+    // 多跑一帧就会被再减一次，读到的就不是重置值了。
+    for (let i = 0; i < 95; i++) { G.frame = 100 + i; update(); }
+    const want = bossSummonInterval(Math.max(50, 150 - G.floor * 2));
+    ok(bs.spawnTimer === want,
+      `召唤后重置到 max(50, 150-层数×2)/1.05 = ${want}`, `got ${bs.spawnTimer}`);
+    ok(bs.spawnTimer < Math.max(50, 150 - G.floor * 2), '确实比原来的间隔短（速率更高）',
+      `${bs.spawnTimer} vs ${Math.max(50, 150 - G.floor * 2)}`);
+  }
+
+  // 17e 清层奖励卡数：前期 ×1.1、第 30 层起 ×0.9
+  fresh();
+  const cards = (f) => { G.floor = f; return getFloorClearCards(); };
+  ok(cards(5) === 2, '第 5 层 2 张（2×1.1 取整）', `got ${cards(5)}`);
+  ok(cards(10) === 3, '第 10 层 3 张（3×1.1）', `got ${cards(10)}`);
+  ok(cards(29) === 4, '第 29 层 4 张（4×1.1，仍在前期）', `got ${cards(29)}`);
+  ok(cards(30) === 5, '第 30 层 5 张（5×0.9 取整，拐点切到后期）', `got ${cards(30)}`);
+  ok(cards(100) === 11, '第 100 层 11 张（12×0.9）', `got ${cards(100)}`);
+
+  // 17f E13/E14 的作用范围 = 命中目标 + 90px
+  fresh();
+  const t0 = mkM(300, 300);
+  const near = mkM(300, 300 + EFFECT_AOE_RADIUS - 20);
+  const farM = mkM(300, 300 + EFFECT_AOE_RADIUS + 60);
+  G.monsters = [t0, near, farM];
+  ok(EFFECT_AOE_RADIUS === 90, '范围半径 = 90px', `got ${EFFECT_AOE_RADIUS}`);
+  const tgt = effectAoeTargets(t0);
+  ok(tgt.indexOf(t0) >= 0, '靶心自己在范围内');
+  ok(tgt.indexOf(near) >= 0, '90px 内的怪被带上');
+  ok(tgt.indexOf(farM) < 0, '90px 外的怪不受影响');
+  const tgt2 = effectAoeTargets(null);   // 无目标 → 就近兜底
+  ok(tgt2.indexOf(t0) >= 0 && tgt2.indexOf(near) >= 0, '没传目标时就近取玩家最近的怪当靶心');
+  G.monsters = [];
+  ok(effectAoeTargets(null).length === 0, '场上没怪时返回空数组（不崩）');
+
+  // 17g E04 删除 + E02/E11 出率 −30%
+  ok(!EFFECTS.some(e => e.id === 'E04'), 'EFFECTS 里没有 E04「移速减慢」了');
+  ok(EFFECTS.some(e => e.id === 'E02' && e.weight === 0.7), 'E02「连环击」权重 0.7');
+  ok(EFFECTS.some(e => e.id === 'E11' && e.weight === 0.7), 'E11「自速暴涨」权重 0.7');
+  ok((TRIG_.find(t => t.id === 'T08') || {}).weight === 0.7, 'T08「连环击杀」权重 0.7');
+  const etal = {};
+  for (let i = 0; i < 60000; i++) { const e = randomEffect(); etal[e.id] = (etal[e.id] || 0) + 1; }
+  const eUnit = etal[EFFECTS.find(e => !e.weight).id];
+  const r02 = etal.E02 / eUnit, r11 = etal.E11 / eUnit;
+  ok(r02 > 0.64 && r02 < 0.76, '实测 E02 出率 ≈ 权重 1 板的 0.7', `比值 ${r02.toFixed(3)}`);
+  ok(r11 > 0.64 && r11 < 0.76, '实测 E11 出率 ≈ 权重 1 板的 0.7', `比值 ${r11.toFixed(3)}`);
+
+  // 17h 图鉴/教程字幕不再提 E04，图腾上限写的是 10
+  const codexAll = CODEX_PAGES ? CODEX_PAGES.flatMap(p => p.lines).join('\n') : '';
+  ok(!codexAll.includes('E04'), '机制图鉴里不再列 E04');
+  ok(codexAll.includes('上限 10 座'), '机制图鉴里的图腾上限写的是 10 座');
+  ok(codexAll.includes('90px'), '机制图鉴里写了 E13/E14 的 90px 范围');
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);
