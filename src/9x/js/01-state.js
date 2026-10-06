@@ -1,6 +1,8 @@
     // ---------- 游戏状态 ----------
     const G = {
-        player: { x: 390, y: 280, r: 14, hp: 100, maxHp: 100, speed: 2.8, atk: 10, mult: 1.0, shootCooldown: 0 },
+        // v9.22: player.mult 删除——只被 resetGame() 写入，从没有任何读取点
+        // （对局记录里的「倍」是 snapshotStats() 用 1 + G.buffs.multUp 现算的）。
+        player: { x: 390, y: 280, r: 14, hp: 100, maxHp: 100, speed: 2.8, atk: 10, shootCooldown: 0 },
         core: { x: 390, y: 280, r: 22, hp: 100, maxHp: 100 },
         bullets: [], monsters: [], trails: [], particles: [],
         hand: [], triggerSlot: null, effectSlot: null,
@@ -13,15 +15,19 @@
         // 与 autoShoot() 里的 p.shootCooldown 是两道独立闸门，两处都得改才生效。
         frame: 0, gameOver: false, fireRate: 40, fireCounter: 0, target: null,
         killCount: 0, killStreak: 0, score: 0, maxCombo: 0, lastKillFrame: 0, difficulty: 1,
-        playerSlowTimer: 0, playerSlowAmount: 0, handTriggerCount: 0, handEffectCount: 0,
-        vacuumActive: false, vacuumTimer: 0, selectingActive: false, selectionCards: [],
+        handTriggerCount: 0, handEffectCount: 0,
+        selectingActive: false, selectionCards: [],
         bossPending: false, bossSpawned: false, floatingTexts: [], debug: false,
         fireTrails: [], damageFlows: [],   // v9.19: 火焰伤害「玩家→核心」的转移动画
+        // v9.22: 终结技不再靠「造成伤害」充能，改为固定时间回复。
+        // 回满一槽需要 ULT_BASE_FRAMES / (1 + 层数/50) 帧，见 05-update.js 的 getUltimateChargeFrames()。
+        // ultimateChargeMult 保留下来当「充能速度」乘数（命运·超载 ×2 / 奥术学者 ×1.5 / 第 40 层 ×1.5），
+        // 乘的是速率而不是总量——这样那三处奖励的文案仍然成立。
         ultimateGauge: 0, ultimateMax: 100, ultimateChargeMult: 1.0,
         ultimateActive: false, ultimateTimer: 0, screenFlash: 0, notifications: [], chainCooldown: 0,
         paused: false, maxSlots: 4, hazardZones: [], hazardTimer: 0,
         fateBuffs: { trailDmgMul: 1, bulletDmgMul: 1, speedMul: 1, dropRateMul: 1, monsterCountMul: 1, vampHeal: 0, atkMul: 1, damageTakenMul: 1 },
-        lastKillBurst: 0, fateChoosing: false, fateOptions: [],
+        fateChoosing: false, fateOptions: [],
         playerClass: null, essence: 0, relics: [], relicBuffs: {},
         terrain: [], trailLifeBonus: 0, extraBullets: 0, essenceBonus: 0,
         merchantStock: [], shopSoldOut: [], mapChoices: [],

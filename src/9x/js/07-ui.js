@@ -536,60 +536,9 @@
         updateUI();
     }
 
-    // ---------- 波间选择与真空 ----------
-    function showCardSelection() {
-        if (G.selectingActive) return;
-        G.selectingActive = true;
-        G.selectionCards = [];
-        const allCards = [];
-        TRIGGERS.forEach(t => allCards.push({ ...t, type: 'trigger' }));
-        EFFECTS.forEach(e => allCards.push({ ...e, type: 'effect' }));
-        for (let i = allCards.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [allCards[i], allCards[j]] = [allCards[j], allCards[i]];
-        }
-        G.selectionCards = allCards.slice(0, 3);
-
-        const overlay = document.getElementById('selectionOverlay');
-        const row = document.getElementById('selectionRow');
-        if (!overlay || !row) return;
-
-        row.innerHTML = G.selectionCards.map((c, i) =>
-            `<div class="selection-card ${c.type === 'trigger' ? 'sel-trigger' : 'sel-effect'}" data-idx="${i}">
-                <span class="s-emoji">${c.emoji}</span>
-                <span class="s-label">${c.label}</span>
-                <span class="s-type">${c.type === 'trigger' ? '触发板' : '效果板'}</span>
-            </div>`
-        ).join('');
-
-        overlay.classList.add('active');
-
-        row.querySelectorAll('.selection-card').forEach(el => {
-            el.addEventListener('mousedown', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                const idx = parseInt(this.dataset.idx);
-                selectCard(idx);
-            });
-        });
-    }
-
-    function selectCard(index) {
-        const card = G.selectionCards[index];
-        if (!card) return;
-        G.hand.push({ ...card });
-        G.selectingActive = false;
-        G.selectionCards = [];
-
-        const overlay = document.getElementById('selectionOverlay');
-        if (overlay) overlay.classList.remove('active');
-
-        setFeedback(`✅ 获得密文版 ${card.emoji} ${card.label}`, '#6b8');
-        addScore(15);
-        // v9.6: 选完卡→可视化地图（每层都有选择！）
-        showNodeMap();
-        updateUI();
-    }
+    // ---------- 波间选择 ----------
+    // v9.22: showCardSelection() / selectCard() 已删除——v9.10 起波间三选一
+    // 改成了属性提升（showStatChoice），这两个函数没有调用点，是遗留的密文版三选一。
 
     // ---------- v9.2 命运抉择 ----------
     function showFateChoice() {
@@ -641,31 +590,9 @@
         updateUI();
     }
 
-    function startVacuum() {
-        G.vacuumActive = true;
-        G.vacuumTimer = 300;
-        const bar = document.getElementById('vacuumBar');
-        if (bar) bar.classList.add('active');
-        updateVacuumUI();
-    }
-
-    function skipVacuum() {
-        G.vacuumActive = false;
-        G.vacuumTimer = 0;
-        const bar = document.getElementById('vacuumBar');
-        if (bar) bar.classList.remove('active');
-        advanceFloor();
-    }
-
-    function updateVacuumUI() {
-        if (G.simMode) return;
-        const label = document.getElementById('vacuumLabel');
-        const fill = document.getElementById('vacuumFill');
-        if (!label || !fill) return;
-        const sec = Math.ceil(G.vacuumTimer / 60);
-        label.textContent = `⏳ 整顿 ${sec}s`;
-        fill.style.width = (G.vacuumTimer / 300 * 100) + '%';
-    }
+    // v9.22: 真空期三件套（startVacuum / skipVacuum / updateVacuumUI）已删除。
+    // startVacuum() 从来没有调用点，于是 G.vacuumActive 恒为 false，
+    // 这一段连同 05-update.js 的倒计时、body.html 的 #vacuumBar 和它的 CSS 都是死的。
 
     function advanceFloor() {
         G.floor++;

@@ -127,14 +127,7 @@
             resetGame();
         });
     }
-    const skipBtn = document.getElementById('skipBtn');
-    if (skipBtn) {
-        skipBtn.addEventListener('mousedown', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            skipVacuum();
-        });
-    }
+    // v9.22: skipBtn（跳过真空期）的绑定已删除，见 07-ui.js 的说明。
     // v9.6: 暂停工作台按钮
     const pwCombineBtn = document.getElementById('pwCombineBtn');
     if (pwCombineBtn) {

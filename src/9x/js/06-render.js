@@ -422,15 +422,7 @@
                 ctx.stroke();
                 ctx.setLineDash([]);
             }
-            if (m.isSlow) {
-                ctx.strokeStyle = '#bb88dd';
-                ctx.lineWidth = 2;
-                ctx.setLineDash([2, 4]);
-                ctx.beginPath();
-                ctx.arc(m.x, m.y, m.r + 10, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.setLineDash([]);
-            }
+            // v9.22: m.isSlow 的紫色光环已删——没有任何怪物类型定义过 isSlow。
             if (m === G.target) {
                 ctx.strokeStyle = '#ffdd44';
                 ctx.lineWidth = 2;
@@ -618,7 +610,10 @@
             ctx.fillStyle = 'rgba(255,255,200,0.7)';
             ctx.font = '9px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(ratio >= 1 ? '⚡ 就绪 [Q]' : `⚡ ${Math.floor(ratio * 100)}%`, w / 2, gY - 4);
+            // v9.22: 充能改成固定时间回复之后，百分比不再有信息量（每一层都一样快），
+            // 改显示「还要几秒」——玩家能据此决定是现在进场还是先遛一会儿。
+            const ultLeft = (1 - ratio) * getUltimateChargeFrames() / 60;
+            ctx.fillText(ratio >= 1 ? '⚡ 就绪 [Q]' : `⚡ ${ultLeft.toFixed(1)}s`, w / 2, gY - 4);
         }
 
         drawTutorial();

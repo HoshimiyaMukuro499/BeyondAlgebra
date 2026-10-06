@@ -1,3 +1,67 @@
+    // v9.22: 怪物踩到轨迹后挂多少帧迟缓（3 秒 @60fps）。
+    // 减速倍数不在这里——沿用 slowTimer 那个 0.8，和 E14「延缓」共用。
+    const TRAIL_SLOW_FRAMES = 180;
+
+    // ---------- v9.22 障碍物绕行 ----------
+    // 老做法是「下一步会撞上 → 朝障碍中心 ±1.2 弧度随机偏一下、速度砍到 0.6」，
+    // 两个毛病：
+    //   1. 偏角的符号是随机的，有一半概率把怪推进障碍里，尤其障碍密集时；
+    //   2. 偏角是相对「怪 → 障碍中心」算的，怪一旦贴住障碍，朝目标的方向就被
+    //      完全忽略，于是它贴着障碍原地打转——就是「走进障碍后卡住」。
+    // 改成切向绕行：贴住障碍时沿圆的切线走，两条切线里挑与「怪 → 目标」夹角
+    // 更小的那条，于是怪总是从更近的一侧滑过去。再掺一点朝目标的分量，
+    // 免得它贴着障碍磨蹭不往前走。
+    // 把陷进障碍里的实体沿法线顶到圆面上。玩家碰撞用的也是这套（见 update 开头），
+    // 两边的余量保持一致，免得同一堵墙对玩家和怪物表现不一样。
+    function pushOutOfTerrain(m, pad) {
+        for (const t of G.terrain) {
+            const R = t.r + pad;
+            let dx = m.x - t.x, dy = m.y - t.y;
+            let d = Math.hypot(dx, dy);
+            if (d >= R) continue;
+            if (d < 1e-6) { dx = 1; dy = 0; d = 1; }   // 正好压在圆心上
+            m.x = t.x + dx / d * R;
+            m.y = t.y + dy / d * R;
+        }
+    }
+
+    function steerAroundTerrain(m, mx, my, target, spd) {
+        const PAD = m.r + 2;
+
+        // 先把自己从任何已经陷进去的障碍里顶出来。障碍会随楼层重建，
+        // 怪也可能被别的怪挤进去——不先做这一步，后面的切线判断没有意义。
+        pushOutOfTerrain(m, PAD);
+
+        // 挑「下一步陷得最深」的那个障碍来处理。逐个处理会互相覆盖方向，
+        // 只挑一个反而更稳。
+        const nx = m.x + mx, ny = m.y + my;
+        let worst = null, worstPen = 0;
+        for (const t of G.terrain) {
+            const pen = (t.r + PAD) - Math.hypot(nx - t.x, ny - t.y);
+            if (pen > worstPen) { worstPen = pen; worst = t; }
+        }
+        if (!worst) return [mx, my];
+
+        // 法线（怪 → 障碍外）与两条切线
+        let dx = m.x - worst.x, dy = m.y - worst.y;
+        let d = Math.hypot(dx, dy);
+        if (d < 1e-6) { dx = 1; dy = 0; d = 1; }
+        const nxn = dx / d, nyn = dy / d;
+        const t1x = -nyn, t1y = nxn;
+
+        // 挑和目标方向同侧的那条切线
+        let gx = target.x - m.x, gy = target.y - m.y;
+        const gl = Math.hypot(gx, gy) || 1e-6;
+        gx /= gl; gy /= gl;
+        const side = (t1x * gx + t1y * gy) >= 0 ? 1 : -1;
+
+        // 切线 + 一点朝目标的分量，最后归一化回正常速度
+        let ox = t1x * side + gx * 0.45;
+        let oy = t1y * side + gy * 0.45;
+        const ol = Math.hypot(ox, oy) || 1e-6;
+        return [ox / ol * spd, oy / ol * spd];
+    }
+
     // ---------- 更新 ----------
     function update() {
         if (G.gameOver) return;
@@ -14,11 +78,9 @@
 
         const p = G.player;
 
-        let playerSpeedMult = G.buffs.speedUp * G.fateBuffs.speedMul;
-        if (G.playerSlowTimer > 0) {
-            G.playerSlowTimer--;
-            playerSpeedMult *= (1 - G.playerSlowAmount * 0.3);
-        }
+        // v9.22: 玩家减速（playerSlowTimer / playerSlowAmount）整块删除——
+        // 唯一写入点是 m.isSlow，而没有任何怪物类型定义过这个字段，恒为 false。
+        const playerSpeedMult = G.buffs.speedUp * G.fateBuffs.speedMul;
         const speed = p.speed * playerSpeedMult;
 
         let dx = 0,
@@ -95,8 +157,7 @@
                     m.stunned = Math.max(m.stunned || 0, 18);
                     spawnParticles(b.x, b.y, '#ff8844', 5);
                     showFloatingText(m.x, m.y - m.r, '-' + Math.floor(bulletDmg), '#ff8844');
-                    // v9.1: 终极技能充能
-                    G.ultimateGauge = Math.min(G.ultimateMax, G.ultimateGauge + b.damage * 0.05 * G.ultimateChargeMult);
+                    // v9.22: 子弹不再给终极技充能——改成固定时间回复，见 04-trail.js
                     // v9.1: 荆棘词缀反弹
                     if (m.affixes && m.affixes.includes('thorns')) {
                         const thornDmg = bulletDmg * (0.08 + G.floor * 0.002);
@@ -135,38 +196,20 @@
                 const dCore = dist(m, G.core);
                 const target = (nT && nT.d < dCore) ? nT.t : G.core;
                 const angle = angleTo(m, target);
-                // v9.19: E14 延缓只在速度公式里乘一次（不像 slowAll 那样在生成时也乘）
+                // v9.19: slowTimer 只在速度公式里乘一次（不像 slowAll 那样在生成时也乘）。
+                // v9.22: slowTimer 现在有两个来源——E14「延缓」和踩到轨迹——两者共用
+                // 同一个字段和同一个 0.8，取的是更长的那个持续时间。
                 const spd = m.speed * (1 - G.buffs.slowAll) * (m.slowTimer > 0 ? 0.8 : 1) * 1.33;
                 let mx = Math.cos(angle) * spd;
                 let my = Math.sin(angle) * spd;
-                const nx = m.x + mx, ny = m.y + my;
-                // v9.7: 轨迹阻挡——怪物无法穿过轨迹！
-                let trailBlocked = false;
-                const allTrails = [...G.trails, ...G.sprintTrails];
-                for (const t of allTrails) {
-                    const tmx = (t.x1 + t.x2) / 2, tmy = (t.y1 + t.y2) / 2;
-                    const tw = (getTrailWidth() + 4) * (TRAIL_STYLES[t.trailType]?.widthMul || 1);
-                    if (dist({ x: nx, y: ny }, { x: tmx, y: tmy }) < m.r + tw) {
-                        const ta = angleTo(m, { x: tmx, y: tmy });
-                        const bypassAngle = ta + (Math.random() < 0.5 ? 1 : -1) * 1.5;
-                        mx = Math.cos(bypassAngle) * spd * 0.5;
-                        my = Math.sin(bypassAngle) * spd * 0.5;
-                        trailBlocked = true; break;
-                    }
-                }
-                // v9.4: 地形障碍碰撞
-                if (!trailBlocked) {
-                    for (const t of G.terrain) {
-                        if (dist({ x: nx, y: ny }, t) < m.r + t.r) {
-                            const ta = angleTo(m, t);
-                            const bypassAngle = ta + (Math.random() < 0.5 ? 1 : -1) * 1.2;
-                            mx = Math.cos(bypassAngle) * spd * 0.6;
-                            my = Math.sin(bypassAngle) * spd * 0.6; break;
-                        }
-                    }
-                }
+                // v9.22: 轨迹不再阻挡怪物——接触轨迹改为挂 3 秒迟缓（见下面的接触块）。
+                // v9.4: 地形障碍绕行
+                [mx, my] = steerAroundTerrain(m, mx, my, target, spd);
                 m.vx_prev = mx; m.vy_prev = my;
                 m.x += mx; m.y += my;
+                // 绕开的是「最挡路」的那一个，切线走法可能蹭进旁边的障碍——
+                // 移动之后再兜一次底，保证任何一帧结束时怪都不在障碍内部。
+                pushOutOfTerrain(m, m.r + 2);
 
                 // v9.1: 灼烧怪火轨
                 if (m.isScorcher) {
@@ -182,37 +225,44 @@
                 }
             }
 
+            // ---------- v9.22 轨迹接触：迟缓 + 伤害 ----------
+            // 轨迹不再阻挡怪物，改成「踩上去就迟缓 3 秒」。判定只做一次，
+            // 迟钝缓和伤害共用同一个 onTrail。
+            let onTrail = false, isSprintHit = false;
+            const allTrails = [...G.trails, ...G.sprintTrails];
+            for (const t of allTrails) {
+                const tmx = (t.x1 + t.x2) / 2, tmy = (t.y1 + t.y2) / 2;
+                if (dist(m, { x: tmx, y: tmy }) < getTrailWidth() + m.r + 10) {
+                    onTrail = true;
+                    if (t.isSprint) isSprintHit = true;
+                    break;
+                }
+            }
+            // 迟缓没有冷却：踩着就一直续 3 秒，离开 3 秒后才恢复。
+            // 和 E14「延缓」共用 slowTimer，所以两者叠加时取更长的那个，
+            // 减速倍数仍是同一个 0.8——本来就是「之前定义过的效果」。
+            // 虚灵也吃迟缓（它只免疫伤害），「接触到轨迹的怪物」没有例外。
+            if (onTrail) m.slowTimer = Math.max(m.slowTimer || 0, TRAIL_SLOW_FRAMES);
+
             // v9.7: 轨迹伤害（虚灵免疫）+ 冲刺轨迹双倍伤害
-            if (m.trailDamageCooldown <= 0 && !m.isWraith) {
-                let onTrail = false; let isSprintHit = false;
-                const allTrails = [...G.trails, ...G.sprintTrails];
-                for (const t of allTrails) {
-                    const tmx = (t.x1 + t.x2) / 2, tmy = (t.y1 + t.y2) / 2;
-                    if (dist(m, { x: tmx, y: tmy }) < getTrailWidth() + m.r + 10) {
-                        onTrail = true;
-                        if (t.isSprint) isSprintHit = true;
-                        break;
-                    }
-                }
-                if (onTrail) {
-                    let td = getTrailDamage();
-                    if (isSprintHit) td *= 2.5; // v9.7: 冲刺轨迹伤害×2.5
-                    m.hp -= td;
-                    m.trailDamageCooldown = isSprintHit ? 8 : 15;
-                    showFloatingText(m.x, m.y - m.r, '-' + Math.floor(td), isSprintHit ? '#ffaa00' : '#ffaa44');
-                    // v9.1: 终极技能充能 + 荆棘词缀 + T03
-                    G.ultimateGauge = Math.min(G.ultimateMax, G.ultimateGauge + td * 0.05 * G.ultimateChargeMult);
-                    if (m.affixes && m.affixes.includes('thorns')) {
-                        const thornDmg = td * (0.08 + G.floor * 0.002);
-                        G.player.hp = Math.max(0, G.player.hp - thornDmg);
-                        showFloatingText(G.player.x, G.player.y - G.player.r, '-' + Math.floor(thornDmg), '#ff6644');
-                    }
-                    if (m.isElite || m.isBoss) triggerPassive('T03');
-                    triggerPassive('T06');
-                    addScore(1);
-                }
-            } else {
+            if (m.trailDamageCooldown > 0) {
                 m.trailDamageCooldown--;
+            } else if (onTrail && !m.isWraith) {
+                let td = getTrailDamage();
+                if (isSprintHit) td *= 2.5; // v9.7: 冲刺轨迹伤害×2.5
+                m.hp -= td;
+                m.trailDamageCooldown = isSprintHit ? 8 : 15;
+                showFloatingText(m.x, m.y - m.r, '-' + Math.floor(td), isSprintHit ? '#ffaa00' : '#ffaa44');
+                // v9.22: 轨迹伤害不再给终极技充能（改固定时间回复）
+                // v9.1: 荆棘词缀 + T03
+                if (m.affixes && m.affixes.includes('thorns')) {
+                    const thornDmg = td * (0.08 + G.floor * 0.002);
+                    G.player.hp = Math.max(0, G.player.hp - thornDmg);
+                    showFloatingText(G.player.x, G.player.y - G.player.r, '-' + Math.floor(thornDmg), '#ff6644');
+                }
+                if (m.isElite || m.isBoss) triggerPassive('T03');
+                triggerPassive('T06');
+                addScore(1);
             }
 
             // v9.17: 打「图腾与核心中更近的那一个」。图腾直接掉血（不经过核心护盾），
@@ -264,11 +314,6 @@
                             m.hp -= G.relicBuffs.thornsDmg;
                             showFloatingText(m.x, m.y - m.r, '↩' + G.relicBuffs.thornsDmg, '#ffaa44');
                         }
-                        if (m.isSlow) {
-                            G.playerSlowTimer = 60;
-                            G.playerSlowAmount = Math.min(G.playerSlowAmount + m.slowAmount * 0.1, 0.6);
-                            setFeedback(`🐌 被减速！`, '#bb88dd');
-                        }
                         if (G.core.hp <= 0) {
                             G.core.hp = 0;
                             G.gameOver = true;
@@ -284,8 +329,8 @@
                 if (m.isBoss) {
                     spawnParticles(m.x, m.y, '#ff2266', 40);
                     spawnParticles(m.x, m.y, '#ffaa44', 25);
-                    // v9.15: 先记击杀再计分——爆发判定读的是 G.killStreak，
-                    // 反过来的话第 25 杀发生时连杀数还是 24，冲击波要等到第 26 杀才响。
+                    // v9.15: 先记击杀再计分——下面的加分读的是 G.killStreak。
+                    // （v9.22: 连杀爆发已删，但 T08「连环击杀」和 连杀数×分 都还在读它。）
                     registerKill();
                     addScore(m.scoreValue || 300);
                     // v9.4: BOSS掉落精华和遗物
@@ -293,16 +338,19 @@
                     // 触顶时飘的是实际到手数，飘 0 就干脆不飘，免得写「💎+0」。
                     const bossGot = addCombatEssence(10 + G.floor);
                     if (bossGot > 0) showFloatingText(m.x, m.y - m.r - 10, '💎+' + bossGot, '#c0a0ff');
-                    if (Math.random() < 0.3 && G.relics.length < 8) dropRelic();
+                    // v9.22: dropRateMul 真的接上了（丰收 ×2 / 贪婪圣杯 ×3）
+                    if (Math.random() < 0.3 * (G.fateBuffs.dropRateMul || 1) && G.relics.length < 8) dropRelic();
                     if (G.fateBuffs.vampHeal > 0) {
                         G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.fateBuffs.vampHeal * 3);
                     }
                     triggerPassive('T08'); addScore(G.killStreak * 5);
                     G.bossPending = false; G.bossSpawned = false;
-                    const drops = 2 + Math.floor(Math.random() * 2);
+                    // v9.22: 卡牌数也吃 dropRateMul；飘字改用实际到手的 bossGot
+                    // （原来说的是未受本层精华上限钳制的 10+层，跟真掉的对不上）
+                    const drops = Math.round((2 + Math.floor(Math.random() * 2)) * (G.fateBuffs.dropRateMul || 1));
                     for (let d = 0; d < drops; d++) dropBalancedCard();
                     G.monsters.splice(i, 1);
-                    setFeedback(`👑 BOSS击杀！+${Math.floor(m.scoreValue)}分 · 掉落${drops}张牌 · 💎+${10+G.floor}`, '#ff3366');
+                    setFeedback(`👑 BOSS击杀！+${Math.floor(m.scoreValue)}分 · 掉落${drops}张牌 · 💎+${bossGot}`, '#ff3366');
                     continue;
                 }
                 spawnParticles(m.x, m.y, '#ffaa44', 12);
@@ -338,8 +386,8 @@
                 // v9.18: 封顶在本层上限内，飘字用实际到手数
                 const essenceGot = addCombatEssence(essenceDrop);
                 if (essenceGot > 0 && G.frame % 3 === 0) showFloatingText(m.x, m.y - m.r - 8, '💎+' + essenceGot, '#c0a0ff');
-                // v9.4: 遗物掉落（精英/特殊波）
-                if ((m.isElite || G.relicDropWave) && Math.random() < 0.08 && G.relics.length < 8) {
+                // v9.4: 遗物掉落（精英）。v9.22: 删掉 G.relicDropWave——只读不写的死字段。
+                if (m.isElite && Math.random() < 0.08 * (G.fateBuffs.dropRateMul || 1) && G.relics.length < 8) {
                     dropRelic();
                 }
                 // v9.2: 命运吸血
@@ -401,6 +449,13 @@
             const df = G.damageFlows[i];
             df.t++;
             if (df.t >= df.life) G.damageFlows.splice(i, 1);
+        }
+
+        // v9.22: 终极技充能——固定时间回复，不再靠造成伤害（见 04-trail.js 的说明）。
+        // 释放期间不回能，否则连开两发等于白送一倍速率。
+        if (!G.ultimateActive && G.ultimateGauge < G.ultimateMax) {
+            G.ultimateGauge = Math.min(G.ultimateMax,
+                G.ultimateGauge + G.ultimateMax / getUltimateChargeFrames() * G.ultimateChargeMult);
         }
 
         // v9.1: 终极技能计时器
@@ -507,7 +562,7 @@
             // 目标楼层检测（在floor clear逻辑之前）
             if (G.simTargetFloor > 0 && G.floor >= G.simTargetFloor
                 && G.monsters.length === 0 && G.monstersToSpawn === 0
-                && !G.vacuumActive && !G.selectingActive && !G.bossPending) {
+                && !G.selectingActive && !G.bossPending) {
                 G.gameOver = true;
                 logEvent('game_over', { reason: 'target_floor_reached', snapshot: snapshotStats() });
                 handleSimGameOver();
@@ -515,19 +570,8 @@
             }
         }
 
-        // 真空期倒计时
-        if (G.vacuumActive) {
-            G.vacuumTimer--;
-            updateVacuumUI();
-            if (G.vacuumTimer <= 0) {
-                G.vacuumActive = false;
-                if (!G.simMode) {
-                    const bar = document.getElementById('vacuumBar');
-                    if (bar) bar.classList.remove('active');
-                }
-                advanceFloor();
-            }
-        }
+        // v9.22: 真空期倒计时整块删除——startVacuum() 从来没有调用点，
+        // G.vacuumActive 恒为 false，这段和它守着的 UI 都是死代码。
 
         // 生成
         if (G.monstersToSpawn > 0) {
@@ -552,7 +596,7 @@
             }
         }
         // 波次清空 → v9.10: 属性提升选择替代密文版三选一
-        if (G.monsters.length === 0 && G.monstersToSpawn === 0 && !G.vacuumActive && !G.selectingActive && !G.bossPending
+        if (G.monsters.length === 0 && G.monstersToSpawn === 0 && !G.selectingActive && !G.bossPending
             && !Tutorial.pendingScript()) {
             if (Tutorial.holdFloor()) { /* 教程：等清空字幕播完再进下一步 */ }
             else if(G.floor%5===0){const n=2+Math.floor(G.floor/10);for(let c=0;c<n;c++)dropBalancedCard();G.floorCardsObtained+=n;logEvent('floor_clear',{floorKills:G.floorKills,cardsRewarded:n,stageEnd:true,snapshot:snapshotStats()});if(G.simMode){simAutoStatChoice();}else{showStatChoice();}}else{logEvent('floor_clear',{floorKills:G.floorKills,stageEnd:false,snapshot:snapshotStats()});advanceFloor();}

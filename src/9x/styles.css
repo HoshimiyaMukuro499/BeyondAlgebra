@@ -391,48 +391,9 @@
             pointer-events: none;
         }
 
-        .vacuum-bar-wrap {
-            display: none;
-            background: #18212c;
-            border-radius: 12px;
-            padding: 8px 14px;
-            border: 1px solid #2a3d52;
-            align-items: center;
-            gap: 10px;
-        }
-        .vacuum-bar-wrap.active { display: flex; }
-        .vacuum-bar-fill {
-            flex: 1;
-            height: 8px;
-            background: #1a2a3a;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        .vacuum-bar-fill-inner {
-            height: 100%;
-            background: linear-gradient(90deg, #4a9eff, #5ac8fa);
-            border-radius: 10px;
-            transition: width 0.3s;
-        }
-        .vacuum-label {
-            font-size: 11px;
-            color: #b0cef0;
-            white-space: nowrap;
-            min-width: 50px;
-            text-align: center;
-        }
-        .btn-skip {
-            background: #2a4a6a;
-            border: none;
-            color: #eaf2ff;
-            padding: 4px 14px;
-            border-radius: 20px;
-            font-size: 10px;
-            cursor: pointer;
-            font-weight: 600;
-            pointer-events: auto;
-        }
-        .btn-skip:hover { background: #3a5f8a; }
+        /* v9.22: 真空期整块 UI 的样式删除——.vacuum-bar-wrap / .vacuum-bar-fill /
+           .vacuum-bar-fill-inner / .vacuum-label / .btn-skip / .btn-skip:hover。
+           它们对应的 DOM（#vacuumBar 那一块）已经不存在了。 */
 
         /* v9.4 职业选择遮罩 */
         .class-overlay {

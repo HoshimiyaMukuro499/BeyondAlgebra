@@ -199,31 +199,16 @@
         { id: 'bulletStorm',   label: '弹幕风暴', emoji: '🎯', desc: '子弹伤害+100%',              apply() { G.fateBuffs.bulletDmgMul *= 2; }, },
         { id: 'speedDemon',    label: '疾风步',   emoji: '💨', desc: '移速+50%，护盾-30%',        apply() { G.fateBuffs.speedMul *= 1.5; G.player.maxHp = Math.floor(G.player.maxHp * 0.7); G.player.hp = Math.min(G.player.hp, G.player.maxHp); }, },
         { id: 'ironWall',      label: '铁壁',     emoji: '🛡️', desc: '护盾+60%，移速-20%',       apply() { G.player.maxHp = Math.floor(G.player.maxHp * 1.6); G.player.hp = Math.floor(G.player.hp * 1.6); G.fateBuffs.speedMul *= 0.8; }, },
-        { id: 'doubleDrop',    label: '丰收',     emoji: '🍀', desc: '卡牌掉落率×2，怪物+25%',    apply() { G.fateBuffs.dropRateMul *= 2; G.fateBuffs.monsterCountMul *= 1.25; }, },
+        { id: 'doubleDrop',    label: '丰收',     emoji: '🍀', desc: '怪物+25%，掉落率×2',    apply() { G.fateBuffs.dropRateMul *= 2; G.fateBuffs.monsterCountMul *= 1.25; }, },
         { id: 'vampiricAura',  label: '吸血光环', emoji: '🩸', desc: '击杀回血8点',               apply() { G.fateBuffs.vampHeal += 8; }, },
         { id: 'berserker',     label: '狂战士',   emoji: '😡', desc: '攻击+50%，受伤害+40%',      apply() { G.fateBuffs.atkMul *= 1.5; G.fateBuffs.damageTakenMul *= 1.4; }, },
         { id: 'ultraCharge',   label: '超载',     emoji: '⚡', desc: '终极技能充能速度翻倍',      apply() { G.ultimateChargeMult *= 2; }, },
     ];
 
-    // ---------- v9.2 连杀爆发 ----------
-    const KILL_BURSTS = [
-        { threshold: 25,  label: '冲击波', emoji: '💫', color: '#ffdd44',
-          // v9.15: 改按怪物自身血量扣 25%，跟 100 连杀的「全怪 -30%」同一套写法。
-          // 旧写法扣 8×难度：在旧曲线下难度涨到几百万，这一下等于无条件清场；
-          // 加拐点之后又会变得几乎无感。按百分比才在任何楼层都说得通。
-          trigger() { for (const m of G.monsters) { m.stunned = Math.max(m.stunned || 0, 90);
-            m.hp -= m.maxHp * 0.25; } setFeedback('💫 25连杀！冲击波！全场-25%HP', '#ffdd44'); spawnParticles(G.player.x, G.player.y, '#ffdd44', 30); } },
-        { threshold: 50,  label: '过载',   emoji: '⚡', color: '#ff8844',
-          trigger() { G.buffs.atkUp += 15;
-            G.buffs.multUp += 0.3;
-            // v9.19: fireRate 是「几帧一枪」，基数 10→40 后 -2 只剩 5% 效果，
-            // 按同样的比例放大到 -8，连杀奖励的手感才和 9.18 之前一致
-            G.fireRate = Math.max(12, G.fireRate - 8); setFeedback('⚡ 50连杀！过载！攻击+15,倍率+0.3,射速↑', '#ff8844'); spawnParticles(G.player.x, G.player.y, '#ff8844', 40); } },
-        { threshold: 100, label: '天罚',   emoji: '☄️', color: '#ff3366',
-          trigger() { for (const m of G.monsters) { m.hp *= 0.7;
-            m.frozen = Math.max(m.frozen || 0, 60); } G.ultimateGauge = G.ultimateMax;
-            setFeedback('☄️ 100连杀！！天罚降临！全怪-30%HP+冰冻+终极就绪', '#ff3366'); spawnParticles(G.player.x, G.player.y, '#ff3366', 50); } },
-    ];
+    // v9.22: 连杀爆发（25/50/100 连杀的冲击波·过载·天罚）整块删除。
+    // 它和终结技的定位重叠，而且 100 连杀直接把终结技槽灌满这件事，
+    // 在下面的「固定回复速度」之后已经没有意义。
+    // 注意 G.killStreak 本身**没有**删——T08「连环击杀」还在用它（见 05-update.js）。
 
     function getBossHp() {
         // v9.15: 和难度曲线同步加拐点，否则 BOSS 自己按 1.7^(层/10) 一路指数涨，
@@ -356,19 +341,8 @@
 
     // v9.6: 旧波次变体和地图节点已移除，使用上方STAGE_TYPES和NODE_POOL
 
-    // ---------- v9.4 地图节点（保留兼容）----------
-    const MAP_NODES = [
-        { id: 'normal', label: '普通战斗', icon: '⚔️', cls: '', desc: '标准波次',
-          getMods() { return {}; } },
-        { id: 'elite', label: '精英战斗', icon: '⭐', cls: 'node-elite', desc: '精英波+遗物掉落',
-          getMods() { return { forceElite: true, relicDrop: true }; } },
-        { id: 'treasure', label: '宝藏洞穴', icon: '💎', cls: 'node-treasure', desc: '3倍精华+商人',
-          getMods() { return { treasureWave: true, merchantAfter: true }; } },
-        { id: 'danger', label: '危险区域', icon: '💀', cls: 'node-danger', desc: '怪物+50%但遗物必定掉落',
-          getMods() { return { monsterMul: 1.5, relicDrop: true }; } },
-        { id: 'rest', label: '休整营地', icon: '🏕️', cls: 'node-rest', desc: '回复30%护盾+免费抽3牌',
-          getMods() { return { isRest: true }; } },
-    ];
+    // v9.22: MAP_NODES 已删除——v9.6 起节点一律走 NODE_POOL，
+    // 这张表的 getMods() 没有任何调用点，treasure 关卡类型也由它带进死胡同。
 
     // ---------- v9.10 属性提升选项 / v9.18 商店也卖这一套 ----------
     // 原来是写在 07-ui.js 里的，v9.18 起 getMerchantStock() 也要用它，

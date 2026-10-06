@@ -463,7 +463,7 @@
     if (G.simMode) {
         // 关闭所有遮罩层
         ['classOverlay','pauseOverlay','pauseWorkshop','selectionOverlay',
-         'mapOverlay','merchantOverlay','vacuumBar'].forEach(id => {
+         'mapOverlay','merchantOverlay'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.classList.remove('active');
         });

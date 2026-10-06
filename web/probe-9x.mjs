@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const file = process.argv[2] || '密文轨迹demo9.21.html';
+const file = process.argv[2] || '密文轨迹demo9.22.html';
 const html = fs.readFileSync(path.join(ROOT, file), 'utf8');
 const m = html.match(/<script>([\s\S]*?)<\/script>\s*<\/body>/);
 if (!m) throw new Error('没找到 <script>');
@@ -26,10 +26,15 @@ const ctxStub = new Proxy({}, {
 const makeEl = () => ({
   style: {}, dataset: {}, innerHTML: '', textContent: '', value: '', disabled: false,
   width: 780, height: 560, children: [],
+  // showNodeMap() 会写 canvas.parentElement.style.pointerEvents，真 DOM 里它一定存在
+  parentElement: { style: {}, classList: { add: noop, remove: noop } },
   classList: { add: noop, remove: noop, contains: () => false, toggle: noop },
   addEventListener: noop, removeEventListener: noop, appendChild: (c) => c, removeChild: noop,
   insertBefore: noop, remove: noop, setAttribute: noop, getAttribute: () => null,
-  querySelector: () => null, querySelectorAll: () => [], focus: noop, blur: noop, click: noop,
+  // v9.22: 以前这里返回 null，教程一推进到「属性三选一」就崩——
+  // showStatChoice() 会写 overlay.querySelector('h3').textContent。
+  // 返回一个假元素比返回 null 更接近真 DOM（真 DOM 里这些节点是存在的）。
+  querySelector: () => makeEl(), querySelectorAll: () => [], focus: noop, blur: noop, click: noop,
   getContext: () => ctxStub,
   getBoundingClientRect: () => ({ left: 0, top: 0, width: 780, height: 560 }),
 });
@@ -71,7 +76,28 @@ const factory = new Function(
   ' randomTrigger: (typeof randomTrigger !== "undefined") ? randomTrigger : null,' +
   ' doCombine: (typeof doCombine !== "undefined") ? doCombine : null,' +
   ' triggerEliminate: (typeof triggerEliminate !== "undefined") ? triggerEliminate : null,' +
-  ' TURRET_SLOT_CHOICE: (typeof TURRET_SLOT_CHOICE !== "undefined") ? TURRET_SLOT_CHOICE : null };'
+  ' TURRET_SLOT_CHOICE: (typeof TURRET_SLOT_CHOICE !== "undefined") ? TURRET_SLOT_CHOICE : null,' +
+  // v9.22
+  ' combineCards: (typeof combineCards !== "undefined") ? combineCards : null,' +
+  ' activateUltimate: (typeof activateUltimate !== "undefined") ? activateUltimate : null,' +
+  ' Tutorial: (typeof Tutorial !== "undefined") ? Tutorial : null,' +
+  ' TUTORIAL_FLOORS: (typeof TUTORIAL_FLOORS !== "undefined") ? TUTORIAL_FLOORS : null,' +
+  ' CODEX_PAGES: (typeof CODEX_PAGES !== "undefined") ? CODEX_PAGES : null,' +
+  ' TRAIL_SLOW_FRAMES: (typeof TRAIL_SLOW_FRAMES !== "undefined") ? TRAIL_SLOW_FRAMES : null,' +
+  ' getUltimateChargeFrames: (typeof getUltimateChargeFrames !== "undefined") ? getUltimateChargeFrames : null,' +
+  ' ULT_BASE_FRAMES: (typeof ULT_BASE_FRAMES !== "undefined") ? ULT_BASE_FRAMES : null,' +
+  ' drawTutorial: (typeof drawTutorial !== "undefined") ? drawTutorial : null,' +
+  ' fillSlot: (typeof fillSlot !== "undefined") ? fillSlot : null,' +
+  ' selectNode: (typeof selectNode !== "undefined") ? selectNode : null,' +
+  ' selectStat: (typeof selectStat !== "undefined") ? selectStat : null,' +
+  // 已删符号的存在性探针——拿 KILL_BURSTS/MAP_NODES 这类名字去断言「确实删干净了」
+  ' deletedSymbols: { KILL_BURSTS: typeof KILL_BURSTS !== "undefined",' +
+  '  MAP_NODES: typeof MAP_NODES !== "undefined",' +
+  '  startVacuum: typeof startVacuum !== "undefined",' +
+  '  skipVacuum: typeof skipVacuum !== "undefined",' +
+  '  updateVacuumUI: typeof updateVacuumUI !== "undefined",' +
+  '  showCardSelection: typeof showCardSelection !== "undefined",' +
+  '  selectCard: typeof selectCard !== "undefined" } };'
 );
 const api = factory(
   windowStub, documentStub, noop, noop, noop, noop, noop, noop,
@@ -114,6 +140,14 @@ function drawLoop(cx, cy, r, n) {
     const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
     G.trails.push({ x1: x, y1: y, x2: x, y2: y, life: 360, layer: 1, trailType: 'basic' });
   }
+}
+
+// 造一只"站着不动也打不死"的测试怪。字段与 spawnMonster 保持一致，
+// 少一个字段（例如 slowTimer）更新循环就会写出 NaN 位置，断言全被打乱。
+function mkM(x, y) {
+  return { x, y, r: 12, hp: 1e6, maxHp: 1e6, speed: 1, atk: 0, type: 'basic',
+           isBoss: false, isElite: false, isChild: false, frozen: 0, stunned: 0, slowTimer: 0,
+           trailDamageCooldown: 9999, hitCooldown: 0, vx_prev: 0, vy_prev: 0, _fireCounter: 0 };
 }
 
 // ---------- 1. 判环 ----------
@@ -581,7 +615,9 @@ if (!HAS_FEEL) {
 
   // 13f E13 冰冻时长 −10%
   fresh();
-  G.monsters = [mkM(200, 200), mkM(300, 300), mkM(400, 300)];
+  // E13 对每只怪是 65% 概率独立掷骰。3 只时「一只都没冻住」的概率有 4.3%，
+  // 探针会偶发假失败（实测撞到过一次）。放 8 只把它压到 0.02%。
+  G.monsters = Array.from({ length: 8 }, (_, i) => mkM(120 + i * 60, 300 - (i % 3) * 60));
   addPassive('T06', 'E13');          // 高频 → 18 帧
   api.triggerPassive('T06');         // isInitial 只是登记，真正冻住要走触发
   const fr = G.monsters.map(m => m.frozen).filter(v => v > 0);
@@ -727,6 +763,306 @@ if (!HAS_CAP) {
   try { doCombine({ id: 'T13' }, { id: 'E02' }); } catch (e) { threw = e; }
   ok(!threw, '场上无图腾时 T13 不抛异常', threw && threw.message);
   ok(G.turrets.length === 0, '也没有凭空造出塔');
+}
+
+// ---------- 15. v9.22 轨迹迟缓 + 障碍绕行 + 终极技定速 ----------
+const { combineCards, activateUltimate, Tutorial, TUTORIAL_FLOORS, CODEX_PAGES,
+        TRAIL_SLOW_FRAMES, getUltimateChargeFrames, ULT_BASE_FRAMES, deletedSymbols } = api;
+const HAS_922 = !!(TRAIL_SLOW_FRAMES && getUltimateChargeFrames && deletedSymbols);
+
+if (HAS_922) {
+  section('15. v9.22 轨迹迟缓 / 障碍绕行 / 终极技定速 / 死代码清理');
+
+  // 15a 死的那些符号确实没了
+  const stillAlive = Object.keys(deletedSymbols).filter(k => deletedSymbols[k]);
+  ok(stillAlive.length === 0, 'KILL_BURSTS / MAP_NODES / 真空期 / 密文版三选一 全部删干净',
+     `残留: ${stillAlive.join(', ')}`);
+  ok(G.player.mult === undefined, 'G.player.mult 字段已移除');
+
+  // 15b 轨迹不再阻挡：怪踩上去只挂 slowTimer，位置不被推开
+  fresh();
+  G.terrain = [];
+  G.trails = [{ x1: 200, y1: 300, x2: 260, y2: 300, life: 360, layer: 1, trailType: 'basic' }];
+  G.sprintTrails = [];
+  const walker = mkM(230, 300);
+  walker.speed = 0;            // 不移动，只测接触判定
+  G.monsters = [walker];
+  G.monstersToSpawn = 0;
+  const beforeX = walker.x, beforeY = walker.y;
+  update();
+  ok(walker.slowTimer > 0, `踩到轨迹挂上迟缓（${walker.slowTimer} 帧）`, `got ${walker.slowTimer}`);
+  ok(Math.abs(walker.x - beforeX) < 1e-9 && Math.abs(walker.y - beforeY) < 1e-9,
+     '轨迹不再把怪推开（位置零位移）',
+     `Δ=(${(walker.x - beforeX).toFixed(2)}, ${(walker.y - beforeY).toFixed(2)})`);
+  ok(walker.slowTimer === TRAIL_SLOW_FRAMES, `迟缓时长 = TRAIL_SLOW_FRAMES = ${TRAIL_SLOW_FRAMES}（3 秒）`);
+
+  // 15c 迟缓中的怪移速 ×0.8，离开轨迹后 3 秒恢复
+  fresh();
+  G.terrain = []; G.trails = []; G.sprintTrails = [];
+  const slug = mkM(300, 300); slug.slowTimer = TRAIL_SLOW_FRAMES; slug.speed = 3;
+  const fast = mkM(300, 300); fast.slowTimer = 0; fast.speed = 3;
+  G.monsters = [slug, fast]; G.monstersToSpawn = 0;
+  const s0 = { x: slug.x, y: slug.y }, f0 = { x: fast.x, y: fast.y };
+  update();
+  const dS = Math.hypot(slug.x - s0.x, slug.y - s0.y), dF = Math.hypot(fast.x - f0.x, fast.y - f0.y);
+  ok(dF > 0 && Math.abs(dS / dF - 0.8) < 0.05, '轨迹迟缓的减速倍数也是 0.8（与 E14 共用）',
+     `got ${(dS / dF).toFixed(3)}`);
+
+  // 15d 障碍绕行：怪不会停在里面，且最终越过了障碍
+  fresh();
+  G.trails = []; G.sprintTrails = [];
+  // 核心 → 障碍 → 怪，一条直线，旧版会卡在障碍里
+  G.core.x = 120; G.core.y = 280;
+  G.terrain = [{ x: 300, y: 280, r: 45, life: 99999, alpha: 0.4 }];
+  const detour = mkM(620, 280);
+  detour.speed = 3;
+  detour.atk = 0;             // 只测移动，不测伤害
+  G.monsters = [detour];
+  G.monstersToSpawn = 0;
+  let insideFrames = 0, maxInside = 0, maxDev = 0;
+  const d0 = Math.hypot(detour.x - G.core.x, detour.y - G.core.y);
+  for (let i = 0; i < 900; i++) {
+    detour.hp = 1e6;
+    detour.hitCooldown = 9999;
+    update();
+    const pen = 45 - Math.hypot(detour.x - 300, detour.y - 280);   // >0 = 陷在障碍里
+    if (pen > 0.5) { insideFrames++; maxInside = Math.max(maxInside, pen); }
+    // 绕行证据要取**过程中**的最大偏离——怪最终会回到 y≈280（核心就在这条线上），
+    // 拿终点比等于什么都没测。
+    maxDev = Math.max(maxDev, Math.abs(detour.y - 280));
+  }
+  const d1 = Math.hypot(detour.x - G.core.x, detour.y - G.core.y);
+  ok(maxInside < 1.5, '任何一帧都没有陷进障碍内部（余量 ≤ 1.5px）', `最深 ${maxInside.toFixed(2)}px`);
+  ok(insideFrames === 0, '900 帧里零帧处于障碍内部', `inside=${insideFrames}`);
+  ok(d1 < d0 - 100, '怪确实绕过去了（与核心的距离明显缩短）',
+     `${d0.toFixed(0)} → ${d1.toFixed(0)}`);
+  ok(maxDev > 30, '而且是绕行而不是硬穿（过程中 y 最大偏离 > 30px）',
+     `maxDev=${maxDev.toFixed(1)}`);
+
+  // 15e 障碍重建把怪推进墙里时，下一帧会被顶出来
+  fresh();
+  G.trails = []; G.sprintTrails = [];
+  G.terrain = [{ x: 400, y: 300, r: 60, life: 99999, alpha: 0.4 }];
+  const stuck = mkM(400, 300);       // 正好在障碍圆心
+  stuck.speed = 2; stuck.hp = 1e6; stuck.hitCooldown = 9999;
+  G.monsters = [stuck]; G.monstersToSpawn = 0;
+  update();
+  const pen2 = 60 - Math.hypot(stuck.x - 400, stuck.y - 300);
+  ok(pen2 <= 1.0, '压在障碍圆心上的怪被推出去了', `pen=${pen2.toFixed(2)}`);
+
+  // 15f 终极技：固定时间回复，且不靠伤害
+  fresh();
+  G.terrain = []; G.trails = []; G.sprintTrails = [];
+  G.monsters = []; G.monstersToSpawn = 0;
+  G.floor = 1; G.ultimateGauge = 0; G.ultimateChargeMult = 1.0; G.ultimateActive = false;
+  ok(getUltimateChargeFrames() === ULT_BASE_FRAMES / (1 + 1 / 50), '1 层回满帧数 = 1500/(1+1/50)',
+     `got ${getUltimateChargeFrames().toFixed(2)}`);
+  G.floor = 50;
+  ok(Math.abs(getUltimateChargeFrames() - ULT_BASE_FRAMES / 2) < 1e-9, '50 层回满帧数 = 750（12.5 秒）');
+  G.floor = 100;
+  ok(Math.abs(getUltimateChargeFrames() - ULT_BASE_FRAMES / 3) < 1e-9, '100 层回满帧数 = 500（8.3 秒）');
+
+  // 场上零怪物、零伤害，槽照样会涨
+  G.floor = 1; G.ultimateGauge = 0; G.ultimateActive = false;
+  for (let i = 0; i < 300; i++) update();
+  ok(G.ultimateGauge > 0, '零怪物零伤害时终极技槽照样在涨（不再是「造成伤害才充能」）',
+     `gauge=${G.ultimateGauge.toFixed(2)}`);
+  const rate = G.ultimateGauge / 300;
+  const expect = 100 / getUltimateChargeFrames();
+  ok(Math.abs(rate - expect) < 0.02, '充能速率 = ultimateMax / 回满帧数 × 倍率',
+     `got ${rate.toFixed(5)} vs ${expect.toFixed(5)}`);
+
+  // 释放期间不回能
+  G.ultimateGauge = 50; G.ultimateActive = true; G.ultimateTimer = 600;
+  const held = G.ultimateGauge;
+  for (let i = 0; i < 30; i++) update();
+  ok(G.ultimateGauge === held, '释放终极技期间不回能', `got ${G.ultimateGauge} (held ${held})`);
+
+  // 倍率乘在速率上：×2 就是两倍快
+  if (combineCards) {}
+  G.ultimateActive = false;
+  G.ultimateGauge = 0; G.ultimateChargeMult = 2.0;
+  for (let i = 0; i < 100; i++) update();
+  const rateX2 = G.ultimateGauge / 100;
+  ok(Math.abs(rateX2 / rate - 2.0) < 0.05, 'ultimateChargeMult ×2 就是充能速度 ×2（乘在速率上）',
+     `got ${(rateX2 / rate).toFixed(3)}`);
+
+  // 15g 连杀计数还在（只是不再有爆发）
+  fresh();
+  G.terrain = []; G.trails = []; G.sprintTrails = [];
+  G.monsters = []; G.monstersToSpawn = 0;
+  ok('killStreak' in G, 'G.killStreak 字段保留（T08 / 连杀加分还在用它）');
+  ok(G.ultimateChargeMult === 1.0, 'resetGame 后充能倍率回到 1.0');
+}
+
+// ---------- 16. 教程 1–5 层逐层脚本回归 ----------
+const HAS_TUT = !!(Tutorial && TUTORIAL_FLOORS && combineCards && activateUltimate);
+
+if (HAS_TUT) {
+  section('16. 教程 1–5 层逐层脚本回归（无头驱动）');
+
+  // 16a 脚本结构自检：不依赖运行，先把明显的配置错误挖出来
+  const KNOWN_ON = new Set(['enter', 'after', 'move', 'kill', 'slots', 'essence',
+                            'sprint', 'map', 'clear', 'event']);
+  let badOn = [], gateNoFallback = [], dropImbalance = [];
+  for (const f of Object.keys(TUTORIAL_FLOORS)) {
+    const cfg = TUTORIAL_FLOORS[f];
+    cfg.steps.forEach((s, i) => {
+      if (!KNOWN_ON.has(s.on)) badOn.push(`${f}#${i}(${s.on})`);
+      // gate 步骤卡住时靠 fallback 提示 + 超时放行，没 fallback 就只能干等
+      if (s.gate && !s.fallback && s.on !== 'clear') gateNoFallback.push(`${f}#${i}(${s.on})`);
+    });
+    const list = (cfg.drops || []).map(d => d.card).concat(cfg.hand || []);
+    if (list.length) {
+      const t = list.filter(c => c[0] === 'T').length, e = list.filter(c => c[0] === 'E').length;
+      if (Math.abs(t - e) > 1) dropImbalance.push(`${f}(T=${t} E=${e})`);
+    }
+  }
+  ok(badOn.length === 0, '每层的 on: 都是调度器认得的类型', badOn.join(', '));
+  ok(gateNoFallback.length === 0, '每个需要玩家操作的 gate 步骤都有 fallback 提示',
+     gateNoFallback.join(', '));
+  ok(dropImbalance.length === 0, '每层脚本掉落 T/E 平衡（差 ≤ 1）', dropImbalance.join(', '));
+
+  // 16b 真跑：把 simMode 关掉让 Tutorial.tick() 转起来，用 autoPilot 当「玩家」
+  resetGame();
+  api.simAutoSelectClass();               // 清 selectingActive，并 startFloor() 进第 1 层
+  G.simMode = false;                      // Tutorial.tick() / onFloorStart() 都要求它
+  G.gameOver = false; G.paused = false;
+  G.keys = { w: false, a: false, s: false, d: false, shift: false };
+  Tutorial.seen = false; Tutorial.finished = false;
+  G.floor = 1;
+  api.startFloor();
+
+  // 记录每次 show() 的步骤，用来断言「按序、不跳步」
+  const seenSteps = [];
+  const realShow = Tutorial.show.bind(Tutorial);
+  Tutorial.show = function (i) {
+    seenSteps.push({ floor: this.floor, idx: i, on: this.cfg.steps[i].on });
+    return realShow(i);
+  };
+
+  const realAutoFill = Tutorial.autoFill.bind(Tutorial);
+  Tutorial.autoFill = function (ids) {
+    if (process.env.TUTDBG) console.log(`    [dbg] autoFill(${JSON.stringify(ids)}) floor=${this.floor}`);
+    return realAutoFill(ids);
+  };
+  let QPresses = 0, combines = 0, sawSlots = 0;
+  // 脚本里「等怪撞核心」「等围剿成立」这类步骤靠 45 秒超时兜底推进，
+  // 5 层里会有好几次，所以给足 12 分钟游戏时间。
+  const MAXF = 60 * 60 * 12;
+  let frames = 0;
+  for (; frames < MAXF; frames++) {
+    // 当玩家的手：移动 + 冲刺由 autoPilot 负责（simMode 关掉后它不会自己跑）
+    api.autoPilot();
+    // 槽位满了就按空格（gate 步骤会超时 autofill，但填完还得有人按空格）
+    if (G.triggerSlot || G.effectSlot) sawSlots++;
+    // 当玩家的手（二）：点手牌填槽。fillSlot 会 splice 手牌，两张牌要分两次重新找下标。
+    if (!G.paused && !G.selectingActive) {
+      if (!G.triggerSlot) {
+        const i = G.hand.findIndex(c => c.type === 'trigger');
+        if (i >= 0) api.fillSlot(i);
+      }
+      if (!G.effectSlot) {
+        const i = G.hand.findIndex(c => c.type === 'effect');
+        if (i >= 0) api.fillSlot(i);
+      }
+    }
+    // 槽位齐了就按空格（gate 步骤会超时 autofill，但填完还得有人按空格）
+    if (G.triggerSlot && G.effectSlot && !G.paused && !G.selectingActive) {
+      G.combineCooldown = false;          // setTimeout 在探针里是 noop，得手动清
+      combineCards();
+      combines++;
+    }
+    // 充能满了就按 Q（第 5 层的 gate 步骤在等这个）
+    if (G.ultimateGauge >= G.ultimateMax && !G.ultimateActive && !G.paused) {
+      activateUltimate();
+      QPresses++;
+    }
+    // 当玩家的手（三）：节点地图开着就选一条路。第 5 层必须走这一步——
+    // 选完 Tutorial.outroPending 置真，第 6 层才播收尾字幕并 finish()。
+    // 不选的话第 5 层脚本会一直停在那，G.floor 不前进，收尾永远不会来。
+    if (G.mapMode && G.mapChoices.length > 0 && api.selectNode) {
+      // 挑一个非商人/非休整的节点——那两类会弹商店浮层，把流程岔开
+      const ni = G.mapChoices.findIndex(n => !n.isMerchant && !n.isRest);
+      api.selectNode(ni >= 0 ? ni : 0, 'center');
+    } else if (G.selectingActive) {
+      // 属性三选一浮层：真的选一项（走正式入口，别用 simAutoSelectClass——
+      // 那个会顺带 startFloor()，把当前层的教程脚本从头再播一遍）
+      if (G.selectionCards && G.selectionCards.length > 0 && api.selectStat) {
+        api.selectStat(0);
+      } else {
+        api.simAutoSelectClass();     // 开局职业选择
+      }
+    }
+    update();
+    if (process.env.TUTDBG && frames % 2000 === 0) {
+      console.log(`    [dbg] f=${frames} floor=${G.floor} idx=${Tutorial.idx} on=${
+        Tutorial.cfg ? (Tutorial.cfg.steps[Tutorial.idx + 1] || {}).on : '-'} pend=${Tutorial.pendTimer}` +
+        ` text=${!!Tutorial.text} slots=${!!G.triggerSlot}/${!!G.effectSlot} sel=${G.selectingActive}` +
+        ` paused=${G.paused} 怪=${G.monsters.length} 待出=${G.monstersToSpawn} 塔=${G.turrets.length}` +
+        ` kills=${Tutorial.kills} 轨迹=${G.trails.length} 分=${G.score}`);
+    }
+    if (Tutorial.finished) break;
+    if (G.gameOver) break;
+  }
+
+  ok(!G.gameOver, '5 层教程跑完没有 gameOver（核心没被打爆）');
+  ok(Tutorial.finished, `教程在第 6 层之前结束（跑了 ${frames} 帧 ≈ ${(frames / 60).toFixed(0)} 秒）`);
+
+  // 顺序断言：同一层内 idx 必须严格递增 1（不许跳步、不许回退）
+  const byFloor = new Map();
+  for (const s of seenSteps) {
+    if (!byFloor.has(s.floor)) byFloor.set(s.floor, []);
+    byFloor.get(s.floor).push(s.idx);
+  }
+  let outOfOrder = [];
+  const perFloorCount = [];
+  for (const [f, idxs] of [...byFloor.entries()].sort((a, b) => a[0] - b[0])) {
+    perFloorCount.push(`${f}:${idxs.length}步`);
+    for (let i = 1; i < idxs.length; i++) {
+      if (idxs[i] !== idxs[i - 1] + 1) outOfOrder.push(`层${f}: ${idxs[i - 1]}→${idxs[i]}`);
+    }
+  }
+  ok(outOfOrder.length === 0, '每一层的步骤都按 idx 递增 1 播放（没有跳步/回退）',
+     outOfOrder.join(', '));
+  console.log(`     每层播报：${perFloorCount.join(' · ')}`);
+
+  // 每一层的脚本步骤都真的被播到了（教程层 1–5 全覆盖）
+  const covered = [...byFloor.keys()].filter(f => TUTORIAL_FLOORS[f]).sort((a, b) => a - b);
+  ok(covered.join(',') === '1,2,3,4,5', '教程层 1–5 全部被脚本接管过', `covered=${covered.join(',')}`);
+  const shortFloor = [];
+  for (const f of covered) {
+    const expect = TUTORIAL_FLOORS[f].steps.length;
+    const got = byFloor.get(f).length;
+    const hasBanner = TUTORIAL_FLOORS[f].steps[0].kind === 'banner';
+    if (got < expect - (hasBanner ? 1 : 0)) shortFloor.push(`层${f}: ${got}/${expect}`);
+  }
+  ok(shortFloor.length === 0, '每层都播完了全部步骤（banner 不计入播报）', shortFloor.join(', '));
+
+  ok(combines > 0, `教程流程里真的按过空格宣读（${combines} 次）`);
+  ok(QPresses > 0, `教程流程里真的按过 Q（${QPresses} 次）`);
+
+  // 收尾：教程状态正确关闭
+  ok(Tutorial.seen === true, '教程结束后 seen = true（第 6 层起恢复随机）');
+  ok(Tutorial.active === false, '教程结束后 active = false');
+
+  // 16c 图鉴文案不能提到已删的机制
+  const codexText = CODEX_PAGES.flatMap(p => p.lines).join('\n');
+  const stale = [];
+  if (codexText.includes('连杀爆发')) stale.push('连杀爆发');
+  if (codexText.includes('无法穿越轨迹')) stale.push('无法穿越轨迹');
+  if (codexText.includes('靠造成伤害充能')) stale.push('靠造成伤害充能');
+  if (/max\(6, 12 - 楼层/.test(codexText)) stale.push('旧的射击间隔公式');
+  ok(stale.length === 0, '机制图鉴里没有 v9.22 已删机制的过期描述', stale.join(', '));
+
+  // 逐层脚本字幕同样不能提
+  const stepText = Object.values(TUTORIAL_FLOORS)
+    .flatMap(c => c.steps.map(s => s.text || '')).join('\n');
+  const stale2 = [];
+  if (stepText.includes('连杀爆发')) stale2.push('连杀爆发');
+  if (stepText.includes('无法穿越轨迹')) stale2.push('无法穿越轨迹');
+  if (stepText.includes('充能靠造成伤害')) stale2.push('充能靠造成伤害');
+  ok(stale2.length === 0, '逐层教程字幕里也没有过期描述', stale2.join(', '));
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);

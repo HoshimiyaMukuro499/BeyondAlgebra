@@ -81,7 +81,7 @@
                     origin.hp -= chainDmg;
                     spawnParticles(origin.x, origin.y, '#88ccff', 8);
                     showFloatingText(origin.x, origin.y - origin.r, '-' + chainDmg, '#88ccff');
-                    G.ultimateGauge = Math.min(G.ultimateMax, G.ultimateGauge + chainDmg * 0.05 * G.ultimateChargeMult);
+                    // v9.22: 闪电链不再给终极技充能（改固定时间回复）
                     let chained = 0;
                     for (const m of G.monsters) {
                         if (m === origin || chained >= 4) break;
@@ -149,24 +149,16 @@
         // 炮台全都算），整局只增不减，分数被它乘到 ×405。
         // 现在得分就是得分，连杀另有 G.killStreak 负责，且真的会断。
         G.score += Math.floor(amount);
-        // v9.2: 连杀爆发检测（阈值改用真正的连杀数）
-        for (const burst of KILL_BURSTS) {
-            if (G.killStreak >= burst.threshold && G.lastKillBurst < burst.threshold) {
-                burst.trigger();
-                G.lastKillBurst = burst.threshold;
-                showNotification(`${burst.emoji} ${burst.label}！`, burst.color, 180);
-            }
-        }
+        // v9.22: 连杀爆发的检测块整块删除，见 00-data.js 的说明。
         updateUI();
     }
 
     // v9.15: 连杀 = 连续击杀。3 秒没有击杀、或核心挨打就断。
     // 计时用 G.lastKillFrame，在击杀处刷新；这里每帧检查一次。
+    // v9.22: 连杀爆发删掉之后，这个计数器唯一的消费方是 T08「连环击杀」。
     const KILL_STREAK_WINDOW = 180; // 3 秒
     function breakKillStreak() {
-        if (G.killStreak === 0 && G.lastKillBurst === 0) return;
         G.killStreak = 0;
-        G.lastKillBurst = 0; // 断连后爆发阈值重新武装，可以反复触发
     }
     function tickKillStreak() {
         if (G.killStreak > 0 && G.frame - G.lastKillFrame > KILL_STREAK_WINDOW) breakKillStreak();
@@ -187,17 +179,13 @@
         const diff = getDifficultyMultiplier();
         const eliteChance = G.forceEliteWave ? 1.0 : getEliteChance();
 
-        // v9.4: 伏击波从核心附近生成
+        // v9.4: 从画布四边外随机进场（v9.22: 'ambush' 伏击波分支删除——
+        // STAGE_TYPES 和 NODE_POOL 里都没有这个类型，永远走不到）
         let x, y;
         const pad = 30;
         const w = G.canvasWidth || 780;
         const h = G.canvasHeight || 560;
-        if (G.stageType === 'ambush') {
-            const ang = rand(0, Math.PI * 2);
-            const d = rand(120, 200);
-            x = G.core.x + Math.cos(ang) * d;
-            y = G.core.y + Math.sin(ang) * d;
-        } else {
+        {
             const side = randInt(0, 3);
             if (side === 0) { x = rand(-pad, w + pad); y = -pad; }
             else if (side === 1) { x = w + pad; y = rand(-pad, h + pad); }
@@ -285,8 +273,6 @@
             color: isElite ? type.eliteColor : type.color,
             isHealer: type.isHealer || false,
             healAmount: (type.healAmount || 3) * Math.min(diff, 2.5),
-            isSlow: type.isSlow || false,
-            slowAmount: (type.slowAmount || 0.25) + G.floor * 0.005,
             isSplitter: type.isSplitter || false,
             splitCount: type.splitCount || 2,
             canSplit: true,
@@ -353,8 +339,6 @@
             color: isElite ? type.eliteColor : type.color,
             isHealer: type.isHealer || false,
             healAmount: (type.healAmount || 3) * Math.min(diff, 2.5),
-            isSlow: type.isSlow || false,
-            slowAmount: (type.slowAmount || 0.25) + G.floor * 0.005,
             isSplitter: type.isSplitter || false, splitCount: type.splitCount || 2,
             canSplit: true, healCooldown: 0, isChild: false,
             isScorcher: type.isScorcher || false, fireTrailInterval: type.fireTrailInterval || 8,
@@ -403,8 +387,6 @@
                 color: '#88cc66',
                 isHealer: false,
                 healAmount: 0,
-                isSlow: false,
-                slowAmount: 0,
                 isSplitter: false,
                 canSplit: false,
                 healCooldown: 0,
@@ -442,7 +424,7 @@
             scoreValue: type.scoreValue * getDifficultyMultiplier(),
             type: type.id, typeLabel: type.label, typeEmoji: type.emoji,
             color: type.color, isHealer: false, healAmount: 0,
-            isSlow: false, slowAmount: 0, isSplitter: false, canSplit: false,
+            isSplitter: false, canSplit: false,
             healCooldown: 0, isChild: false, isBoss: true,
             spawnTimer: type.spawnInterval,
             moveInterval: type.moveInterval, moveTimer: rand(0, 120),
@@ -471,7 +453,7 @@
             scoreValue: type.scoreValue * 0.3,
             type: type.id, typeLabel: '爪牙', typeEmoji: type.emoji,
             color: type.color, isHealer: false, healAmount: 0,
-            isSlow: false, slowAmount: 0, isSplitter: false, canSplit: false,
+            isSplitter: false, canSplit: false,
             healCooldown: 0, isChild: true, isBoss: false,
             moveInterval: 40, moveTimer: rand(0, 80), isMoving: true,
             alwaysMoving: Math.random() < 0.5,

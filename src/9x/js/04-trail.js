@@ -221,6 +221,18 @@
         return best ? { t: best, d: bd } : null;
     }
 
+    // ---------- v9.22 终极技充能：固定时间回复 ----------
+    // 回满一槽需要 25 秒 × 60 / (1 + 层数/50) 帧：
+    // 第 1 层 24.5s · 第 10 层 20.8s · 第 30 层 15.6s · 第 50 层 12.5s · 第 100 层 8.3s。
+    // 改之前是「造成伤害充能」，于是充能速度完全取决于玩家那一下的输出量——
+    // 打不动的怪充不动，秒杀的怪一帧回满，同一个 40 层在不同局里能差出十几倍。
+    // ultimateChargeMult 仍在（超载 ×2 / 奥术学者 ×1.5 / 第 40 层 ×1.5），
+    // 但它现在乘的是**速率**，所以那三处的「充能速度 ×N」文案依然准确。
+    const ULT_BASE_FRAMES = 25 * 60;
+    function getUltimateChargeFrames() {
+        return ULT_BASE_FRAMES / (1 + G.floor / 50);
+    }
+
     // ---------- v9.1 终极技能 ----------
     function activateUltimate() {
         G.ultimateGauge = 0;
