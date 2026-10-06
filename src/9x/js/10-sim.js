@@ -212,6 +212,10 @@
                 score = 55;
             } else if (c.id === 'speedUp') {
                 score = 40;
+            } else if (c.id === 'turretHp') {
+                score = 45;   // v9.18 新增两项也给它打分，否则跑分永远抽不到、等于没覆盖
+            } else if (c.id === 'trailWidth') {
+                score = 30;
             }
             score += Math.random() * 8;
             if (score > bestScore) { bestScore = score; best = c; }
@@ -313,9 +317,13 @@
             simDoBuy(relic);
         }
 
-        const essencePack = stock.find(s => s.type === 'essence');
-        if (essencePack && !G.shopSoldOut.includes(essencePack.idx) && G.essence >= essencePack.cost) {
-            simDoBuy(essencePack);
+        // v9.18: 原「精华提取」已删。改成优先买便宜的增益，模拟器不该囤着精华
+        // 空手离店——那会让「每层精华上限」在跑分里表现为「精华一路堆到爆」，
+        // 掩盖掉这次经济改动的真实效果。
+        const buffs = stock.filter(s => s.type === 'buff' && !G.shopSoldOut.includes(s.idx))
+            .sort((a, b) => a.cost - b.cost);
+        for (const buff of buffs) {
+            if (G.essence >= buff.cost) simDoBuy(buff);
         }
 
         G.selectingActive = false;
@@ -335,8 +343,8 @@
             item.relic.apply(G);
         } else if (item.type === 'heal') {
             G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.player.maxHp * 0.4);
-        } else if (item.type === 'essence') {
-            G.essence += 15 + Math.floor(Math.random() * 11);
+        } else if (item.type === 'buff') {
+            item.buff.apply();   // v9.18: 与每层奖励同一套加成
         }
     }
 

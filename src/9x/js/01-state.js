@@ -32,6 +32,9 @@
         turrets: [],              // v9.17: 图腾改血量制，无数量上限
         turretLoops: {},          // v9.17: 已出过塔的环 key——塔碎后删除，环重新武装
         turretHpBonus: 0,         // v9.17: 图腾血量加成（商店/每层奖励购买）
+        // v9.18 经济（essence 本身在上面的 playerClass 行里）
+        essenceThisFloor: 0,      // 本层战斗已掉落的精华，用来卡 getEssenceCap()
+        shopRefreshCount: 1,      // 本次进店已刷新次数——刷新费 = 2 × 层 × 次数
         mapMode: false,           // 地图模式（canvas绘制地图）
         canvasWidth: 780, canvasHeight: 560,
         // v9.10: 对局记录
@@ -148,6 +151,25 @@
         const base = Math.min(0.05 + 0.04 * Math.log2(G.floor + 1), 0.35);
         const st = STAGE_TYPES.find(s => s.id === G.stageType);
         return Math.min(base * (st && st.eliteMult ? st.eliteMult : 1), 0.8);
+    }
+
+    // ---------- v9.18 每层精华硬上限 ----------
+    // 战斗掉落的精华按层封顶，商店买卖不算（那不是战斗收入）。
+    // 拐点沿用难度的 DIFF_KNEE=30：30 层前每层最多 8，之后放宽到 16。
+    // 目的见 EDITION：后期一局掉几百精华，商店点什么都不心疼，加成失去分量。
+    const ESSENCE_CAP = 8;
+    const ESSENCE_CAP_LATE = 16;
+    function getEssenceCap() {
+        return G.floor >= DIFF_KNEE ? ESSENCE_CAP_LATE : ESSENCE_CAP;
+    }
+
+    // 返回**实际到手**的数量——调用方要用它来飘字，不能拿请求值去飘。
+    function addCombatEssence(n) {
+        const room = Math.max(0, getEssenceCap() - (G.essenceThisFloor || 0));
+        const got = Math.min(n, room);
+        G.essenceThisFloor = (G.essenceThisFloor || 0) + got;
+        G.essence += got;
+        return got;
     }
 
     function getSpawnInterval() {

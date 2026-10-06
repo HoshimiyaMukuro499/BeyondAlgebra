@@ -281,8 +281,10 @@
                     registerKill();
                     addScore(m.scoreValue || 300);
                     // v9.4: BOSS掉落精华和遗物
-                    G.essence += 10 + G.floor;
-                    showFloatingText(m.x, m.y - m.r - 10, '💎+' + (10 + G.floor), '#c0a0ff');
+                    // v9.18: 走 addCombatEssence——BOSS 精华同样计入本层上限（用户要求「每层 ≤ 8」）。
+                    // 触顶时飘的是实际到手数，飘 0 就干脆不飘，免得写「💎+0」。
+                    const bossGot = addCombatEssence(10 + G.floor);
+                    if (bossGot > 0) showFloatingText(m.x, m.y - m.r - 10, '💎+' + bossGot, '#c0a0ff');
                     if (Math.random() < 0.3 && G.relics.length < 8) dropRelic();
                     if (G.fateBuffs.vampHeal > 0) {
                         G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.fateBuffs.vampHeal * 3);
@@ -325,8 +327,9 @@
                 if (m.isElite) essenceDrop += 3;
                 essenceDrop += (G.relicBuffs.essencePerKill || 0);
                 essenceDrop += Math.floor((G.essenceBonus || 0) * essenceDrop);
-                G.essence += essenceDrop;
-                if (essenceDrop > 0 && G.frame % 3 === 0) showFloatingText(m.x, m.y - m.r - 8, '💎+' + essenceDrop, '#c0a0ff');
+                // v9.18: 封顶在本层上限内，飘字用实际到手数
+                const essenceGot = addCombatEssence(essenceDrop);
+                if (essenceGot > 0 && G.frame % 3 === 0) showFloatingText(m.x, m.y - m.r - 8, '💎+' + essenceGot, '#c0a0ff');
                 // v9.4: 遗物掉落（精英/特殊波）
                 if ((m.isElite || G.relicDropWave) && Math.random() < 0.08 && G.relics.length < 8) {
                     dropRelic();

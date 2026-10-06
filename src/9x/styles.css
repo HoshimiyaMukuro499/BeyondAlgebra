@@ -568,6 +568,30 @@
         .merchant-item .mi-label { font-size: 12px; color: #e0e8f0; font-weight: 600; }
         .merchant-item .mi-cost { font-size: 11px; color: #f5c542; margin-top: 2px; }
         .merchant-item .mi-desc { font-size: 9px; color: #8aa3c0; margin-top: 4px; }
+        /* v9.18 刷新按钮 */
+        .merchant-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            pointer-events: auto;
+        }
+        .btn-refresh-shop {
+            background: #2a3f57;
+            border: 1px solid #f5c542;
+            color: #f5c542;
+            padding: 6px 18px;
+            border-radius: 20px;
+            font-size: 12px;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+        .btn-refresh-shop:hover { background: #35506e; }
+        .btn-refresh-shop.disabled {
+            opacity: 0.4;
+            border-color: #5a7a9a;
+            color: #8aa3c0;
+            cursor: default;
+        }
         .btn-leave-shop {
             background: transparent;
             border: 1px solid #5a7a9a;

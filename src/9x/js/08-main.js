@@ -32,6 +32,7 @@
         G.batchQueue = []; G.activeTrailType = 'basic'; G.chairBonuses = 0;
         G.pathHistory = []; G.sprintTrails = []; G.mapMode = false;
         G.turrets = []; G.turretLoops = {}; G.turretHpBonus = 0;
+        G.essenceThisFloor = 0; G.shopRefreshCount = 1;   // v9.18 经济
         G._revived = false; G.fireRate = 10; G.stage = 1;
         G.gameLog = []; G.floorKills = 0; G.floorCardsObtained = 0;
         Tutorial.reset();

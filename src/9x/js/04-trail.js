@@ -6,6 +6,7 @@
             G.monstersToSpawn = Tutorial.spawnQueue.length;
             G.spawnTimer = Tutorial.spawnInterval || getSpawnInterval();
             G.floorKills = 0; G.floorCardsObtained = 0;
+            G.essenceThisFloor = 0;   // v9.18: 每层战斗精华上限从这里重新起算
             G.bossPending = false; G.bossSpawned = false;
             addScore(G.floor * 5);
             logEvent('floor_start', { stageType: 'tutorial', monsterCount: G.monstersToSpawn, isBoss: false, snapshot: snapshotStats() });
@@ -17,6 +18,7 @@
         const count = getMonsterCount();
         G.monstersToSpawn = count; G.spawnTimer = 0;
         G.floorKills = 0; G.floorCardsObtained = 0;
+        G.essenceThisFloor = 0;   // v9.18: 每层战斗精华上限从这里重新起算
         logEvent('floor_start', { stageType: G.stageType, monsterCount: count, isBoss, snapshot: snapshotStats() });
         G.bossPending = false; G.bossSpawned = false;
         const diff = getDifficultyMultiplier();

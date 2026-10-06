@@ -182,25 +182,53 @@
         ).join('');
     }
 
-    // ---------- v9.4 商人系统 ----------
+    // ---------- v9.4 商人系统 / v9.18 经济重做 ----------
+    // 刷新费 = 2 × 层 × 已刷新次数（次数从 1 起），见 getShopRefreshCost()。
+    function getShopRefreshCost() {
+        return 2 * G.floor * (G.shopRefreshCount || 1);
+    }
+
     function showMerchant() {
         G.merchantStock = getMerchantStock();
         G.shopSoldOut = [];
+        G.shopRefreshCount = 1;          // v9.18: 每次进店都从 1 开始算刷新费
         const overlay = document.getElementById('merchantOverlay');
         const row = document.getElementById('merchantRow');
-        const essenceEl = document.getElementById('merchantEssence');
         if (!overlay || !row) return;
         G.selectingActive = true;
-        essenceEl.textContent = '💎 精华: ' + G.essence;
+        overlay.classList.add('active');
+        renderMerchant();
+        document.getElementById('leaveShopBtn').onmousedown = function(e) {
+            e.preventDefault(); e.stopPropagation();
+            leaveShop();
+        };
+        const refreshBtn = document.getElementById('shopRefreshBtn');
+        if (refreshBtn) refreshBtn.onmousedown = function(e) {
+            e.preventDefault(); e.stopPropagation();
+            refreshMerchantStock();
+        };
+    }
+
+    // 商店浮层的整体重绘：精华行 + 商品行 + 刷新按钮文案。买完、刷新后都走这里，
+    // 免得「买完一处更新一处」漏掉某个显示。
+    function renderMerchant() {
+        const row = document.getElementById('merchantRow');
+        const essenceEl = document.getElementById('merchantEssence');
+        if (!row) return;
+        if (essenceEl) {
+            // 本层战斗已掉落的精华也显示出来——玩家能直接看到「这层还能刷多少」
+            const cap = getEssenceCap();
+            const got = Math.round(G.essenceThisFloor || 0);
+            essenceEl.textContent = '💎 精华: ' + G.essence + '　（本层战斗掉落 ' + got + '/' + cap + '）';
+        }
         row.innerHTML = G.merchantStock.map((item, i) =>
-            `<div class="merchant-item" data-idx="${i}">
+            `<div class="merchant-item${G.shopSoldOut.includes(i) ? ' sold-out' : ''}" data-idx="${i}">
                 <span class="mi-emoji">${item.emoji}</span>
                 <span class="mi-label">${item.label}</span>
                 <span class="mi-cost">💎 ${item.cost}</span>
                 <span class="mi-desc">${item.desc}</span>
             </div>`
         ).join('');
-        overlay.classList.add('active');
         row.querySelectorAll('.merchant-item').forEach(el => {
             el.addEventListener('mousedown', function(e) {
                 e.preventDefault(); e.stopPropagation();
@@ -208,10 +236,27 @@
                 buyMerchantItem(idx);
             });
         });
-        document.getElementById('leaveShopBtn').onmousedown = function(e) {
-            e.preventDefault(); e.stopPropagation();
-            leaveShop();
-        };
+        const refreshBtn = document.getElementById('shopRefreshBtn');
+        if (refreshBtn) {
+            const cost = getShopRefreshCost();
+            refreshBtn.textContent = '🔄 刷新商品（💎 ' + cost + '）';
+            refreshBtn.disabled = G.essence < cost;
+            refreshBtn.classList.toggle('disabled', G.essence < cost);
+        }
+    }
+
+    // v9.18: 花钱换一批货。已购买的格子清空重来——整批重抽，不做「补位」。
+    function refreshMerchantStock() {
+        const cost = getShopRefreshCost();
+        if (G.essence < cost) { setFeedback('💎 精华不足，刷新需要 ' + cost + '！', '#ff6644'); return; }
+        G.essence -= cost;
+        G.shopRefreshCount = (G.shopRefreshCount || 1) + 1;
+        G.merchantStock = getMerchantStock();
+        G.shopSoldOut = [];
+        logEvent('shop_refresh', { cost, count: G.shopRefreshCount, floor: G.floor });
+        setFeedback('🔄 商店已刷新（花费 ' + cost + ' 精华）', '#ffb347');
+        renderMerchant();
+        updateUI();
     }
 
     function buyMerchantItem(idx) {
@@ -232,20 +277,11 @@
         } else if (item.type === 'heal') {
             G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.player.maxHp * 0.4);
             setFeedback(`💚 治疗40%护盾 (剩余精华:${G.essence})`, '#44ff88');
-        } else if (item.type === 'essence') {
-            const bonus = 15 + Math.floor(Math.random() * 11);
-            G.essence += bonus;
-            setFeedback(`💎 获得${bonus}精华 (剩余精华:${G.essence})`, '#c0a0ff');
+        } else if (item.type === 'buff') {
+            // v9.18: 与每层奖励同一套加成，apply() 自带 setFeedback
+            item.buff.apply();
         }
-        // Update UI
-        const essenceEl = document.getElementById('merchantEssence');
-        if (essenceEl) essenceEl.textContent = '💎 精华: ' + G.essence;
-        const row = document.getElementById('merchantRow');
-        if (row) {
-            row.querySelectorAll('.merchant-item').forEach((el, i) => {
-                if (G.shopSoldOut.includes(i)) el.classList.add('sold-out');
-            });
-        }
+        renderMerchant();
         updateUI();
     }
 
@@ -440,20 +476,7 @@
     }
 
     // ---------- v9.10 属性提升选择（替代密文版三选一）----------
-    const STAT_CHOICES = [
-        { id: 'atkUp',     label: '攻击强化', emoji: '⚔️', desc: '永久攻击+3',        color: '#ff8844',
-          apply() { G.buffs.atkUp = Math.min(G.buffs.atkUp + 3, 2000); setFeedback('⚔️ 攻击力永久+3！', '#ff8844'); } },
-        { id: 'heal',      label: '生命复苏', emoji: '💚', desc: '回复30%最大护盾',   color: '#44ff88',
-          apply() { const healAmt = Math.floor(G.player.maxHp * 0.3); G.player.hp = Math.min(G.player.maxHp, G.player.hp + healAmt);
-                    spawnParticles(G.player.x, G.player.y, '#44ff88', 12);
-                    showFloatingText(G.player.x, G.player.y - G.player.r, '+' + healAmt, '#44ff88');
-                    setFeedback('💚 回复' + healAmt + '护盾！', '#44ff88'); } },
-        { id: 'speedUp',   label: '疾步',     emoji: '💨', desc: '永久移速+5%',       color: '#88ddff',
-          apply() { G.buffs.speedUp += 0.05; setFeedback('💨 移速永久+5%！', '#88ddff'); } },
-        { id: 'trailUp',   label: '轨迹淬炼', emoji: '🐾', desc: '永久轨迹伤害+1',    color: '#ffdd44',
-          apply() { G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1, 400); setFeedback('🐾 轨迹伤害永久+1！', '#ffdd44'); } },
-    ];
-
+    // v9.18: STAT_CHOICES 挪到 00-data.js——商店也开始卖同一套，见那里的注释。
     function showStatChoice() {
         if (G.selectingActive) return;
         G.selectingActive = true;

@@ -1,11 +1,11 @@
-// 9.17 无头验证：把构建产物塞进一个假 DOM 里跑，直接断言图腾系统的行为。
+// 9.17–9.18 无头验证：把构建产物塞进一个假 DOM 里跑，直接断言图腾系统与经济系统的行为。
 // 用完即删（不属于仓库内容）。
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const file = process.argv[2] || '密文轨迹demo9.17.html';
+const file = process.argv[2] || '密文轨迹demo9.18.html';
 const html = fs.readFileSync(path.join(ROOT, file), 'utf8');
 const m = html.match(/<script>([\s\S]*?)<\/script>\s*<\/body>/);
 if (!m) throw new Error('没找到 <script>');
@@ -51,7 +51,16 @@ const factory = new Function(
   'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'navigator', 'localStorage', 'alert',
   // typeof 守卫：同一个探针也要能跑在 9.16 上做对照
   src + '\n;return { G, resetGame, update, draw, checkTrailLoop, dist, autoShoot, addTrail, autoPilot, startFloor, simAutoSelectClass,' +
-  ' nearestTurret: (typeof nearestTurret !== "undefined") ? nearestTurret : null };'
+  ' nearestTurret: (typeof nearestTurret !== "undefined") ? nearestTurret : null,' +
+  // v9.18 经济——带 typeof 守卫，同一个探针仍能跑在 9.17 上做对照
+  ' getEssenceCap: (typeof getEssenceCap !== "undefined") ? getEssenceCap : null,' +
+  ' addCombatEssence: (typeof addCombatEssence !== "undefined") ? addCombatEssence : null,' +
+  ' getMerchantStock: (typeof getMerchantStock !== "undefined") ? getMerchantStock : null,' +
+  ' getShopRefreshCost: (typeof getShopRefreshCost !== "undefined") ? getShopRefreshCost : null,' +
+  ' refreshMerchantStock: (typeof refreshMerchantStock !== "undefined") ? refreshMerchantStock : null,' +
+  ' STAT_CHOICES: (typeof STAT_CHOICES !== "undefined") ? STAT_CHOICES : null,' +
+  ' advanceFloor: (typeof advanceFloor !== "undefined") ? advanceFloor : null,' +
+  ' simDoBuy: (typeof simDoBuy !== "undefined") ? simDoBuy : null };'
 );
 const api = factory(
   windowStub, documentStub, noop, noop, noop, noop, noop, noop,
@@ -59,6 +68,9 @@ const api = factory(
 );
 
 const { G, resetGame, update, draw, checkTrailLoop, nearestTurret } = api;
+const { getEssenceCap, addCombatEssence, getMerchantStock, getShopRefreshCost,
+        refreshMerchantStock, STAT_CHOICES, advanceFloor } = api;
+const HAS_ECON = !!(getEssenceCap && addCombatEssence && getMerchantStock);
 
 let pass = 0, fail = 0;
 const ok = (cond, label, extra = '') => {
@@ -341,6 +353,134 @@ section('11. 帧成本');
   const mt = time('50 怪 + 30 塔', () => { G.monsters = mk(50); G.turrets = mkT(30); });
   console.log(`    → 30 座塔的索敌开销 ${(mt - m50).toFixed(2)} ms/frame（16.67ms 预算的 ${(((mt - m50) / 16.67) * 100).toFixed(1)}%）`);
   ok(mt < 16.67, '50 怪 + 30 塔仍在 60fps 预算内', `${mt.toFixed(2)} ms`);
+}
+
+// ---------- 12. v9.18 经济 ----------
+section('12. 每层精华硬上限 + 商店经济');
+if (!HAS_ECON) {
+  console.log('  （跳过：这是 9.17 及更早的产物，没有经济系统）');
+} else {
+  // 12a 上限随层数分档
+  fresh();
+  G.floor = 1;  const capEarly = getEssenceCap();
+  G.floor = 29; const cap29 = getEssenceCap();
+  G.floor = 30; const cap30 = getEssenceCap();
+  G.floor = 99; const capLate = getEssenceCap();
+  ok(capEarly === 8, '1 层上限 = 8', `got ${capEarly}`);
+  ok(cap29 === 8, '29 层上限仍是 8', `got ${cap29}`);
+  ok(cap30 === 16, '30 层（DIFF_KNEE）放宽到 16', `got ${cap30}`);
+  ok(capLate === 16, '99 层上限 = 16', `got ${capLate}`);
+
+  // 12b 单层内加满就不再给
+  fresh();
+  G.floor = 1; G.essenceThisFloor = 0; G.essence = 0;
+  const g1 = addCombatEssence(100);
+  const g2 = addCombatEssence(100);
+  ok(g1 === 8, '一次请求 100，实际到手 8', `got ${g1}`);
+  ok(g2 === 0, '触顶后再要就是 0', `got ${g2}`);
+  ok(G.essence === 8, '精华只加了 8', `got ${G.essence}`);
+  ok(G.essenceThisFloor === 8, 'essenceThisFloor 记到 8', `got ${G.essenceThisFloor}`);
+
+  // 12c 分档切点：本层已拿 8，升到 30 层后还能再拿 8
+  fresh();
+  G.floor = 29; G.essenceThisFloor = 0; G.essence = 0;
+  addCombatEssence(100);              // 拿满 8
+  G.floor = 30;
+  const g3 = addCombatEssence(100);
+  ok(g3 === 8, '30 层起上限抬到 16，已拿的 8 之外还能再拿 8', `got ${g3}`);
+
+  // 12d 跨层重置：startFloor() 要清零
+  fresh();
+  G.essenceThisFloor = 7;
+  api.startFloor();
+  ok(G.essenceThisFloor === 0, 'startFloor() 把本层计数清零', `got ${G.essenceThisFloor}`);
+
+  // 12e 真正打一层：BOSS 掉 10+层 也不该突破上限
+  fresh();
+  G.floor = 20;                       // BOSS 掉落 = 30，远超上限
+  G.essenceThisFloor = 0; G.essence = 0;
+  api.startFloor();
+  for (let f = 0; f < 4000; f++) { G.frame = f; update(); if (G.gameOver) break; }
+  ok(G.essence <= 8, `真跑一层（第20层，BOSS 在场）战斗精华没超过 8`, `got ${G.essence}`);
+
+  // 12f 商品表：没有精华提取，构成符合设计
+  fresh();
+  G.floor = 8;
+  const stock = getMerchantStock();
+  ok(!stock.some(s => s.type === 'essence'), '商品表里没有 essence（精华提取已删）');
+  const nCard = stock.filter(s => s.type === 'card').length;
+  const nBuff = stock.filter(s => s.type === 'buff').length;
+  const nRelic = stock.filter(s => s.type === 'relic').length;
+  const nHeal = stock.filter(s => s.type === 'heal').length;
+  ok(nCard === 2, '密文版 2 张（4→2）', `got ${nCard}`);
+  ok(nBuff === 2, '增益 2 项', `got ${nBuff}`);
+  ok(nRelic >= 1, '遗物至少 1 件', `got ${nRelic}`);
+  ok(nHeal === 1, '治疗 1 项', `got ${nHeal}`);
+  ok(stock.every(s => Number.isFinite(s.cost) && s.cost > 0), '所有商品价格都是有限正数（没有 NaN）');
+  ok(stock.filter(s => s.type === 'buff').every(s => s.buff && typeof s.buff.apply === 'function'),
+     '增益项都带可用的 apply()');
+
+  // 12g 刷新花费公式
+  fresh();
+  G.floor = 5; G.shopRefreshCount = 1;
+  const c1 = getShopRefreshCost();
+  G.shopRefreshCount = 2;
+  const c2 = getShopRefreshCost();
+  G.floor = 9; G.shopRefreshCount = 3;
+  const c3 = getShopRefreshCost();
+  ok(c1 === 2 * 5 * 1, '5 层首次刷新 = 2×5×1 = 10', `got ${c1}`);
+  ok(c2 === 2 * 5 * 2, '5 层第二次 = 2×5×2 = 20', `got ${c2}`);
+  ok(c3 === 2 * 9 * 3, '9 层第三次 = 2×9×3 = 54', `got ${c3}`);
+
+  // 12h 真的刷新一次：扣对钱、次数 +1、商品重抽
+  fresh();
+  G.floor = 6; G.shopRefreshCount = 1; G.essence = 100;
+  G.merchantStock = getMerchantStock();
+  G.shopSoldOut = [0, 1];
+  const before = G.essence;
+  refreshMerchantStock();
+  ok(G.essence === before - 12, '刷新扣了 2×6×1 = 12', `got ${before - G.essence}`);
+  ok(G.shopRefreshCount === 2, '刷新次数 +1', `got ${G.shopRefreshCount}`);
+  ok(G.shopSoldOut.length === 0, '刷新清空了已售罄列表');
+  ok(G.merchantStock.length >= 5, '刷新后商品重新生成', `got ${G.merchantStock.length}`);
+
+  // 12i 钱不够时不刷
+  fresh();
+  G.floor = 6; G.shopRefreshCount = 1; G.essence = 3;
+  G.merchantStock = getMerchantStock();
+  const stockBefore = G.merchantStock.slice();
+  refreshMerchantStock();
+  ok(G.essence === 3, '精华不足时不扣钱', `got ${G.essence}`);
+  ok(G.shopRefreshCount === 1, '精华不足时不加刷新次数', `got ${G.shopRefreshCount}`);
+  ok(G.merchantStock.length === stockBefore.length, '精华不足时不重抽商品');
+
+  // 12j 每项增益都配了 shopCost（漏一个商店就会出 NaN）
+  ok(STAT_CHOICES.every(c => Number.isFinite(c.shopCost) && c.shopCost > 0),
+     'STAT_CHOICES 每项都有 shopCost');
+  ok(STAT_CHOICES.some(c => c.id === 'turretHp'), '增益里含「图腾加固」');
+  ok(STAT_CHOICES.some(c => c.id === 'trailWidth'), '增益里含「轨迹拓宽」');
+
+  // 12k 买图腾加固真的加厚了场上的塔
+  fresh();
+  const tk = { x: 100, y: 100, r: 14, type: 'basic', emoji: 'x', color: '#88aacc', fireRate: 25, fireTimer: 0,
+               damage: 30, range: 140, hp: 8, maxHp: 12, tier: '中环', loopKey: 'k', spawnAnim: 0 };
+  G.turrets = [tk];
+  STAT_CHOICES.find(c => c.id === 'turretHp').apply();
+  ok(G.turretHpBonus === 3, 'turretHpBonus +3', `got ${G.turretHpBonus}`);
+  ok(tk.maxHp === 15 && tk.hp === 11, '场上的塔也一起加厚（12→15，8→11）', `got ${tk.hp}/${tk.maxHp}`);
+
+  // 12l 长跑不变量：任何一帧的本层战斗精华都不许超过当层上限
+  fresh();
+  api.simAutoSelectClass();
+  let worst = 0, worstFloor = 0;
+  for (let f = 0; f < 12000; f++) {
+    update();
+    const cap = getEssenceCap();
+    if (G.essenceThisFloor > cap) { worst = G.essenceThisFloor; worstFloor = G.floor; break; }
+    if (G.gameOver) break;
+  }
+  ok(worst === 0, `12000 帧里本层精华从未突破上限`, worst ? `第 ${worstFloor} 层拿到 ${worst}` : '');
+  console.log(`    终局：floor=${G.floor} 精华=${G.essence} 本层=${G.essenceThisFloor}/${getEssenceCap()} 存活塔=${G.turrets.length}`);
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);

@@ -353,27 +353,67 @@
           getMods() { return { isRest: true }; } },
     ];
 
-    // ---------- v9.4 商人商品 ----------
+    // ---------- v9.10 属性提升选项 / v9.18 商店也卖这一套 ----------
+    // 原来是写在 07-ui.js 里的，v9.18 起 getMerchantStock() 也要用它，
+    // 所以挪到数据模块——否则「数据模块取 UI 模块的 const」是个看不见的顺序依赖。
+    // shopCost 是商店单价基准，实际售价再乘 (1 + 层数×0.06)。
+    const STAT_CHOICES = [
+        { id: 'atkUp',     label: '攻击强化', emoji: '⚔️', desc: '永久攻击+3',        color: '#ff8844', shopCost: 12,
+          apply() { G.buffs.atkUp = Math.min(G.buffs.atkUp + 3, 2000); setFeedback('⚔️ 攻击力永久+3！', '#ff8844'); } },
+        { id: 'heal',      label: '生命复苏', emoji: '💚', desc: '回复30%最大护盾',   color: '#44ff88', shopCost: 10,
+          apply() { const healAmt = Math.floor(G.player.maxHp * 0.3); G.player.hp = Math.min(G.player.maxHp, G.player.hp + healAmt);
+                    spawnParticles(G.player.x, G.player.y, '#44ff88', 12);
+                    showFloatingText(G.player.x, G.player.y - G.player.r, '+' + healAmt, '#44ff88');
+                    setFeedback('💚 回复' + healAmt + '护盾！', '#44ff88'); } },
+        { id: 'speedUp',   label: '疾步',     emoji: '💨', desc: '永久移速+5%',       color: '#88ddff', shopCost: 12,
+          apply() { G.buffs.speedUp += 0.05; setFeedback('💨 移速永久+5%！', '#88ddff'); } },
+        { id: 'trailUp',   label: '轨迹淬炼', emoji: '🐾', desc: '永久轨迹伤害+1',    color: '#ffdd44', shopCost: 14,
+          apply() { G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1, 400); setFeedback('🐾 轨迹伤害永久+1！', '#ffdd44'); } },
+        // v9.18 新增两条
+        { id: 'trailWidth', label: '轨迹拓宽', emoji: '📏', desc: '永久轨迹宽度+1',   color: '#66dd88', shopCost: 14,
+          apply() { G.buffs.trailWidth = Math.min(G.buffs.trailWidth + 1, 60); setFeedback('📏 轨迹宽度永久+1！', '#66dd88'); } },
+        { id: 'turretHp',  label: '图腾加固', emoji: '🗼', desc: '图腾血量+3',        color: '#88aacc', shopCost: 14,
+          apply() { G.turretHpBonus = (G.turretHpBonus || 0) + 3;
+                    for (const t of G.turrets) { t.maxHp += 3; t.hp += 3; }   // 已有的塔一起加厚
+                    setFeedback('🗼 图腾血量+3！（含场上 ' + G.turrets.length + ' 座）', '#88aacc'); } },
+    ];
+
+    // ---------- v9.4 商人商品 / v9.18 经济重做 ----------
+    // v9.18 改动：
+    //   1. 删掉「精华提取」——花 5 精华返 15-25 是数学上的白送套利
+    //   2. 密文版出率降低（4 个槽位 → 2 个），增益与遗物出率升高
+    //   3. 增益就是每层奖励那套 STAT_CHOICES
+    // 价格**不随层数放大**：每层战斗精华已经硬顶在 8（后期 16），收入被钳住了，
+    // 价格再跟着层数涨就是双重紧缩，商店会变成看客。密文商人每 4 层才出现一次，
+    // 一轮攒下的 32 精华刚好够买一两件——这就是想要的节奏。
+    // 刷新逻辑见 refreshMerchantStock()：刷新也走这份生成流程。
     function getMerchantStock() {
         const stock = [];
-        // 随机3张触发板
+
+        // 密文版：各 1 张（原来各 2 张）
         const shuffledT = [...TRIGGERS].sort(() => Math.random() - 0.5);
-        for (let i = 0; i < 2; i++) {
-            stock.push({ type: 'card', card: { ...shuffledT[i], cardType: 'trigger' }, cost: 8 + i * 4, emoji: shuffledT[i].emoji, label: shuffledT[i].label, desc: '触发板' });
-        }
-        // 随机2张效果板
         const shuffledE = [...EFFECTS].sort(() => Math.random() - 0.5);
-        for (let i = 0; i < 2; i++) {
-            stock.push({ type: 'card', card: { ...shuffledE[i], cardType: 'effect' }, cost: 10 + i * 5, emoji: shuffledE[i].emoji, label: shuffledE[i].label, desc: '效果板' });
+        stock.push({ type: 'card', card: { ...shuffledT[0], cardType: 'trigger' }, cost: 8, emoji: shuffledT[0].emoji, label: shuffledT[0].label, desc: '触发板' });
+        stock.push({ type: 'card', card: { ...shuffledE[0], cardType: 'effect' }, cost: 10, emoji: shuffledE[0].emoji, label: shuffledE[0].label, desc: '效果板' });
+
+        // 增益：与每层奖励同款，抽 2 个不重复的
+        const buffs = [...STAT_CHOICES].sort(() => Math.random() - 0.5).slice(0, 2);
+        for (const b of buffs) {
+            stock.push({ type: 'buff', buff: b, cost: b.shopCost, emoji: b.emoji, label: b.label, desc: b.desc + '（永久）' });
         }
-        // 1个遗物
-        const rareRelics = RELICS.filter(r => r.rarity === 'rare' || r.rarity === 'epic');
-        const relic = rareRelics[Math.floor(Math.random() * rareRelics.length)];
-        stock.push({ type: 'relic', relic: relic, cost: 35 + Math.floor(Math.random() * 20), emoji: relic.emoji, label: relic.name, desc: relic.desc });
-        // 1个治疗
+
+        // 遗物：1 个保底，40% 再出一个（不重复）
+        const rareRelics = RELICS.filter(r => r.rarity === 'rare' || r.rarity === 'epic').sort(() => Math.random() - 0.5);
+        // 兜底：万一遗物表被改到没有 rare/epic，也不该让商店崩掉
+        const pool = rareRelics.length > 0 ? rareRelics : [...RELICS].sort(() => Math.random() - 0.5);
+        stock.push({ type: 'relic', relic: pool[0], cost: 35 + Math.floor(Math.random() * 20), emoji: pool[0].emoji, label: pool[0].name, desc: pool[0].desc });
+        if (pool[1] && Math.random() < 0.4) {
+            const r2 = pool[1];
+            stock.push({ type: 'relic', relic: r2, cost: 40 + Math.floor(Math.random() * 20), emoji: r2.emoji, label: r2.name, desc: r2.desc });
+        }
+
+        // 治疗
         stock.push({ type: 'heal', cost: 12, emoji: '💚', label: '治疗药剂', desc: '回复40%护盾' });
-        // 1个精华包
-        stock.push({ type: 'essence', cost: 5, emoji: '💎', label: '精华提取', desc: '获得15-25精华' });
         return stock;
     }
 
