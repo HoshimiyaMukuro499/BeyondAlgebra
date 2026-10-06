@@ -166,13 +166,27 @@
         if (!found) return;
         const area = found.area, cx = found.cx, cy = found.cy;
 
-        const tier = area < 2000 ? { t: '小环', m: .6, hp: 5, b: '🥉小闭环' }
-            : area < 8000 ? { t: '中环', m: 1, hp: 12, b: '🥈闭环' }
-                : { t: '大环', m: 1.5, hp: 20, b: '🥇大闭环！' };
+        // v9.20: 血量降到原来的 30%（5/12/20 → 1.5/3.6/6，取整为 2/4/6）。
+        // 注意 05-update.js 里怪打塔是 max(1, round(atk*0.05))，绝大多数怪
+        // 全程都压在下限 1 点上，所以这里的数字≈「能挨几下」。
+        const tier = area < 2000 ? { t: '小环', m: .6, hp: 2, b: '🥉小闭环' }
+            : area < 8000 ? { t: '中环', m: 1, hp: 4, b: '🥈闭环' }
+                : { t: '大环', m: 1.5, hp: 6, b: '🥇大闭环！' };
 
         // 同一个环只出一座塔；塔碎了才会把这个 key 删掉，环于是重新武装
         const loopKey = Math.round(cx / 24) + ',' + Math.round(cy / 24) + ',' + tier.t;
         if (G.turretLoops[loopKey]) return;
+
+        // v9.21: 图腾数量上限。注意这里是「先 return、不登记 key」——环保持武装状态，
+        // 一旦有位置腾出来，下一轮检查就会把它补上，玩家不用重画。
+        // checkTrailLoop 每 15 帧跑一次，所以提示要节流，否则满上限时会刷屏。
+        if (G.turrets.length >= G.maxTurrets) {
+            if (G.frame - (G.turretCapHintFrame || -999) > 120) {
+                G.turretCapHintFrame = G.frame;
+                setFeedback(`🗼 图腾已满 ${G.turrets.length}/${G.maxTurrets}——碎裂或扩容后才能再召唤`, '#88aacc');
+            }
+            return;
+        }
 
         let turType = 'basic';
         if (G.passives['T12']) {
@@ -264,8 +278,42 @@
         updateUI();
     }
 
+    // v9.21: T13「消除」——消耗品，不是被动。
+    // 宣读当场生效：全场怪物各吃 3 倍「怪物反噬」(E10) 的伤害，然后拆掉场上
+    // 最早生成的那座图腾。之后这张牌就没了。
+    // 因为它不产生被动，所以刻意**不**走 addPassive、**不**吃槽位上限，
+    // 配对的效果板也不会登记成被动——两张牌一起烧掉，这是它的代价。
+    function triggerEliminate(effectId) {
+        const dmg = Math.floor(60 * (2 + getDifficultyMultiplier()) / 3) * 3;
+        let hitCount = 0;
+        for (const m of G.monsters) {
+            m.hp = Math.max(0, m.hp - dmg);
+            spawnParticles(m.x, m.y, '#ff6644', 6);
+            showFloatingText(m.x, m.y - m.r, '-' + dmg, '#ff6644');
+            hitCount++;
+        }
+        // G.turrets 是追加序，[0] 就是最早生成的那座
+        let cleared = false;
+        if (G.turrets.length > 0) {
+            const t = G.turrets.shift();
+            if (t.loopKey) delete G.turretLoops[t.loopKey];   // 环重新武装，可以再召唤
+            spawnParticles(t.x, t.y, '#888888', 16);
+            showFloatingText(t.x, t.y - t.r - 6, '🧹 消除', '#88aacc');
+            cleared = true;
+        }
+        spawnParticles(G.player.x, G.player.y, '#ffdd66', 24);
+        showNotification('🧹 消除！', '#ffdd66', 200);
+        setFeedback(`🧹 消除：全场${hitCount}只怪各受${dmg}点伤害` + (cleared ? '，最早一座图腾被拆掉' : '（场上无图腾可拆）'), '#ffdd66');
+        logEvent('eliminate', { damage: dmg, monsters: hitCount, turretCleared: cleared });
+    }
+
     function doCombine(trigger, effect) {
         const triggerId = trigger.id, effectId = effect.id;
+        // T13 走消耗品分支，要在槽位检查**之前**——它不吃槽位上限
+        if (triggerId === 'T13') {
+            triggerEliminate(effectId);
+            return true;
+        }
         let usedSlots = 0;
         for (const tid of Object.keys(G.passives)) usedSlots += G.passives[tid].length;
         const isUpgrade = G.passives[triggerId] && G.passives[triggerId].some(p => p.effectId === effectId);

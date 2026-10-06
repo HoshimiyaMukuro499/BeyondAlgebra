@@ -537,7 +537,11 @@
             typeCounts[label] = (typeCounts[label] || 0) + 1;
         }
         let typeStr = Object.entries(typeCounts).map(([k, v]) => `${k}:${v}`).join(' ');
-        ctx.fillText(`被动:${Object.keys(G.passives).length} | 连杀:${G.killStreak} | ${typeStr}`, 12, h - 12);
+        // v9.21: 图腾计数进 HUD——满上限时闭环不再出塔，不给数字玩家会以为是 bug。
+        // 平时维持原来那行淡白，只有满了才转成橙色，等于顺带当个警告灯。
+        const tFull = G.turrets.length >= G.maxTurrets;
+        ctx.fillStyle = tFull ? 'rgba(255,136,68,0.75)' : 'rgba(255,255,255,0.10)';
+        ctx.fillText(`被动:${Object.keys(G.passives).length} | 🗼${G.turrets.length}/${G.maxTurrets} | 连杀:${G.killStreak} | ${typeStr}`, 12, h - 12);
 
         const diff = getDifficultyMultiplier();
         ctx.fillStyle = 'rgba(255,136,68,0.3)';

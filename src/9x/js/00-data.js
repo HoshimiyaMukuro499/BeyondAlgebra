@@ -12,8 +12,22 @@
         { id: 'T08', label: '连环击杀', emoji: '🔥' },
         { id: 'T10', label: '残血触发', emoji: '❤️‍🔥' },
         { id: 'T12', label: '闭环触发', emoji: '⭕' },
-        { id: 'T12', label: '闭环触发', emoji: '⭕' },
+        // v9.21: T13「消除」是消耗品而不是被动——宣读即触发，之后整张牌销毁。
+        // weight 是抽取权重：普通板 1，它 0.5，于是抽中率只有普通触发板的一半。
+        // 拿它必须走 randomTrigger()，直接下标取会让它变成普通概率。
+        { id: 'T13', label: '消除', emoji: '🧹', weight: 0.5 },
     ];
+
+    // v9.21: 触发板的加权随机。原来是 pool[Math.floor(Math.random()*pool.length)]，
+    // 给 T13 加 weight 后那样写等于没加权，所以所有「随机发一张触发板」的地方
+    // 都必须走这里。（找牌、图鉴那种按 id 命中的查找不需要。）
+    function randomTrigger() {
+        let total = 0;
+        for (const t of TRIGGERS) total += (t.weight || 1);
+        let r = Math.random() * total;
+        for (const t of TRIGGERS) { r -= (t.weight || 1); if (r <= 0) return t; }
+        return TRIGGERS[TRIGGERS.length - 1];
+    }
     const EFFECTS = [
         { id: 'E01', label: '攻击增幅', emoji: '⚔️' },
         { id: 'E02', label: '连环击', emoji: '💥' },
@@ -375,11 +389,27 @@
         // v9.18 新增两条
         { id: 'trailWidth', label: '轨迹拓宽', emoji: '📏', desc: '永久轨迹宽度+1',   color: '#66dd88', shopCost: 14,
           apply() { G.buffs.trailWidth = Math.min(G.buffs.trailWidth + 1, 60); setFeedback('📏 轨迹宽度永久+1！', '#66dd88'); } },
-        { id: 'turretHp',  label: '图腾加固', emoji: '🗼', desc: '图腾血量+3',        color: '#88aacc', shopCost: 14,
-          apply() { G.turretHpBonus = (G.turretHpBonus || 0) + 3;
-                    for (const t of G.turrets) { t.maxHp += 3; t.hp += 3; }   // 已有的塔一起加厚
-                    setFeedback('🗼 图腾血量+3！（含场上 ' + G.turrets.length + ' 座）', '#88aacc'); } },
+        // v9.20: 跟着基础血量一起缩到 30%（3 → 1）。不缩的话，塔基础血只剩
+        // 2/4/6 而这一项还加 3，一次购买就能把小环从 2 顶到 5——比削弱前还硬。
+        { id: 'turretHp',  label: '图腾加固', emoji: '🗼', desc: '图腾血量+1',        color: '#88aacc', shopCost: 14,
+          apply() { G.turretHpBonus = (G.turretHpBonus || 0) + 1;
+                    for (const t of G.turrets) { t.maxHp += 1; t.hp += 1; }   // 已有的塔一起加厚
+                    setFeedback('🗼 图腾血量+1！（含场上 ' + G.turrets.length + ' 座）', '#88aacc'); } },
     ];
+
+    // ---------- v9.21 图腾扩容 ----------
+    // 不进 STAT_CHOICES——它不是商店商品，只在每层打完的奖励界面按小概率露脸
+    // （概率见 07-ui.js 的 showStatChoice）。放在这里是因为 UI 和模拟器都要用同一份。
+    const TURRET_SLOT_CHOICE = {
+        id: 'turretSlot', label: '图腾扩容', emoji: '🗼',
+        desc: '图腾上限+1',
+        color: '#ffdd66',
+        apply() {
+            G.maxTurrets = (G.maxTurrets || 15) + 1;
+            setFeedback('🗼 图腾上限 +1 → ' + G.maxTurrets + '！', '#ffdd66');
+            showNotification('🗼 图腾上限 +1', '#ffdd66', 200);
+        },
+    };
 
     // ---------- v9.4 商人商品 / v9.18 经济重做 ----------
     // v9.18 改动：
@@ -394,9 +424,9 @@
         const stock = [];
 
         // 密文版：各 1 张（原来各 2 张）
-        const shuffledT = [...TRIGGERS].sort(() => Math.random() - 0.5);
+        const pickedT = randomTrigger();   // v9.21: 走加权抽取，T13 只有一半概率
         const shuffledE = [...EFFECTS].sort(() => Math.random() - 0.5);
-        stock.push({ type: 'card', card: { ...shuffledT[0], cardType: 'trigger' }, cost: 8, emoji: shuffledT[0].emoji, label: shuffledT[0].label, desc: '触发板' });
+        stock.push({ type: 'card', card: { ...pickedT, cardType: 'trigger' }, cost: 8, emoji: pickedT.emoji, label: pickedT.label, desc: '触发板' });
         stock.push({ type: 'card', card: { ...shuffledE[0], cardType: 'effect' }, cost: 10, emoji: shuffledE[0].emoji, label: shuffledE[0].label, desc: '效果板' });
 
         // 增益：与每层奖励同款，抽 2 个不重复的

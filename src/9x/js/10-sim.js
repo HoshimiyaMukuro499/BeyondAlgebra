@@ -195,6 +195,10 @@
     function simAutoStatChoice() {
         const shuffled = [...STAT_CHOICES].sort(() => Math.random() - 0.5);
         const choices = shuffled.slice(0, 3);
+        // v9.21: 和 07-ui.js 的 showStatChoice 保持同一个稀有度——跑分要能覆盖到它
+        if (Math.random() < 0.01 * (1 + G.floor / 10)) {
+            choices[Math.floor(Math.random() * choices.length)] = { ...TURRET_SLOT_CHOICE };
+        }
 
         const hpRatio = G.player.hp / G.player.maxHp;
         let best = choices[0];
@@ -216,6 +220,9 @@
                 score = 45;   // v9.18 新增两项也给它打分，否则跑分永远抽不到、等于没覆盖
             } else if (c.id === 'trailWidth') {
                 score = 30;
+            } else if (c.id === 'turretSlot') {
+                // 稀有的那张，撞见就买——上限跑分里也要真的被测到
+                score = 120;
             }
             score += Math.random() * 8;
             if (score > bestScore) { bestScore = score; best = c; }
@@ -283,8 +290,10 @@
         } else if (best.isRest) {
             G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.player.maxHp * 0.3);
             for (let i = 0; i < 2; i++) {
-                const pool2 = Math.random() < 0.5 ? TRIGGERS : EFFECTS;
-                G.hand.push({ ...pool2[Math.floor(Math.random() * pool2.length)], type: pool2 === TRIGGERS ? 'trigger' : 'effect' });
+                // v9.21: 触发板走加权抽取，和 07-ui.js 的休整节点保持一致
+                const isT = Math.random() < 0.5;
+                const card = isT ? randomTrigger() : EFFECTS[Math.floor(Math.random() * EFFECTS.length)];
+                G.hand.push({ ...card, type: isT ? 'trigger' : 'effect' });
             }
             logEvent('rest_node', {});
             G.stageType = 'mixed';

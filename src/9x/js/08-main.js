@@ -32,6 +32,7 @@
         G.batchQueue = []; G.activeTrailType = 'basic'; G.chairBonuses = 0;
         G.pathHistory = []; G.sprintTrails = []; G.mapMode = false;
         G.turrets = []; G.turretLoops = {}; G.turretHpBonus = 0;
+        G.maxTurrets = 15; G.turretCapHintFrame = -999;   // v9.21: 图腾上限
         G.essenceThisFloor = 0; G.shopRefreshCount = 1;   // v9.18 经济
         G._revived = false; G.fireRate = 40; G.stage = 1;   // v9.19: 10 → 40，与 01-state.js 保持一致
         G.gameLog = []; G.floorKills = 0; G.floorCardsObtained = 0;

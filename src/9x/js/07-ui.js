@@ -132,8 +132,9 @@
         if (trigCount < effCount) dropType = 'trigger';
         else if (effCount < trigCount) dropType = 'effect';
         else dropType = Math.random() < 0.5 ? 'trigger' : 'effect';
-        const pool = dropType === 'trigger' ? TRIGGERS : EFFECTS;
-        const card = pool[Math.floor(Math.random() * pool.length)];
+        // v9.21: 触发板走加权抽取（T13 只有一半概率），效果板仍是等概率
+        const card = dropType === 'trigger' ? randomTrigger()
+            : EFFECTS[Math.floor(Math.random() * EFFECTS.length)];
         if (G.hand.length >= 20) {
             const old = G.hand.shift();
             setFeedback(`📥 ${old.emoji}→${card.emoji}${card.label} (替换)`, '#8ab3d0');
@@ -484,6 +485,16 @@
         const shuffled = [...STAT_CHOICES].sort(() => Math.random() - 0.5);
         G.selectionCards = shuffled.slice(0, 3); // 复用 selectionCards 存储
 
+        // v9.21: 小概率把其中一张换成「图腾扩容」。
+        // 概率 = 1% × (1 + 层数/10)：第 10 层 2%、第 30 层 4%、第 60 层 7%。
+        // 这里是**整体掷一次**再替换，不是把它塞进池子跟着洗——后者会让它实际
+        // 出现率变成掷中率 × 3/7，和「1%×(1+层数/10)」对不上。
+        if (Math.random() < 0.01 * (1 + G.floor / 10)) {
+            const slot = { ...TURRET_SLOT_CHOICE, desc: `图腾上限+1（${G.maxTurrets} → ${G.maxTurrets + 1}）` };
+            G.selectionCards[Math.floor(Math.random() * G.selectionCards.length)] = slot;
+            showNotification('🗼 稀有：图腾扩容出现了！', '#ffdd66', 240);
+        }
+
         const overlay = document.getElementById('selectionOverlay');
         const row = document.getElementById('selectionRow');
         if (!overlay || !row) return;
@@ -678,7 +689,12 @@
         if (node.isMerchant) { showMerchant(); return; }
         if (node.isRest) {
             G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.player.maxHp * 0.3);
-            for (let i = 0; i < 2; i++) { const pool = Math.random() < 0.5 ? TRIGGERS : EFFECTS; G.hand.push({ ...pool[Math.floor(Math.random() * pool.length)], type: pool === TRIGGERS ? 'trigger' : 'effect' }); }
+            for (let i = 0; i < 2; i++) {
+                // v9.21: 触发板走加权抽取
+                const isT = Math.random() < 0.5;
+                const card = isT ? randomTrigger() : EFFECTS[Math.floor(Math.random() * EFFECTS.length)];
+                G.hand.push({ ...card, type: isT ? 'trigger' : 'effect' });
+            }
             setFeedback('🏕️ 休整：回复30%护盾+2张密文版', '#44cc88');
             setTimeout(() => showNodeMap(), 800);
             return;

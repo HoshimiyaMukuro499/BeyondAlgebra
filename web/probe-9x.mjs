@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const file = process.argv[2] || '密文轨迹demo9.19.html';
+const file = process.argv[2] || '密文轨迹demo9.21.html';
 const html = fs.readFileSync(path.join(ROOT, file), 'utf8');
 const m = html.match(/<script>([\s\S]*?)<\/script>\s*<\/body>/);
 if (!m) throw new Error('没找到 <script>');
@@ -65,7 +65,13 @@ const factory = new Function(
   ' EFFECTS: (typeof EFFECTS !== "undefined") ? EFFECTS : null,' +
   ' addPassive: (typeof addPassive !== "undefined") ? addPassive : null,' +
   ' triggerPassive: (typeof triggerPassive !== "undefined") ? triggerPassive : null,' +
-  ' spawnMonster: (typeof spawnMonster !== "undefined") ? spawnMonster : null };'
+  ' spawnMonster: (typeof spawnMonster !== "undefined") ? spawnMonster : null,' +
+  // v9.21 图腾上限 + T13「消除」
+  ' TRIGGERS: (typeof TRIGGERS !== "undefined") ? TRIGGERS : null,' +
+  ' randomTrigger: (typeof randomTrigger !== "undefined") ? randomTrigger : null,' +
+  ' doCombine: (typeof doCombine !== "undefined") ? doCombine : null,' +
+  ' triggerEliminate: (typeof triggerEliminate !== "undefined") ? triggerEliminate : null,' +
+  ' TURRET_SLOT_CHOICE: (typeof TURRET_SLOT_CHOICE !== "undefined") ? TURRET_SLOT_CHOICE : null };'
 );
 const api = factory(
   windowStub, documentStub, noop, noop, noop, noop, noop, noop,
@@ -78,6 +84,8 @@ const { getEssenceCap, addCombatEssence, getMerchantStock, getShopRefreshCost,
 const HAS_ECON = !!(getEssenceCap && addCombatEssence && getMerchantStock);
 const { EFFECTS, addPassive } = api;
 const HAS_FEEL = !!(EFFECTS && EFFECTS.some(e => e.id === 'E14'));
+const { TRIGGERS: TRIG_, randomTrigger, doCombine, triggerEliminate, TURRET_SLOT_CHOICE } = api;
+const HAS_CAP = !!(TRIG_ && TRIG_.some(t => t.id === 'T13') && randomTrigger && doCombine);
 
 let pass = 0, fail = 0;
 const ok = (cond, label, extra = '') => {
@@ -117,19 +125,19 @@ section('1. 轨迹判环（G.trails 自交 → 出塔）');
   checkTrailLoop();
   ok(G.turrets.length === 1, '闭环成立 → 生成 1 座图腾', `got ${G.turrets.length}`);
   ok(G.turrets[0] && G.turrets[0].tier === '小环', '半径 20 的环判为小环', G.turrets[0] && G.turrets[0].tier);
-  ok(G.turrets[0] && G.turrets[0].hp === 5 && G.turrets[0].maxHp === 5, '小环血量 = 5', G.turrets[0] && G.turrets[0].hp);
+  ok(G.turrets[0] && G.turrets[0].hp === 2 && G.turrets[0].maxHp === 2, '小环血量 = 2（原 5 的 30%）', G.turrets[0] && G.turrets[0].hp);
   ok(G.turrets[0] && G.turrets[0].life === undefined, '旧字段 life 已移除');
 
   fresh();
   drawLoop(400, 280, 30, 40);          // 面积 ≈ 2827 → 中环
   G.frame = 6; checkTrailLoop();
-  ok(G.turrets[0] && G.turrets[0].tier === '中环' && G.turrets[0].hp === 12, '中环 → 12 血',
+  ok(G.turrets[0] && G.turrets[0].tier === '中环' && G.turrets[0].hp === 4, '中环 → 4 血（原 12 的 30%）',
     G.turrets[0] && `${G.turrets[0].tier}/${G.turrets[0].hp}`);
 
   fresh();
   drawLoop(400, 280, 60, 48);          // 面积 ≈ 11310 → 大环
   G.frame = 6; checkTrailLoop();
-  ok(G.turrets[0] && G.turrets[0].tier === '大环' && G.turrets[0].hp === 20, '大环 → 20 血',
+  ok(G.turrets[0] && G.turrets[0].tier === '大环' && G.turrets[0].hp === 6, '大环 → 6 血（原 20 的 30%）',
     G.turrets[0] && `${G.turrets[0].tier}/${G.turrets[0].hp}`);
 }
 
@@ -204,8 +212,8 @@ section('5. 索敌「塔与核心中更近者」');
   const perHit = hpBefore - G.turrets[0].hp;
   ok(perHit === 1, `atk=10 的怪每击掉 1 点血`, `got ${perHit}`);
 
-  // 一路打到碎：小环 5 血 → 5 次命中
-  G.turrets[0].hp = 5; G.turrets[0].maxHp = 5; G.turrets[0].tier = '小环'; G.turrets[0].loopKey = 'kk';
+  // 一路打到碎：小环 2 血 → 2 次命中
+  G.turrets[0].hp = 2; G.turrets[0].maxHp = 2; G.turrets[0].tier = '小环'; G.turrets[0].loopKey = 'kk';
   G.turretLoops['kk'] = true;
   G.monsters[0].x = 300 + 20; G.monsters[0].y = 280; G.monsters[0].hp = 9999;
   let hits = 0;
@@ -216,7 +224,7 @@ section('5. 索敌「塔与核心中更近者」');
     update();
     hits++;
   }
-  ok(G.turrets.length === 0, '小环被打 5 下就碎了', `hits=${hits} 剩 ${G.turrets.length}`);
+  ok(G.turrets.length === 0, '小环被打 2 下就碎了', `hits=${hits} 剩 ${G.turrets.length}`);
   ok(G.turretLoops['kk'] === undefined, '碎裂后 loop key 释放');
 }
 
@@ -473,8 +481,8 @@ if (!HAS_ECON) {
                damage: 30, range: 140, hp: 8, maxHp: 12, tier: '中环', loopKey: 'k', spawnAnim: 0 };
   G.turrets = [tk];
   STAT_CHOICES.find(c => c.id === 'turretHp').apply();
-  ok(G.turretHpBonus === 3, 'turretHpBonus +3', `got ${G.turretHpBonus}`);
-  ok(tk.maxHp === 15 && tk.hp === 11, '场上的塔也一起加厚（12→15，8→11）', `got ${tk.hp}/${tk.maxHp}`);
+  ok(G.turretHpBonus === 1, 'turretHpBonus +1（v9.20 随基础血量缩到 30%）', `got ${G.turretHpBonus}`);
+  ok(tk.maxHp === 13 && tk.hp === 9, '场上的塔也一起加厚（12→13，8→9）', `got ${tk.hp}/${tk.maxHp}`);
 
   // 12l 长跑不变量：任何一帧的本层战斗精华都不许超过当层上限
   fresh();
@@ -617,6 +625,108 @@ if (!HAS_FEEL) {
 
   // 13i 护盾条与核心条都画在核心头顶，渲染不抛异常
   ok((() => { try { draw(); return true; } catch (e) { return false; } })(), 'draw() 带双血条正常');
+}
+
+// ---------- 14. v9.21 图腾上限 + T13「消除」 ----------
+section('14. 图腾上限 15 + 稀有扩容 + T13「消除」消耗品');
+if (!HAS_CAP) {
+  console.log('  （跳过：这是 9.20 及更早的产物，没有 T13）');
+} else {
+  // 14a 上限的默认值
+  fresh();
+  ok(G.maxTurrets === 15, 'resetGame 后图腾上限 = 15', `got ${G.maxTurrets}`);
+
+  // 14b 满了就不出塔，而且环「保持武装」——腾出位置后不用重画也能补上
+  fresh();
+  for (let i = 0; i < 15; i++) {
+    G.turrets.push({ x: 100 + i, y: 100, r: 14, type: 'basic', emoji: 'x', color: '#fff',
+      fireRate: 999, fireTimer: 0, damage: 0, range: 1, hp: 99, maxHp: 99,
+      tier: '中环', loopKey: 'full' + i, spawnAnim: 0 });
+    G.turretLoops['full' + i] = true;   // 这 15 座各自都占着一个 key
+  }
+  drawLoop(400, 280, 20, 40);
+  G.frame = 6; checkTrailLoop();
+  ok(G.turrets.length === 15, '满 15 座时闭环不再出塔', `got ${G.turrets.length}`);
+  ok(Object.keys(G.turretLoops).length === 15, '被挡下的环没有登记 key（保持武装）',
+    `got ${Object.keys(G.turretLoops).length}`);
+
+  G.turrets.pop();                       // 腾一个位置
+  G.frame = 42;                          // 必须是 6 的倍数，checkTrailLoop 每 6 帧才查一次
+  checkTrailLoop();
+  ok(G.turrets.length === 15, '腾出位置后同一个环自动补上（不用重画）', `got ${G.turrets.length}`);
+
+  // 14c 扩容选项
+  fresh();
+  const before = G.maxTurrets;
+  TURRET_SLOT_CHOICE.apply();
+  ok(G.maxTurrets === before + 1, '「图腾扩容」把上限 +1', `${before} → ${G.maxTurrets}`);
+  ok(STAT_CHOICES.every(c => c.id !== 'turretSlot'), '扩容不在商店货架 STAT_CHOICES 里（只在每层奖励）');
+
+  // 14d T13 的存在与权重
+  const t13 = TRIG_.find(t => t.id === 'T13');
+  ok(!!t13, 'TRIGGERS 里有 T13「消除」');
+  ok(t13 && t13.weight === 0.5, 'T13 权重 = 0.5（普通板的一半）', t13 && `got ${t13.weight}`);
+  ok(TRIG_.filter(t => t.id === 'T12').length === 1, 'TRIGGERS 里 T12 不再重复',
+    `got ${TRIG_.filter(t => t.id === 'T12').length} 条`);
+
+  // 14e 权重真的生效：抽 60000 次，T13 的次数应约为普通板的一半
+  const tally = {};
+  for (let i = 0; i < 60000; i++) { const t = randomTrigger(); tally[t.id] = (tally[t.id] || 0) + 1; }
+  const normalAvg = (60000 - (tally.T13 || 0)) / (TRIG_.length - 1);
+  const ratio = (tally.T13 || 0) / normalAvg;
+  ok(ratio > 0.42 && ratio < 0.58, '实测 T13 抽中率 ≈ 普通板的一半', `比值 ${ratio.toFixed(3)}（期望 0.5）`);
+
+  // 14f 宣读 T13：全场掉血 + 拆掉最早的一座，且不产生被动
+  fresh();
+  G.floor = 10; G.passives = {}; G.maxSlots = 4;
+  const mkT = (n) => G.turrets.push({ x: 200 + n, y: 200, r: 14, type: 'basic', emoji: 'x',
+    color: '#fff', fireRate: 999, fireTimer: 0, damage: 0, range: 1, hp: 9, maxHp: 9,
+    tier: '中环', loopKey: 'lk' + n, spawnAnim: 0 });
+  mkT(0); mkT(1); mkT(2);
+  G.turretLoops['lk0'] = true;
+  const firstX = G.turrets[0].x;
+  G.monsters = [1, 2, 3].map(i => ({ x: 300 + i, y: 300, r: 12, hp: 1e6, maxHp: 1e6, speed: 1,
+    atk: 0, type: 'basic', isBoss: false, isElite: false, frozen: 0, stunned: 0, slowTimer: 0,
+    trailDamageCooldown: 9999, hitCooldown: 0 }));
+
+  const hpBeforeM = G.monsters.map(m => m.hp);
+  const ret = doCombine({ id: 'T13', label: '消除' }, { id: 'E10', label: '怪物反噬' });
+  ok(ret === true, 'doCombine(T13, E10) 返回 true（成功）');
+  ok(G.turrets.length === 2, '拆掉了 1 座（3 → 2）', `got ${G.turrets.length}`);
+  ok(G.turrets.every(t => t.x !== firstX), '拆掉的是最早生成的那座', `firstX=${firstX} 剩 ${G.turrets.map(t => t.x).join(',')}`);
+  ok(G.turretLoops['lk0'] === undefined, '被拆的塔的 loop key 释放，环重新武装');
+  ok(G.monsters.every((m, i) => m.hp < hpBeforeM[i]), '全场每只怪都掉血');
+  const dealt = hpBeforeM[0] - G.monsters[0].hp;
+  ok(G.monsters.every((m, i) => Math.abs((hpBeforeM[i] - m.hp) - dealt) < 1e-9), '每只怪受到的伤害一致');
+  ok(dealt % 3 === 0 && dealt > 0, '伤害是 3 的倍数（3 × 反噬基准）', `got ${dealt}`);
+  ok(!G.passives['T13'], 'T13 不产生被动（不登记进 G.passives）');
+  ok(Object.keys(G.passives).length === 0, '配对的效果板也没被登记', `got ${JSON.stringify(G.passives)}`);
+
+  // 14g 槽位满时照样能宣读
+  fresh();
+  G.passives = {};
+  for (const tid of ['T01', 'T02', 'T03', 'T06']) G.passives[tid] = [{ effectId: 'E01', count: 1 }];
+  G.maxSlots = 4;
+  let usedSlots = 0;
+  for (const k of Object.keys(G.passives)) usedSlots += G.passives[k].length;
+  ok(usedSlots >= G.maxSlots, '先把槽位塞满（4/4）');
+  G.monsters = [{ x: 300, y: 300, r: 12, hp: 1e6, maxHp: 1e6, speed: 1, atk: 0, type: 'basic',
+    isBoss: false, isElite: false, frozen: 0, stunned: 0, slowTimer: 0,
+    trailDamageCooldown: 9999, hitCooldown: 0 }];
+  const mMid = G.monsters[0].hp;
+  ok(doCombine({ id: 'T13' }, { id: 'E01' }) === true, '槽位满时 T13 仍然宣读成功（不吃槽位上限）');
+  ok(G.monsters[0].hp < mMid, '而且伤害照样打出来了');
+  ok(Object.keys(G.passives).length === 4, '被动槽位数量没变（还是 4）', `got ${Object.keys(G.passives).length}`);
+
+  // 14h 场上没有图腾时，只炸场不报错
+  fresh();
+  G.monsters = [{ x: 300, y: 300, r: 12, hp: 1e6, maxHp: 1e6, speed: 1, atk: 0, type: 'basic',
+    isBoss: false, isElite: false, frozen: 0, stunned: 0, slowTimer: 0,
+    trailDamageCooldown: 9999, hitCooldown: 0 }];
+  let threw = null;
+  try { doCombine({ id: 'T13' }, { id: 'E02' }); } catch (e) { threw = e; }
+  ok(!threw, '场上无图腾时 T13 不抛异常', threw && threw.message);
+  ok(G.turrets.length === 0, '也没有凭空造出塔');
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);
