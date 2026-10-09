@@ -140,9 +140,11 @@ const factory = new Function(
   ' ELIMINATE_COOLDOWN: (typeof ELIMINATE_COOLDOWN !== "undefined") ? ELIMINATE_COOLDOWN : null,' +
   ' tryEliminate: (typeof tryEliminate !== "undefined") ? tryEliminate : null,' +
   ' activateEliminate: (typeof activateEliminate !== "undefined") ? activateEliminate : null,' +
-  ' TURRET_ATK_RATIO: (typeof TURRET_ATK_RATIO !== "undefined") ? TURRET_ATK_RATIO : null,' +
+  ' TURRET_ATK_CEILING: (typeof TURRET_ATK_CEILING !== "undefined") ? TURRET_ATK_CEILING : null,' +
+  ' TURRET_RATIO_NORM: (typeof TURRET_RATIO_NORM !== "undefined") ? TURRET_RATIO_NORM : null,' +
   ' PLAYER_FIRE_RATE_MUL: (typeof PLAYER_FIRE_RATE_MUL !== "undefined") ? PLAYER_FIRE_RATE_MUL : null,' +
   ' getPlayerAttackPower: (typeof getPlayerAttackPower !== "undefined") ? getPlayerAttackPower : null,' +
+  ' getTurretAttackPower: (typeof getTurretAttackPower !== "undefined") ? getTurretAttackPower : null,' +
   ' setStickFromTouch: (typeof setStickFromTouch !== "undefined") ? setStickFromTouch : null,' +
   ' releaseStick: (typeof releaseStick !== "undefined") ? releaseStick : null,' +
   ' joyRadiusPx: (typeof joyRadiusPx !== "undefined") ? joyRadiusPx : null,' +
@@ -189,7 +191,8 @@ const HAS_V924 = !!(AFFIXES && AFFIXES.length === 14 && tickAffixes && getPlayer
 const { AFFIX_ZONE_R_MUL, AFFIX_ZONE_MAX_PER_KIND, bossEarlyMul, BOSS_EARLY_RAMP_END,
         spawnAffixZone, tickAffixZones, getAffixZoneMul, getTurretAtkZoneMul, getTurretRateZoneMul,
         FIRE_ZONE_TICK, FIRE_ZONE_DMG_PER_TICK, ELIMINATE_COOLDOWN, tryEliminate, activateEliminate,
-        TURRET_ATK_RATIO, PLAYER_FIRE_RATE_MUL, getPlayerAttackPower,
+        TURRET_ATK_CEILING, TURRET_RATIO_NORM, PLAYER_FIRE_RATE_MUL,
+        getPlayerAttackPower, getTurretAttackPower,
         setStickFromTouch, releaseStick, joyRadiusPx, syncGameOverUI, selectClass } = api;
 const HAS_V925 = !!(bossEarlyMul && spawnAffixZone && tickAffixZones && tryEliminate
                     && getPlayerAttackPower && setStickFromTouch);
@@ -473,7 +476,10 @@ section('11. 帧成本');
   // 塔也要真的开火
   fresh();
   G.monsters = mk(50);
-  G.turrets = (() => { const a = []; for (let i = 0; i < 30; i++) a.push({ x: 390, y: 280, r: 14, type: 'basic', emoji: 'x', color: '#88aacc', fireRate: 1, fireTimer: 0, damage: 1, range: 100000, hp: 1e9, maxHp: 1e9, tier: '中环', loopKey: 'k' + i, spawnAnim: 0 }); return a; })();
+  // 伤害来源跨版本换过一次：9.24 及更早读塔实例上的 `damage`（生成时的快照），
+  // v9.25 起改成开火时按 `ratio`（= 类型权重 d × 尺寸 m）现算。两个字段都填上，
+  // 这个计时用例才能在各个版本上都真的让塔开火——缺了哪个版本会算成 NaN。
+  G.turrets = (() => { const a = []; for (let i = 0; i < 30; i++) a.push({ x: 390, y: 280, r: 14, type: 'basic', emoji: 'x', color: '#88aacc', fireRate: 1, fireTimer: 0, damage: 1, ratio: 30, range: 100000, hp: 1e9, maxHp: 1e9, tier: '中环', loopKey: 'k' + i, spawnAnim: 0 }); return a; })();
   const hp0 = G.monsters[0].hp;
   G.frame = 1000; update();
   ok(G.monsters[0].hp < hp0 || G.monsters.some(m => m.hp < hp0), '计时前先确认图腾真的在开火');
@@ -1783,8 +1789,10 @@ if (!HAS_V925) {
   tw.x = 760; tw.y = 540;
   ok(getTurretAtkZoneMul(tw) === 1 && getTurretRateZoneMul(tw) === 1, '图腾挪出圈外就恢复正常');
 
-  // 19k 图腾攻击力 = 玩家的 0.4 倍（开火那一刻算，不是召唤时的快照）
-  ok(Math.abs(TURRET_ATK_RATIO - 0.4) < 1e-12, 'TURRET_ATK_RATIO = 0.4', `got ${TURRET_ATK_RATIO}`);
+  // 19k 图腾攻击力：上限 = 玩家攻击力 × 0.6，按旧 d×m 比例分配
+  ok(Math.abs(TURRET_ATK_CEILING - 0.6) < 1e-12, 'TURRET_ATK_CEILING = 0.6',
+    `got ${TURRET_ATK_CEILING}`);
+  ok(TURRET_RATIO_NORM === 75, 'TURRET_RATIO_NORM = 50 × 1.5 = 75', `got ${TURRET_RATIO_NORM}`);
   fresh();
   api.simAutoSelectClass();
   G.player.atk = 10; G.buffs.atkUp = 0; G.buffs.multUp = 0;
@@ -1794,17 +1802,55 @@ if (!HAS_V925) {
   const pAtk2 = getPlayerAttackPower();
   ok(Math.abs(pAtk2 / pAtk1 - 5) < 1e-9, '面板攻击涨 5 倍，基准威力跟着涨 5 倍',
     `${pAtk1.toFixed(2)} → ${pAtk2.toFixed(2)}`);
-  // 真的走一遍图腾开火：造一座塔、放一只怪，跑够一个冷却周期看掉多少血
+  // 归一化到最大的一座：大环闪电（ratio = 50 × 1.5 = 75）正好顶到 0.6 倍
+  ok(Math.abs(getTurretAttackPower({ ratio: 50 * 1.5 }) - pAtk2 * 0.6) < 1e-9,
+    '大环闪电 = 玩家攻击力 × 0.6（上限）',
+    `got ${getTurretAttackPower({ ratio: 75 }).toFixed(3)}，期望 ${(pAtk2 * 0.6).toFixed(3)}`);
+  ok(getTurretAttackPower({ ratio: 75 }) > getTurretAttackPower({ ratio: 45 }),
+    '大环闪电 > 大环基础塔（类型权重生效）');
+  ok(getTurretAttackPower({ ratio: 30 }) > getTurretAttackPower({ ratio: 18 }),
+    '中环基础塔 > 中环速射塔（类型权重生效）');
+  ok(Math.abs(getTurretAttackPower({ ratio: 30 }) - pAtk2 * 0.6 * 30 / 75) < 1e-9,
+    '中环基础塔 = 上限 × 30/75 = 0.24 倍玩家攻击力',
+    `got ${getTurretAttackPower({ ratio: 30 }).toFixed(3)}`);
+  // 真的走一遍图腾开火：造一座中环基础塔（ratio = 30 × 1.0）、放一只怪，跑够一个冷却周期
   const T = { x: 400, y: 280, r: 14, type: 'basic', emoji: '🗼', color: '#88aacc',
-    fireRate: 25, fireTimer: 24, range: 140, hp: 99, maxHp: 99, tier: '中环', loopKey: 'k2', spawnAnim: 0 };
+    fireRate: 25, fireTimer: 24, range: 140, ratio: 30, hp: 99, maxHp: 99, tier: '中环', loopKey: 'k2', spawnAnim: 0 };
   G.turrets = [T];
   G.monsters = [mkM(430, 280)];
   G.monsters[0].hp = G.monsters[0].maxHp = 1e6;
   const mHpBefore = G.monsters[0].hp;
   update();
   const dealt = mHpBefore - G.monsters[0].hp;
-  ok(Math.abs(dealt - pAtk2 * TURRET_ATK_RATIO) < 1e-6,
-    '图腾单发伤害 = 玩家基准威力 × 0.4', `got ${dealt.toFixed(3)}，期望 ${(pAtk2 * 0.4).toFixed(3)}`);
+  const expectTurret = pAtk2 * 0.6 * 30 / 75;
+  ok(Math.abs(dealt - expectTurret) < 1e-6,
+    '图腾单发伤害 = 玩家攻击力 × 0.6 × ratio/75',
+    `got ${dealt.toFixed(3)}，期望 ${expectTurret.toFixed(3)}`);
+  // 削减圈不会让塔突破上限，只会往下削
+  ok(getTurretAttackPower({ ratio: 75 }) * 0.6 < getTurretAttackPower({ ratio: 75 }),
+    '削减圈只削不涨（上限不会被圈层抬高）');
+  // 怪物的敌对建筑（🗿 敌图腾）**单独算**：把玩家攻击力拉满，跑一轮敌图腾开火，
+  // 掉血量必须还是 3 + f × 0.2。真跑一遍而不是比两次同一条表达式。
+  fresh();
+  api.simAutoSelectClass();
+  G.floor = 1;
+  G.player.x = 400; G.player.y = 280; G.player.hp = 5000; G.player.maxHp = 5000;
+  G.turrets = [];
+  G.enemyTotems = [{ x: 460, y: 280, r: 15, life: 720, maxLife: 720, fireTimer: 1, _lastFire: 0 }];
+  const hpBeforeET = G.player.hp;
+  updateEnemyTotems();
+  const etDealt = hpBeforeET - G.player.hp;
+  ok(Math.abs(etDealt - (3 + G.floor * 0.2)) < 1e-9,
+    '敌图腾单发 = 3 + f × 0.2，与玩家攻击力无关',
+    `got ${etDealt}，期望 ${(3 + G.floor * 0.2).toFixed(1)}`);
+  // 把玩家的攻击力拉到天上，敌图腾的伤害仍然纹丝不动
+  G.player.atk = 500; G.buffs.atkUp = 400; G.buffs.multUp = 20;
+  G.enemyTotems = [{ x: 460, y: 280, r: 15, life: 720, maxLife: 720, fireTimer: 1, _lastFire: 0 }];
+  const hpBeforeET2 = G.player.hp;
+  updateEnemyTotems();
+  ok(Math.abs((hpBeforeET2 - G.player.hp) - etDealt) < 1e-9,
+    '玩家攻击力拉满后敌图腾伤害不变（对照 19k：玩家自己的塔会跟着涨）',
+    `玩家攻击力 ${getPlayerAttackPower().toFixed(1)}，敌图腾仍打 ${(hpBeforeET2 - G.player.hp).toFixed(1)}`);
 
   // 19l 玩家开火频率 +20%
   ok(Math.abs(PLAYER_FIRE_RATE_MUL - 1.2) < 1e-12, 'PLAYER_FIRE_RATE_MUL = 1.2',

@@ -41,12 +41,20 @@
     }
 
     // v9.25: 玩家一发的基准威力（不含圈层削减、狂暴、暴击这些一次性修正）。
-    // 子弹伤害与图腾伤害都从这里派生——图腾攻击力锁死为它的 0.4 倍（TURRET_ATK_RATIO），
+    // 子弹伤害与图腾伤害都从这里派生——图腾攻击力是它的一个比例（见 getTurretAttackPower），
     // 抽成一个函数是为了让那个比例只有一个来源，不会两边各写一份乘数然后慢慢走散。
     function getPlayerAttackPower() {
         const p = G.player;
         return (p.atk + G.buffs.atkUp) * (1 + G.buffs.multUp)
             * G.fateBuffs.atkMul * G.fateBuffs.bulletDmgMul * 1.15;
+    }
+
+    // v9.25：玩家图腾的单发伤害。t.ratio = d × m（召唤时算好存下）。
+    // 「大环闪电」ratio = 75 = TURRET_RATIO_NORM，正好顶到玩家攻击力的 0.6 倍，
+    // 其余类型/尺寸按旧比例在它下面排开。开火时现算，不吃召唤时的快照。
+    // 圈层（🟥 削减圈）在外面再乘一次，只会往下削，不会突破这个上限。
+    function getTurretAttackPower(t) {
+        return getPlayerAttackPower() * TURRET_ATK_CEILING * t.ratio / TURRET_RATIO_NORM;
     }
 
     function autoShoot() {
@@ -217,12 +225,14 @@
                 else if (pv.effectId === 'E06') turType = 'trail';
             }
         }
-        // v9.25: 表里的单发伤害（d）删掉了——图腾攻击力现在恒为玩家攻击力的 0.4 倍，
-        // 在开火那一刻算（见 05-update.js）。类型之间的差别只剩射速、射程与特效。
-        const T = { basic: { e: '🗼', c: '#88aacc', fr: 25, rg: 140 }, rapid: { e: '🎯', c: '#ff8844', fr: 8, rg: 120 }, lightning: { e: '⚡', c: '#ffdd44', fr: 40, rg: 180 }, frost: { e: '❄️', c: '#88ccff', fr: 20, rg: 120 }, trail: { e: '🐾', c: '#66dd88', fr: 15, rg: 160 } };
+        // v9.25: d 是**相对权重**（不再是绝对伤害）。单发伤害在开火时由
+        // playerAtk × TURRET_ATK_CEILING × (d × m) / TURRET_RATIO_NORM 现算，
+        // 所以 d 只决定「同一玩家攻击力下，这座塔比别的塔强多少」。最大 d = 50（闪电），
+        // TURRET_RATIO_NORM 就是 `50 × 1.5`——改这里的数值必须同步改那个常量。
+        const T = { basic: { e: '🗼', c: '#88aacc', fr: 25, rg: 140, d: 30 }, rapid: { e: '🎯', c: '#ff8844', fr: 8, rg: 120, d: 18 }, lightning: { e: '⚡', c: '#ffdd44', fr: 40, rg: 180, d: 50 }, frost: { e: '❄️', c: '#88ccff', fr: 20, rg: 120, d: 10 }, trail: { e: '🐾', c: '#66dd88', fr: 15, rg: 160, d: 35 } };
         const d = T[turType];
         const maxHp = tier.hp + (G.turretHpBonus || 0);
-        G.turrets.push({ x: clamp(cx, 60, 720), y: clamp(cy, 60, 500), r: 14 * tier.m, type: turType, emoji: d.e, color: d.c, fireRate: Math.floor(d.fr / tier.m), fireTimer: 0, range: d.rg * tier.m, hp: maxHp, maxHp: maxHp, tier: tier.t, loopKey: loopKey, spawnAnim: 20 });
+        G.turrets.push({ x: clamp(cx, 60, 720), y: clamp(cy, 60, 500), r: 14 * tier.m, type: turType, emoji: d.e, color: d.c, fireRate: Math.floor(d.fr / tier.m), fireTimer: 0, range: d.rg * tier.m, ratio: d.d * tier.m, hp: maxHp, maxHp: maxHp, tier: tier.t, loopKey: loopKey, spawnAnim: 20 });
         G.turretLoops[loopKey] = true;
         _loopCD = 30;
         triggerPassive('T12'); addScore(Math.floor(area / 100));

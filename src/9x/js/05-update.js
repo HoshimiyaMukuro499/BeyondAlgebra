@@ -841,13 +841,14 @@
                 if(t.loopKey)delete G.turretLoops[t.loopKey];
                 G.turrets.splice(i,1);continue;
             }
-            // v9.25: 伤害在开火这一刻算，不存快照——图腾攻击力恒为玩家攻击力的 0.4 倍，
-            // 玩家买完属性成长之后塔跟着一起变强，不会再出现「越到后期塔越没用」。
+            // v9.25: 伤害在开火这一刻算，不存快照——图腾攻击力 = 玩家攻击力 × 0.6 ×
+            // ratio/75（上限 0.6 倍，按旧 d×m 比例分配），玩家买完属性成长之后塔跟着
+            // 一起变强，不会再出现「越到后期塔越没用」。
             // 同时套上圈层系数：站进削减圈里单发打折，站进减速圈里出手变慢。
             const zRate = getTurretRateZoneMul(t);
             t.fireTimer++;if(t.fireTimer>=t.fireRate/zRate&&G.monsters.length>0){t.fireTimer=0;
                 let n=null,nd=Infinity;for(const m of G.monsters){const d=dist(t,m);if(d<t.range&&d<nd){nd=d;n=m;}}
-                if(n){const dmg=getPlayerAttackPower()*TURRET_ATK_RATIO*getTurretAtkZoneMul(t);
+                if(n){const dmg=getTurretAttackPower(t)*getTurretAtkZoneMul(t);
                     n.hp-=dmg;t._lastFire=G.frame;t._lastTarget={x:n.x,y:n.y};showFloatingText(n.x,n.y-n.r-5,t.emoji+'-'+Math.floor(dmg),t.color);spawnParticles(n.x,n.y,t.color,8);spawnParticles(t.x,t.y,'#ffffff',4);
                     if(t.type==='lightning'){G.chainCooldown=15;let c=0;for(const m2 of G.monsters){if(m2===n||c>=3)break;if(dist(n,m2)<150){m2.hp-=dmg*.6;c++;}}}
                     if(t.type==='frost')n.frozen=Math.max(n.frozen||0,40);

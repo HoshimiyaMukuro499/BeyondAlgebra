@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>密文轨迹 demo 9.25</title>
-    <!-- v9.25：①v9.24 新增的 8 个「干扰玩家」词条改为 BOSS 专属——精英怪只从原来 6 个里抽，BOSS 从 14 个里抽（排除突进与群生）；②圈层类词条（削减区/减速区/火焰区）不再贴在自己身边，改为每 5 秒在周围 300px 内随机落一个半径 ×1.5、存活 6 秒的圈层，同属性同屏上限 3 个，火焰区从「脚下留火」改为「落一个火圈」；③圈层同样作用于玩家图腾——削减圈削单发伤害、减速圈削出手速度、火圈照烧；④BOSS 登场时战斗界面顶部横幅显示它这一局抽到的词条，停留 5 秒；⑤BOSS 数值前期减压——1 层 ×0.5 线性爬到 20 层 ×1.0（HP 与攻击都乘）；⑥图腾攻击力锁死为玩家攻击力的 0.4 倍（开火时现算，不再写死在类型表里）；⑦玩家开火频率 +20%；⑧「消除」从触发板 T13 改成按 R / 手机端 🧹 圆钮触发的技能，30 秒冷却；⑨敌方防御塔索敌半径 200 → 120（不再永远压着玩家图腾打）；⑩手机端：开局前盖一层「点击进入全屏模式」引导、摇杆改为动态位置（按在哪圆心就在哪，输入面从 canvas 换成整块战斗界面，修掉黑边不可点导致的「一进游戏就不动」）、死亡后在战斗界面直接出现「重新开始」按钮（修掉手机端无法重开） -->
+    <!-- v9.25：①v9.24 新增的 8 个「干扰玩家」词条改为 BOSS 专属——精英怪只从原来 6 个里抽，BOSS 从 14 个里抽（排除突进与群生）；②圈层类词条（削减区/减速区/火焰区）不再贴在自己身边，改为每 5 秒在周围 300px 内随机落一个半径 ×1.5、存活 6 秒的圈层，同属性同屏上限 3 个，火焰区从「脚下留火」改为「落一个火圈」；③圈层同样作用于玩家图腾——削减圈削单发伤害、减速圈削出手速度、火圈照烧；④BOSS 登场时战斗界面顶部横幅显示它这一局抽到的词条，停留 5 秒；⑤BOSS 数值前期减压——1 层 ×0.5 线性爬到 20 层 ×1.0（HP 与攻击都乘）；⑥玩家图腾（建筑）的攻击力上限为玩家攻击力的 0.6 倍，类型与大中小塔之间按旧 d×m 比例分配（大环闪电正好顶到上限），伤害在开火时现算、不再写死绝对数值；怪物的敌对建筑（🗿敌图腾）单独算、不吃玩家攻击力；⑦玩家开火频率 +20%；⑧「消除」从触发板 T13 改成按 R / 手机端 🧹 圆钮触发的技能，30 秒冷却；⑨敌方防御塔索敌半径 200 → 120（不再永远压着玩家图腾打）；⑩手机端：开局前盖一层「点击进入全屏模式」引导、摇杆改为动态位置（按在哪圆心就在哪，输入面从 canvas 换成整块战斗界面，修掉黑边不可点导致的「一进游戏就不动」）、死亡后在战斗界面直接出现「重新开始」按钮（修掉手机端无法重开） -->
 
     <style>
         * {
@@ -1446,11 +1446,24 @@
     const ELIMINATE_COOLDOWN = 30 * 60;
 
     // ---------- v9.25 玩家 / 图腾的出手强度 ----------
-    // 图腾攻击力与玩家攻击力锁死 0.4 : 1。此前图腾伤害写死在类型表里、再乘层数难度，
-    // 玩家攻击涨上去之后图腾就相对变弱，两套数值各走各的——现在只有一个乘数。
-    // 伤害在**开火那一刻**算（见 05-update.js 的图腾循环），所以这条比例一直成立，
-    // 不是召唤时的快照。类型之间的差别靠射速与射程，不再靠单发伤害。
-    const TURRET_ATK_RATIO = 0.4;
+    // 玩家图腾（建筑）的攻击力**上限**是玩家攻击力的 0.6 倍，但类型之间仍按旧比例分：
+    //
+    //   单发伤害 = 玩家攻击力 × TURRET_ATK_CEILING × (d × m) / TURRET_RATIO_NORM
+    //
+    // d 是类型表里的相对权重（basic 30 / rapid 18 / lightning 50 / frost 10 / trail 35），
+    // m 是大中小环的尺寸倍率（0.6 / 1.0 / 1.5）。分母取旧 d×m 的最大值，于是
+    // 「大环闪电」正好顶到上限，其余按旧比例往下排——比例关系和 v9.24 之前一致，
+    // 只是绝对值不再随层数难度指数膨胀。
+    //
+    // 伤害在**开火那一刻**算（见 05-update.js 的图腾循环），所以玩家捡到攻击加成后
+    // 场上的塔会立刻跟着变强，不是召唤时的快照。
+    //
+    // ⚠️ TURRET_RATIO_NORM 写死为 `50 × 1.5`（最大 d × 最大 m）。改类型表的 d 列或
+    //    改成大环倍率，这里必须一起改，否则上限就不再是 0.6。
+    const TURRET_ATK_CEILING = 0.6;
+    const TURRET_RATIO_NORM = 50 * 1.5;
+    // 敌图腾（怪物的敌对建筑）**单独算**——它不吃玩家的攻击力，走自己那套
+    // `3 + f × 0.2`（见 05-update.js 的 updateEnemyTotems）。
     // 玩家开火频率 +20%：冷却整体除以 1.2。上下限一起缩——只改上面那个 48 会让
     // 后期被 Math.max(24, …) 的地板吃掉，看着改了实际没生效。
     const PLAYER_FIRE_RATE_MUL = 1.2;
@@ -3599,12 +3612,20 @@
     }
 
     // v9.25: 玩家一发的基准威力（不含圈层削减、狂暴、暴击这些一次性修正）。
-    // 子弹伤害与图腾伤害都从这里派生——图腾攻击力锁死为它的 0.4 倍（TURRET_ATK_RATIO），
+    // 子弹伤害与图腾伤害都从这里派生——图腾攻击力是它的一个比例（见 getTurretAttackPower），
     // 抽成一个函数是为了让那个比例只有一个来源，不会两边各写一份乘数然后慢慢走散。
     function getPlayerAttackPower() {
         const p = G.player;
         return (p.atk + G.buffs.atkUp) * (1 + G.buffs.multUp)
             * G.fateBuffs.atkMul * G.fateBuffs.bulletDmgMul * 1.15;
+    }
+
+    // v9.25：玩家图腾的单发伤害。t.ratio = d × m（召唤时算好存下）。
+    // 「大环闪电」ratio = 75 = TURRET_RATIO_NORM，正好顶到玩家攻击力的 0.6 倍，
+    // 其余类型/尺寸按旧比例在它下面排开。开火时现算，不吃召唤时的快照。
+    // 圈层（🟥 削减圈）在外面再乘一次，只会往下削，不会突破这个上限。
+    function getTurretAttackPower(t) {
+        return getPlayerAttackPower() * TURRET_ATK_CEILING * t.ratio / TURRET_RATIO_NORM;
     }
 
     function autoShoot() {
@@ -3775,12 +3796,14 @@
                 else if (pv.effectId === 'E06') turType = 'trail';
             }
         }
-        // v9.25: 表里的单发伤害（d）删掉了——图腾攻击力现在恒为玩家攻击力的 0.4 倍，
-        // 在开火那一刻算（见 05-update.js）。类型之间的差别只剩射速、射程与特效。
-        const T = { basic: { e: '🗼', c: '#88aacc', fr: 25, rg: 140 }, rapid: { e: '🎯', c: '#ff8844', fr: 8, rg: 120 }, lightning: { e: '⚡', c: '#ffdd44', fr: 40, rg: 180 }, frost: { e: '❄️', c: '#88ccff', fr: 20, rg: 120 }, trail: { e: '🐾', c: '#66dd88', fr: 15, rg: 160 } };
+        // v9.25: d 是**相对权重**（不再是绝对伤害）。单发伤害在开火时由
+        // playerAtk × TURRET_ATK_CEILING × (d × m) / TURRET_RATIO_NORM 现算，
+        // 所以 d 只决定「同一玩家攻击力下，这座塔比别的塔强多少」。最大 d = 50（闪电），
+        // TURRET_RATIO_NORM 就是 `50 × 1.5`——改这里的数值必须同步改那个常量。
+        const T = { basic: { e: '🗼', c: '#88aacc', fr: 25, rg: 140, d: 30 }, rapid: { e: '🎯', c: '#ff8844', fr: 8, rg: 120, d: 18 }, lightning: { e: '⚡', c: '#ffdd44', fr: 40, rg: 180, d: 50 }, frost: { e: '❄️', c: '#88ccff', fr: 20, rg: 120, d: 10 }, trail: { e: '🐾', c: '#66dd88', fr: 15, rg: 160, d: 35 } };
         const d = T[turType];
         const maxHp = tier.hp + (G.turretHpBonus || 0);
-        G.turrets.push({ x: clamp(cx, 60, 720), y: clamp(cy, 60, 500), r: 14 * tier.m, type: turType, emoji: d.e, color: d.c, fireRate: Math.floor(d.fr / tier.m), fireTimer: 0, range: d.rg * tier.m, hp: maxHp, maxHp: maxHp, tier: tier.t, loopKey: loopKey, spawnAnim: 20 });
+        G.turrets.push({ x: clamp(cx, 60, 720), y: clamp(cy, 60, 500), r: 14 * tier.m, type: turType, emoji: d.e, color: d.c, fireRate: Math.floor(d.fr / tier.m), fireTimer: 0, range: d.rg * tier.m, ratio: d.d * tier.m, hp: maxHp, maxHp: maxHp, tier: tier.t, loopKey: loopKey, spawnAnim: 20 });
         G.turretLoops[loopKey] = true;
         _loopCD = 30;
         triggerPassive('T12'); addScore(Math.floor(area / 100));
@@ -4838,13 +4861,14 @@
                 if(t.loopKey)delete G.turretLoops[t.loopKey];
                 G.turrets.splice(i,1);continue;
             }
-            // v9.25: 伤害在开火这一刻算，不存快照——图腾攻击力恒为玩家攻击力的 0.4 倍，
-            // 玩家买完属性成长之后塔跟着一起变强，不会再出现「越到后期塔越没用」。
+            // v9.25: 伤害在开火这一刻算，不存快照——图腾攻击力 = 玩家攻击力 × 0.6 ×
+            // ratio/75（上限 0.6 倍，按旧 d×m 比例分配），玩家买完属性成长之后塔跟着
+            // 一起变强，不会再出现「越到后期塔越没用」。
             // 同时套上圈层系数：站进削减圈里单发打折，站进减速圈里出手变慢。
             const zRate = getTurretRateZoneMul(t);
             t.fireTimer++;if(t.fireTimer>=t.fireRate/zRate&&G.monsters.length>0){t.fireTimer=0;
                 let n=null,nd=Infinity;for(const m of G.monsters){const d=dist(t,m);if(d<t.range&&d<nd){nd=d;n=m;}}
-                if(n){const dmg=getPlayerAttackPower()*TURRET_ATK_RATIO*getTurretAtkZoneMul(t);
+                if(n){const dmg=getTurretAttackPower(t)*getTurretAtkZoneMul(t);
                     n.hp-=dmg;t._lastFire=G.frame;t._lastTarget={x:n.x,y:n.y};showFloatingText(n.x,n.y-n.r-5,t.emoji+'-'+Math.floor(dmg),t.color);spawnParticles(n.x,n.y,t.color,8);spawnParticles(t.x,t.y,'#ffffff',4);
                     if(t.type==='lightning'){G.chainCooldown=15;let c=0;for(const m2 of G.monsters){if(m2===n||c>=3)break;if(dist(n,m2)<150){m2.hp-=dmg*.6;c++;}}}
                     if(t.type==='frost')n.frozen=Math.max(n.frozen||0,40);
