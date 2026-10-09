@@ -160,7 +160,11 @@
     }
 
     // ---------- 平衡掉落 ----------
-    function dropBalancedCard() {
+    // v9.25: 多了一次发放 n 张的场景（开局 / 击杀 / BOSS 磨血），逐张调这个函数的话
+    // 会把 setFeedback / updateUI 也做 n 遍——屏幕上刷 n 行、手牌重绘 n 次。
+    // 所以拆出 `silent`：连发时静默取牌，由 grantCards() 统一结算一次。
+    // 不传参的老调用点行为完全不变。
+    function dropBalancedCard(silent, source) {
         const trigCount = G.hand.filter(c => c.type === 'trigger').length;
         const effCount = G.hand.filter(c => c.type === 'effect').length;
         let dropType;
@@ -172,14 +176,30 @@
         const card = dropType === 'trigger' ? randomTrigger() : randomEffect();
         if (G.hand.length >= 20) {
             const old = G.hand.shift();
-            setFeedback(`📥 ${old.emoji}→${card.emoji}${card.label} (替换)`, '#8ab3d0');
-        } else {
+            if (!silent) setFeedback(`📥 ${old.emoji}→${card.emoji}${card.label} (替换)`, '#8ab3d0');
+        } else if (!silent) {
             setFeedback(`📥 拾取 ${card.emoji} ${card.label}`, '#8ab3d0');
         }
         G.hand.push({ ...card, type: dropType });
         G.floorCardsObtained++;
-        logEvent('card_drop', { card: card.id, cardLabel: card.label, cardType: dropType, source: 'kill' });
+        logEvent('card_drop', { card: card.id, cardLabel: card.label, cardType: dropType, source: source || 'kill' });
+        if (!silent) updateUI();
+        return { ...card, type: dropType };
+    }
+
+    // v9.25: 一次发 n 张密文版。来源：开局白送 6 张、每 20 杀 30%、BOSS 每磨 25% 血。
+    // 「获得的个数」必须**在屏幕里**读得到——布局用的是画布上的 showNotification，
+    // 不是右侧面板的 setFeedback：手机端面板是收起的抽屉，战斗时根本看不见。
+    function grantCards(n, reason, color) {
+        if (n <= 0) return [];
+        const got = [];
+        for (let i = 0; i < n; i++) got.push(dropBalancedCard(true, reason));
         updateUI();
+        const names = got.map(c => c.emoji + c.label).join(' ');
+        setFeedback(`📥 ${reason} · 获得 ${n} 张密文版：${names}`, color || '#8ab3d0');
+        showNotification(`📥 密文版 ×${n}`, color || '#8ab3d0', 150);
+        logEvent('card_grant', { count: n, reason, cards: got.map(c => c.id) });
+        return got;
     }
 
     // ---------- v9.4 遗物系统 ----------
@@ -390,6 +410,12 @@
                 selectClass(idx);
             });
         });
+        // v9.25 自检：职业遮罩的标题是**静态 HTML**（body.html 里就写着 active），
+        // 卡片却是这里现填的。所以「只看得到标题、看不到卡」= 这一段没跑成。
+        // 本机复现不出来，就就地断言一次，异常交给页面底部的自检条（__bootError）。
+        if (row.children.length !== CLASSES.length && window.__bootError) {
+            window.__bootError(`职业卡没渲染出来：CLASSES 有 ${CLASSES.length} 个，DOM 里只有 ${row.children.length} 个`);
+        }
 
         // 教程：开局遮罩上的说明 + 跳过教程（只看没看过教程的那一次）
         const h2 = overlay.querySelector('h2');
@@ -451,6 +477,12 @@
         showNotification(`🧙 ${cls.name}！${cls.desc.substring(0, 20)}...`, '#f5c542', 240);
         addScore(10);
         startFloor();
+        // v9.25: 正式开局的启动资金——随机 6 张密文版。
+        // 教程局**不发**：教程是独立沙盒，它的 cfg.hand 会预设手牌，白送 6 张会
+        // 把教学节奏冲掉（而且反正 Tutorial 结束时会 restartRunAfterTutorial()
+        // 整体重来）。判定沿用 Tutorial.seen —— 它只在这一局的教程真正结束 / 被跳过后
+        // 才立起来，所以「重选职业 → 发牌」正好只发生在正式开局那一次。
+        if (Tutorial.seen) grantCards(START_CARDS, '开局补给', '#f5c542');
         updateUI();
     }
 

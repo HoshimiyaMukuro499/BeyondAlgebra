@@ -379,6 +379,30 @@
         }
     }
 
+    // v9.25: BOSS「磨血奖励」——每磨掉 25% 血量掷一次 rollBossCardCount()（1~4 张）。
+    // 为什么用**每帧轮询**而不是在各个掉血点埋钩子：BOSS 掉血的来源太多（玩家子弹、
+    // 轨迹、图腾、闪电链、消除、火圈、连带伤害……），逐个埋钩子必漏。这里一个循环
+    // 覆盖全部来源，代价只是每帧读一次 hp。
+    // 记在怪自己身上（`_cardMilestone` = 已经结算过几个 25%），所以一只 BOSS 从生到死
+    // 一共只结算 3 次：25% / 50% / 75%。**100%（打死那一下）不算**——击杀本身另有一份
+    // 掉落（2~3 张 + 遗物 + 精华），再来一次就成双重结算了。
+    // 调用点在怪物循环之后，所以被打死的 BOSS 这一帧已经被移出数组，天然不会越界。
+    function tickBossCardMilestones() {
+        for (const m of G.monsters) {
+            if (!m.isBoss || m.hp <= 0 || !m.maxHp) continue;
+            const passed = Math.min(3, Math.floor((1 - m.hp / m.maxHp) / BOSS_CARD_STEP));
+            const done = m._cardMilestone || 0;
+            if (passed <= done) continue;
+            m._cardMilestone = passed;
+            // 一帧跨两道坎（重击 / 消除直接带走一大截）就补两次，不漏发
+            for (let k = done; k < passed; k++) {
+                const n = rollBossCardCount();
+                grantCards(n, `BOSS 磨血 ${Math.round((k + 1) * 25)}%`, '#ff6688');
+                showFloatingText(m.x, m.y - m.r - 20, '📥+' + n, '#ff88aa');
+            }
+        }
+    }
+
     // ---------- 更新 ----------
     function update() {
         if (G.gameOver) return;
@@ -865,6 +889,8 @@
         updateSeals();
         // v9.25: 圈层（削减/减速/火焰）的倒计时与火焰伤害
         tickAffixZones();
+        // v9.25: BOSS 磨血奖励（必须在怪物循环之后——见函数上的注释）
+        tickBossCardMilestones();
 
         // v9.25: 「消除」技能冷却 + BOSS 词条横幅的倒计时。
         // 两者都是纯粹的 UI 节拍，挨着放。

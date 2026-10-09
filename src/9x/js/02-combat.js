@@ -216,6 +216,13 @@
         G.floorKills++;
         G.lastKillFrame = G.frame;
         if (G.killStreak > G.maxCombo) G.maxCombo = G.killStreak;
+        // v9.25: 每击杀 20 个怪物掷一次 30% —— 拿到就 1 张密文版。
+        // 挂在这个统一入口上，三个击杀分支（普通 / BOSS / 自爆连带）自动都算数。
+        // 教程局不发：那是个沙盒，脚本自己发牌，多出来的随机牌会盖掉教学节奏。
+        if (!Tutorial.tookOver && G.killCount % KILL_CARD_EVERY === 0
+            && Math.random() < KILL_CARD_CHANCE) {
+            grantCards(1, `击杀 ${KILL_CARD_EVERY} 只`, '#8ab3d0');
+        }
     }
 
     // ---------- 怪物生成 ----------

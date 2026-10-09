@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>密文轨迹 demo 9.25</title>
-    <!-- v9.25：①v9.24 新增的 8 个「干扰玩家」词条改为 BOSS 专属——精英怪只从原来 6 个里抽，BOSS 从 14 个里抽（排除突进与群生）；②圈层类词条（削减区/减速区/火焰区）不再贴在自己身边，改为每 5 秒在周围 300px 内随机落一个半径 ×1.5、存活 6 秒的圈层，同属性同屏上限 3 个，火焰区从「脚下留火」改为「落一个火圈」；③圈层同样作用于玩家图腾——削减圈削单发伤害、减速圈削出手速度、火圈照烧；④BOSS 登场时战斗界面顶部横幅显示它这一局抽到的词条，停留 5 秒；⑤BOSS 数值前期减压——1 层 ×0.5 线性爬到 20 层 ×1.0（HP 与攻击都乘）；⑥玩家图腾（建筑）的攻击力上限为玩家攻击力的 0.6 倍，类型与大中小塔之间按旧 d×m 比例分配（大环闪电正好顶到上限），伤害在开火时现算、不再写死绝对数值；怪物的敌对建筑（🗿敌图腾）单独算、不吃玩家攻击力；⑦玩家开火频率 +20%；⑧「消除」从触发板 T13 改成按 R / 手机端 🧹 圆钮触发的技能，30 秒冷却；⑨敌方防御塔索敌半径 200 → 120（不再永远压着玩家图腾打）；⑩手机端：开局前盖一层「点击进入全屏模式」引导、摇杆改为动态位置（按在哪圆心就在哪，输入面从 canvas 换成整块战斗界面，修掉黑边不可点导致的「一进游戏就不动」）、死亡后在战斗界面直接出现「重新开始」按钮（修掉手机端无法重开） -->
+    <!-- v9.25：①v9.24 新增的 8 个「干扰玩家」词条改为 BOSS 专属——精英怪只从原来 6 个里抽，BOSS 从 14 个里抽（排除突进与群生）；②圈层类词条（削减区/减速区/火焰区）不再贴在自己身边，改为每 5 秒在周围 300px 内随机落一个半径 ×1.5、存活 6 秒的圈层，同属性同屏上限 3 个，火焰区从「脚下留火」改为「落一个火圈」；③圈层同样作用于玩家图腾——削减圈削单发伤害、减速圈削出手速度、火圈照烧；④BOSS 登场时战斗界面顶部横幅显示它这一局抽到的词条，停留 5 秒；⑤BOSS 数值前期减压——1 层 ×0.5 线性爬到 20 层 ×1.0（HP 与攻击都乘）；⑥玩家图腾（建筑）的攻击力上限为玩家攻击力的 1.0 倍（9.25 初版是 0.6，本版上调），类型与大中小塔之间按旧 d×m 比例分配（大环闪电正好顶到上限），伤害在开火时现算、不再写死绝对数值；怪物的敌对建筑（🗿敌图腾）单独算、不吃玩家攻击力；⑦玩家开火频率 +20%；⑧「消除」从触发板 T13 改成按 R / 手机端 🧹 圆钮触发的技能，30 秒冷却；⑨敌方防御塔索敌半径 200 → 120（不再永远压着玩家图腾打）；⑩手机端：开局前盖一层「点击进入全屏模式」引导、摇杆改为动态位置（按在哪圆心就在哪，输入面从 canvas 换成整块战斗界面，修掉黑边不可点导致的「一进游戏就不动」）、死亡后在战斗界面直接出现「重新开始」按钮（修掉手机端无法重开）；⑪密文版新增三个来源：正式开局白送 6 张、每击杀 20 个怪物 30% 得 1 张、BOSS 每被磨掉 25% 血量按 50%/20%/20%/10% 得 1~4 张（100% 那一下即击杀本身，已有独立掉落，不重复结算），每次到手张数用画布通知「📥 密文版 ×N」显示 -->
 
     <style>
         * {
@@ -666,6 +666,26 @@
         .mobile-actions, .drawer-close,
         .joy, .joy-hint, .gameover-restart, .fs-overlay { display: none; }
 
+        /* v9.25 启动自检条——**故意不放进上面那张手机端专用清单**：
+           它要在桌面端和手机端都出现（用户报的那次是在手机上，但启动失败不分平台）。
+           平时不占位，只在 __bootError() 写进内容时亮起。z-index 压过所有遮罩，
+           因为启动失败时它是最该被看见的那一行字。 */
+        .boot-error { display: none; }
+        .boot-error.active {
+            display: block;
+            position: fixed;
+            left: 8px; right: 8px; bottom: 8px;
+            z-index: 900;
+            padding: 10px 14px;
+            border: 1px solid #a33;
+            border-radius: 10px;
+            background: rgba(42, 18, 24, 0.96);
+            color: #ffb3b3;
+            font-size: 12px;
+            line-height: 1.6;
+            word-break: break-all;
+        }
+
         body.mobile {
             display: block;
             min-height: 100vh;
@@ -926,6 +946,12 @@
         body.mobile .fs-title { font-size: 22px; color: #cfe4ff; }
         body.mobile .fs-sub { font-size: 13px; color: #7d9cba; }
 
+        /* 摘掉全屏引导后的 400ms 里，职业卡不吃点击。
+           原因见 09-events.js 的 enterFullscreenOnce()：点掉引导的那一下会再派发一次
+           合成事件，落点正好在屏幕正中，而职业卡也排在屏幕正中——不挡住就等于
+           「点一下进全屏，顺手把职业也选了」，玩家根本没机会选。 */
+        body.mobile.fs-dismissing .class-card { pointer-events: none; }
+
         /* 键盘提示在手机上没有意义 */
         body.mobile .controls-hint { display: none; }
 
@@ -946,6 +972,37 @@
             font-size: 17px;
         }
     </style>
+
+    <!-- v9.25 启动自检。必须在主脚本之前挂上，才能抓到主脚本自己抛出来的异常。
+         手机端报过「只看到『选择你的密文法师』这一行字，没有全屏引导、也没有职业卡」，
+         而那正是「主脚本没跑完」的样子：#classRow 靠 JS 填、#fsOverlay 靠 JS 点亮，
+         两者同时缺席就说明脚本在 initClassSelection() 之前就断了。
+         本机（桌面 Chrome / iPhone UA 的 headless Chrome / DevTools 设备模拟）全都
+         复现不出来，所以先留一个兜底把真实报错显示出来，而不是继续猜。 -->
+    <script>
+    (function () {
+        window.__booted = false;
+        window.__bootErrorShown = false;
+        // 只报一次、且只在启动期报——进游戏之后的运行时报错跟这个兜底无关，
+        // 不该再往屏幕上糊一条红字。
+        window.__bootError = function (msg) {
+            try {
+                if (window.__bootErrorShown) return;
+                window.__bootErrorShown = true;
+                var bar = document.getElementById('bootErrorBar');
+                if (!bar) return;
+                bar.textContent = '⚠️ 启动出错，请截图发给作者：' + String(msg);
+                bar.classList.add('active');
+            } catch (e) { /* 兜底本身不能再抛 */ }
+        };
+        window.addEventListener('error', function (e) {
+            if (window.__booted) return;
+            var m = (e && e.message) || 'unknown error';
+            if (e && e.filename) m += ' @ ' + e.filename + ':' + e.lineno;
+            window.__bootError(m);
+        });
+    })();
+    </script>
 </head>
 <body>
 
@@ -1079,6 +1136,12 @@
     <div class="fs-title">⛶ 点击进入全屏模式</div>
     <div class="fs-sub">横屏游玩体验最好 · 显示不全时请旋转设备</div>
 </div>
+
+<!-- v9.25 启动自检条。手机端报过「只看到职业选择标题、既没有卡牌也没有按钮」——
+     那正好是「脚本没跑完」的样子（#classRow 靠 JS 填、#fsOverlay 靠 JS 点亮）。
+     本机复现不出来，所以留一个兜底：启动期的任何异常都直接写在屏幕底部，
+     玩家截个图就能定位，而不是对着一片空白干瞪眼。见 template.html 的 __bootError。 -->
+<div class="boot-error" id="bootErrorBar"></div>
 
 <!-- v9.4 职业选择 -->
 <div class="class-overlay active" id="classOverlay">
@@ -1446,7 +1509,7 @@
     const ELIMINATE_COOLDOWN = 30 * 60;
 
     // ---------- v9.25 玩家 / 图腾的出手强度 ----------
-    // 玩家图腾（建筑）的攻击力**上限**是玩家攻击力的 0.6 倍，但类型之间仍按旧比例分：
+    // 玩家图腾（建筑）的攻击力**上限**是玩家攻击力的 1.0 倍，但类型之间仍按旧比例分：
     //
     //   单发伤害 = 玩家攻击力 × TURRET_ATK_CEILING × (d × m) / TURRET_RATIO_NORM
     //
@@ -1459,8 +1522,8 @@
     // 场上的塔会立刻跟着变强，不是召唤时的快照。
     //
     // ⚠️ TURRET_RATIO_NORM 写死为 `50 × 1.5`（最大 d × 最大 m）。改类型表的 d 列或
-    //    改成大环倍率，这里必须一起改，否则上限就不再是 0.6。
-    const TURRET_ATK_CEILING = 0.6;
+    //    改成大环倍率，这里必须一起改，否则上限就不再是 TURRET_ATK_CEILING。
+    const TURRET_ATK_CEILING = 1.0;
     const TURRET_RATIO_NORM = 50 * 1.5;
     // 敌图腾（怪物的敌对建筑）**单独算**——它不吃玩家的攻击力，走自己那套
     // `3 + f × 0.2`（见 05-update.js 的 updateEnemyTotems）。
@@ -1468,7 +1531,23 @@
     // 后期被 Math.max(24, …) 的地板吃掉，看着改了实际没生效。
     const PLAYER_FIRE_RATE_MUL = 1.2;
 
-    // ---------- v9.23 每层清空奖励的卡牌数 ----------
+    // ---------- v9.25 密文版掉落（开局 / 击杀 / BOSS 磨血） ----------
+    // 三个新来源，全部走「平衡掉落」（触发板与效果板按手牌数量取少的那边，
+    // 见 07-ui.js 的 dropBalancedCard），抽到几张都一次结算、只弹一条汇总。
+    const START_CARDS = 6;              // 正式开局白送 6 张
+    const KILL_CARD_EVERY = 20;         // 每击杀 20 个怪物判定一次
+    const KILL_CARD_CHANCE = 0.30;
+    // BOSS 每被磨掉 25% 血量判定一次。概率表是一张**完整的**分布（50+20+20+10=100），
+    // 所以只掷一次骰子，落在哪段就是几张——不是「先判中不中、再判中几张」。
+    const BOSS_CARD_STEP = 0.25;
+    function rollBossCardCount() {
+        const r = Math.random();
+        if (r < 0.50) return 1;
+        if (r < 0.70) return 2;
+        if (r < 0.90) return 3;
+        return 4;
+    }
+
     // 基础式仍是 2 + 层数/10（第 5 层 2 张、第 50 层 7 张、第 100 层 12 张），
     // 再按「前期 ×1.1、后期 ×0.9」缩放。拐点沿用难度的 DIFF_KNEE = 30。
     // 只影响清层奖励——BOSS 掉落、商人、休整那三个来源不动。
@@ -2193,6 +2272,13 @@
         G.floorKills++;
         G.lastKillFrame = G.frame;
         if (G.killStreak > G.maxCombo) G.maxCombo = G.killStreak;
+        // v9.25: 每击杀 20 个怪物掷一次 30% —— 拿到就 1 张密文版。
+        // 挂在这个统一入口上，三个击杀分支（普通 / BOSS / 自爆连带）自动都算数。
+        // 教程局不发：那是个沙盒，脚本自己发牌，多出来的随机牌会盖掉教学节奏。
+        if (!Tutorial.tookOver && G.killCount % KILL_CARD_EVERY === 0
+            && Math.random() < KILL_CARD_CHANCE) {
+            grantCards(1, `击杀 ${KILL_CARD_EVERY} 只`, '#8ab3d0');
+        }
     }
 
     // ---------- 怪物生成 ----------
@@ -4399,6 +4485,30 @@
         }
     }
 
+    // v9.25: BOSS「磨血奖励」——每磨掉 25% 血量掷一次 rollBossCardCount()（1~4 张）。
+    // 为什么用**每帧轮询**而不是在各个掉血点埋钩子：BOSS 掉血的来源太多（玩家子弹、
+    // 轨迹、图腾、闪电链、消除、火圈、连带伤害……），逐个埋钩子必漏。这里一个循环
+    // 覆盖全部来源，代价只是每帧读一次 hp。
+    // 记在怪自己身上（`_cardMilestone` = 已经结算过几个 25%），所以一只 BOSS 从生到死
+    // 一共只结算 3 次：25% / 50% / 75%。**100%（打死那一下）不算**——击杀本身另有一份
+    // 掉落（2~3 张 + 遗物 + 精华），再来一次就成双重结算了。
+    // 调用点在怪物循环之后，所以被打死的 BOSS 这一帧已经被移出数组，天然不会越界。
+    function tickBossCardMilestones() {
+        for (const m of G.monsters) {
+            if (!m.isBoss || m.hp <= 0 || !m.maxHp) continue;
+            const passed = Math.min(3, Math.floor((1 - m.hp / m.maxHp) / BOSS_CARD_STEP));
+            const done = m._cardMilestone || 0;
+            if (passed <= done) continue;
+            m._cardMilestone = passed;
+            // 一帧跨两道坎（重击 / 消除直接带走一大截）就补两次，不漏发
+            for (let k = done; k < passed; k++) {
+                const n = rollBossCardCount();
+                grantCards(n, `BOSS 磨血 ${Math.round((k + 1) * 25)}%`, '#ff6688');
+                showFloatingText(m.x, m.y - m.r - 20, '📥+' + n, '#ff88aa');
+            }
+        }
+    }
+
     // ---------- 更新 ----------
     function update() {
         if (G.gameOver) return;
@@ -4885,6 +4995,8 @@
         updateSeals();
         // v9.25: 圈层（削减/减速/火焰）的倒计时与火焰伤害
         tickAffixZones();
+        // v9.25: BOSS 磨血奖励（必须在怪物循环之后——见函数上的注释）
+        tickBossCardMilestones();
 
         // v9.25: 「消除」技能冷却 + BOSS 词条横幅的倒计时。
         // 两者都是纯粹的 UI 节拍，挨着放。
@@ -5983,7 +6095,11 @@
     }
 
     // ---------- 平衡掉落 ----------
-    function dropBalancedCard() {
+    // v9.25: 多了一次发放 n 张的场景（开局 / 击杀 / BOSS 磨血），逐张调这个函数的话
+    // 会把 setFeedback / updateUI 也做 n 遍——屏幕上刷 n 行、手牌重绘 n 次。
+    // 所以拆出 `silent`：连发时静默取牌，由 grantCards() 统一结算一次。
+    // 不传参的老调用点行为完全不变。
+    function dropBalancedCard(silent, source) {
         const trigCount = G.hand.filter(c => c.type === 'trigger').length;
         const effCount = G.hand.filter(c => c.type === 'effect').length;
         let dropType;
@@ -5995,14 +6111,30 @@
         const card = dropType === 'trigger' ? randomTrigger() : randomEffect();
         if (G.hand.length >= 20) {
             const old = G.hand.shift();
-            setFeedback(`📥 ${old.emoji}→${card.emoji}${card.label} (替换)`, '#8ab3d0');
-        } else {
+            if (!silent) setFeedback(`📥 ${old.emoji}→${card.emoji}${card.label} (替换)`, '#8ab3d0');
+        } else if (!silent) {
             setFeedback(`📥 拾取 ${card.emoji} ${card.label}`, '#8ab3d0');
         }
         G.hand.push({ ...card, type: dropType });
         G.floorCardsObtained++;
-        logEvent('card_drop', { card: card.id, cardLabel: card.label, cardType: dropType, source: 'kill' });
+        logEvent('card_drop', { card: card.id, cardLabel: card.label, cardType: dropType, source: source || 'kill' });
+        if (!silent) updateUI();
+        return { ...card, type: dropType };
+    }
+
+    // v9.25: 一次发 n 张密文版。来源：开局白送 6 张、每 20 杀 30%、BOSS 每磨 25% 血。
+    // 「获得的个数」必须**在屏幕里**读得到——布局用的是画布上的 showNotification，
+    // 不是右侧面板的 setFeedback：手机端面板是收起的抽屉，战斗时根本看不见。
+    function grantCards(n, reason, color) {
+        if (n <= 0) return [];
+        const got = [];
+        for (let i = 0; i < n; i++) got.push(dropBalancedCard(true, reason));
         updateUI();
+        const names = got.map(c => c.emoji + c.label).join(' ');
+        setFeedback(`📥 ${reason} · 获得 ${n} 张密文版：${names}`, color || '#8ab3d0');
+        showNotification(`📥 密文版 ×${n}`, color || '#8ab3d0', 150);
+        logEvent('card_grant', { count: n, reason, cards: got.map(c => c.id) });
+        return got;
     }
 
     // ---------- v9.4 遗物系统 ----------
@@ -6213,6 +6345,12 @@
                 selectClass(idx);
             });
         });
+        // v9.25 自检：职业遮罩的标题是**静态 HTML**（body.html 里就写着 active），
+        // 卡片却是这里现填的。所以「只看得到标题、看不到卡」= 这一段没跑成。
+        // 本机复现不出来，就就地断言一次，异常交给页面底部的自检条（__bootError）。
+        if (row.children.length !== CLASSES.length && window.__bootError) {
+            window.__bootError(`职业卡没渲染出来：CLASSES 有 ${CLASSES.length} 个，DOM 里只有 ${row.children.length} 个`);
+        }
 
         // 教程：开局遮罩上的说明 + 跳过教程（只看没看过教程的那一次）
         const h2 = overlay.querySelector('h2');
@@ -6274,6 +6412,12 @@
         showNotification(`🧙 ${cls.name}！${cls.desc.substring(0, 20)}...`, '#f5c542', 240);
         addScore(10);
         startFloor();
+        // v9.25: 正式开局的启动资金——随机 6 张密文版。
+        // 教程局**不发**：教程是独立沙盒，它的 cfg.hand 会预设手牌，白送 6 张会
+        // 把教学节奏冲掉（而且反正 Tutorial 结束时会 restartRunAfterTutorial()
+        // 整体重来）。判定沿用 Tutorial.seen —— 它只在这一局的教程真正结束 / 被跳过后
+        // 才立起来，所以「重选职业 → 发牌」正好只发生在正式开局那一次。
+        if (Tutorial.seen) grantCards(START_CARDS, '开局补给', '#f5c542');
         updateUI();
     }
 
@@ -6988,35 +7132,56 @@
     }
 
     // 初始化：识别设备 → 切布局（桌面端这里什么都不会发生）
-    G.mobileMode = detectMobileMode();
-    applyMobileLayout();
-    syncFullscreenBtns();
+    // v9.25: 整块裹一层 try/catch。这段全是**手机端增强项**（全屏引导、摇杆视觉、
+    // 转屏补量），任何一项在某个具体机型上炸了，都不该把后面的 initClassSelection()
+    // 一起带走——那正是「只看到职业选择标题、没有卡牌」的样子（#classRow 靠 JS 填）。
+    // 挂掉时把真实报错交给页面底部的自检条（template.html 的 __bootError），
+    // 玩家截图就能定位；游戏本体照常能开。
+    try {
+        G.mobileMode = detectMobileMode();
+        applyMobileLayout();
+        syncFullscreenBtns();
 
-    // ---- 全屏引导（v9.25）----
-    // requestFullscreen() 必须由用户手势触发，所以只能做「点一下再进」。此前只在顶栏
-    // 放了个 ⛶ 小按钮，玩家注意不到，进去也只是个带地址栏的窄条。
-    // 盖在 #classOverlay 之上（z-index 更高，见 styles.css），点掉之后才露出职业选择。
-    // active 只在这里加这一次、resetGame() 全程不碰——「只弹一次」是结构自带的，
-    // 不需要再存一个 flag。
-    const fsOverlay = document.getElementById('fsOverlay');
-    if (G.mobileMode && fsOverlay) {
-        if (!document.fullscreenElement) fsOverlay.classList.add('active');
-        const enterFullscreenOnce = () => {
-            // 无论成功与否都摘掉这一层：iOS Safari 不支持 documentElement 全屏，
-            // 不能让玩家卡在引导页上进不去。
-            fsOverlay.classList.remove('active');
-            toggleFullscreen();
-        };
-        fsOverlay.addEventListener('touchend', e => { e.preventDefault(); enterFullscreenOnce(); }, { passive: false });
-        fsOverlay.addEventListener('mousedown', e => { e.preventDefault(); enterFullscreenOnce(); });
+        // ---- 全屏引导（v9.25）----
+        // requestFullscreen() 必须由用户手势触发，所以只能做「点一下再进」。此前只在顶栏
+        // 放了个 ⛶ 小按钮，玩家注意不到，进去也只是个带地址栏的窄条。
+        // 盖在 #classOverlay 之上（z-index 更高，见 styles.css），点掉之后才露出职业选择。
+        // active 只在这里加这一次、resetGame() 全程不碰——「只弹一次」是结构自带的，
+        // 不需要再存一个 flag。
+        const fsOverlay = document.getElementById('fsOverlay');
+        if (G.mobileMode && fsOverlay) {
+            if (!document.fullscreenElement) fsOverlay.classList.add('active');
+            const enterFullscreenOnce = () => {
+                // 无论成功与否都摘掉这一层：iOS Safari 不支持 documentElement 全屏，
+                // 不能让玩家卡在引导页上进不去。
+                fsOverlay.classList.remove('active');
+                toggleFullscreen();
+                // v9.25: 摘掉这一层之后，**同一次点按**还会再派发一次合成事件
+                // （touchend → mousedown → click），落点正是刚才那一层所在的位置——
+                // 也就是屏幕正中，而职业卡也正好排在屏幕正中。不挡住的话，玩家点一下
+                // 「进入全屏」，职业就被那一下顺手选掉了，等于**根本没有机会选职业**。
+                // 这里给 body 挂 400ms 的 `.fs-dismissing`，CSS 把 .class-card 的
+                // pointer-events 关掉，让合成事件落到遮罩上而不是卡片上。
+                if (document.body) {
+                    document.body.classList.add('fs-dismissing');
+                    setTimeout(() => document.body.classList.remove('fs-dismissing'), 400);
+                }
+            };
+            fsOverlay.addEventListener('touchend', e => { e.preventDefault(); enterFullscreenOnce(); }, { passive: false });
+            fsOverlay.addEventListener('mousedown', e => { e.preventDefault(); enterFullscreenOnce(); });
+        }
+
+        // 闲置提示环的尺寸要在第一次按下之前就量准，所以开局先算一次。
+        // 转屏 / 地址栏收放都会改画面高度，摇杆半径跟着变——没在按的时候补量一次。
+        if (G.mobileMode) sizeJoyVisual(joyRadiusPx());
+        window.addEventListener('resize', () => {
+            if (G.mobileMode && !G.stickActive) sizeJoyVisual(joyRadiusPx());
+        });
+    } catch (err) {
+        // 兜底要能失败得很安静：报错只走自检条 + 控制台，不再往外抛。
+        if (window.__bootError) window.__bootError('手机端初始化失败：' + (err && err.message));
+        if (window.console && console.error) console.error('[boot/mobile]', err);
     }
-
-    // 闲置提示环的尺寸要在第一次按下之前就量准，所以开局先算一次。
-    // 转屏 / 地址栏收放都会改画面高度，摇杆半径跟着变——没在按的时候补量一次。
-    if (G.mobileMode) sizeJoyVisual(joyRadiusPx());
-    window.addEventListener('resize', () => {
-        if (G.mobileMode && !G.stickActive) sizeJoyVisual(joyRadiusPx());
-    });
 
     // ---------- v9.10 导出对局记录 ----------
     function exportGameLog() {
@@ -7498,6 +7663,10 @@
     // 启动游戏循环
     tutorialCheckBalance();
     gameLoop();
+
+    // v9.25: 启动已跑完——之后再抛的错都是运行期问题，不该再触发底部那条
+    // 自检条（它只负责「启动失败」，见 template.html 的 __bootError）。
+    window.__booted = true;
 </script>
 </body>
 </html>

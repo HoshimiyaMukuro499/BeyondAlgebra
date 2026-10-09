@@ -7,9 +7,13 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const file = process.argv[2] || '密文轨迹demo9.23.html';
 const html = fs.readFileSync(path.join(ROOT, file), 'utf8');
-const m = html.match(/<script>([\s\S]*?)<\/script>\s*<\/body>/);
-if (!m) throw new Error('没找到 <script>');
-const src = m[1];
+// v9.25 起模板里有两个 <script>（<head> 里的启动自检 + <body> 末尾的主脚本），
+// 所以不能再用「第一个 <script> 到 </body>」那个正则——它会把 head 那段也吞进来。
+// 主脚本永远是 </body> 之前的最后一个 <script>。
+const bodyEnd = html.slice(0, html.lastIndexOf('</body>'));
+const scriptOpen = bodyEnd.lastIndexOf('<script>');
+if (scriptOpen < 0) throw new Error('没找到 <script>');
+const src = bodyEnd.slice(scriptOpen + '<script>'.length, bodyEnd.lastIndexOf('</script>'));
 
 // ---------- 假 DOM ----------
 const noop = () => {};
@@ -150,6 +154,16 @@ const factory = new Function(
   ' joyRadiusPx: (typeof joyRadiusPx !== "undefined") ? joyRadiusPx : null,' +
   ' syncGameOverUI: (typeof syncGameOverUI !== "undefined") ? syncGameOverUI : null,' +
   ' selectClass: (typeof selectClass !== "undefined") ? selectClass : null,' +
+  // v9.25 密文版掉落：开局 6 张 / 每 20 杀 30% / BOSS 每磨 25% 血 1~4 张
+  ' START_CARDS: (typeof START_CARDS !== "undefined") ? START_CARDS : null,' +
+  ' KILL_CARD_EVERY: (typeof KILL_CARD_EVERY !== "undefined") ? KILL_CARD_EVERY : null,' +
+  ' KILL_CARD_CHANCE: (typeof KILL_CARD_CHANCE !== "undefined") ? KILL_CARD_CHANCE : null,' +
+  ' BOSS_CARD_STEP: (typeof BOSS_CARD_STEP !== "undefined") ? BOSS_CARD_STEP : null,' +
+  ' rollBossCardCount: (typeof rollBossCardCount !== "undefined") ? rollBossCardCount : null,' +
+  ' grantCards: (typeof grantCards !== "undefined") ? grantCards : null,' +
+  ' dropBalancedCard: (typeof dropBalancedCard !== "undefined") ? dropBalancedCard : null,' +
+  ' registerKill: (typeof registerKill !== "undefined") ? registerKill : null,' +
+  ' tickBossCardMilestones: (typeof tickBossCardMilestones !== "undefined") ? tickBossCardMilestones : null,' +
   // 已删符号的存在性探针——拿 KILL_BURSTS/MAP_NODES 这类名字去断言「确实删干净了」
   ' deletedSymbols: { KILL_BURSTS: typeof KILL_BURSTS !== "undefined",' +
   '  MAP_NODES: typeof MAP_NODES !== "undefined",' +
@@ -193,7 +207,10 @@ const { AFFIX_ZONE_R_MUL, AFFIX_ZONE_MAX_PER_KIND, bossEarlyMul, BOSS_EARLY_RAMP
         FIRE_ZONE_TICK, FIRE_ZONE_DMG_PER_TICK, ELIMINATE_COOLDOWN, tryEliminate, activateEliminate,
         TURRET_ATK_CEILING, TURRET_RATIO_NORM, PLAYER_FIRE_RATE_MUL,
         getPlayerAttackPower, getTurretAttackPower,
-        setStickFromTouch, releaseStick, joyRadiusPx, syncGameOverUI, selectClass } = api;
+        setStickFromTouch, releaseStick, joyRadiusPx, syncGameOverUI, selectClass,
+        START_CARDS, KILL_CARD_EVERY, KILL_CARD_CHANCE, BOSS_CARD_STEP,
+        rollBossCardCount, grantCards, dropBalancedCard, registerKill,
+        tickBossCardMilestones } = api;
 const HAS_V925 = !!(bossEarlyMul && spawnAffixZone && tickAffixZones && tryEliminate
                     && getPlayerAttackPower && setStickFromTouch);
 
@@ -1789,8 +1806,8 @@ if (!HAS_V925) {
   tw.x = 760; tw.y = 540;
   ok(getTurretAtkZoneMul(tw) === 1 && getTurretRateZoneMul(tw) === 1, '图腾挪出圈外就恢复正常');
 
-  // 19k 图腾攻击力：上限 = 玩家攻击力 × 0.6，按旧 d×m 比例分配
-  ok(Math.abs(TURRET_ATK_CEILING - 0.6) < 1e-12, 'TURRET_ATK_CEILING = 0.6',
+  // 19k 图腾攻击力：上限 = 玩家攻击力 × 1.0，按旧 d×m 比例分配
+  ok(Math.abs(TURRET_ATK_CEILING - 1.0) < 1e-12, 'TURRET_ATK_CEILING = 1.0',
     `got ${TURRET_ATK_CEILING}`);
   ok(TURRET_RATIO_NORM === 75, 'TURRET_RATIO_NORM = 50 × 1.5 = 75', `got ${TURRET_RATIO_NORM}`);
   fresh();
@@ -1802,16 +1819,16 @@ if (!HAS_V925) {
   const pAtk2 = getPlayerAttackPower();
   ok(Math.abs(pAtk2 / pAtk1 - 5) < 1e-9, '面板攻击涨 5 倍，基准威力跟着涨 5 倍',
     `${pAtk1.toFixed(2)} → ${pAtk2.toFixed(2)}`);
-  // 归一化到最大的一座：大环闪电（ratio = 50 × 1.5 = 75）正好顶到 0.6 倍
-  ok(Math.abs(getTurretAttackPower({ ratio: 50 * 1.5 }) - pAtk2 * 0.6) < 1e-9,
-    '大环闪电 = 玩家攻击力 × 0.6（上限）',
-    `got ${getTurretAttackPower({ ratio: 75 }).toFixed(3)}，期望 ${(pAtk2 * 0.6).toFixed(3)}`);
+  // 归一化到最大的一座：大环闪电（ratio = 50 × 1.5 = 75）正好顶到 1.0 倍
+  ok(Math.abs(getTurretAttackPower({ ratio: 50 * 1.5 }) - pAtk2 * 1.0) < 1e-9,
+    '大环闪电 = 玩家攻击力 × 1.0（上限）',
+    `got ${getTurretAttackPower({ ratio: 75 }).toFixed(3)}，期望 ${(pAtk2 * 1.0).toFixed(3)}`);
   ok(getTurretAttackPower({ ratio: 75 }) > getTurretAttackPower({ ratio: 45 }),
     '大环闪电 > 大环基础塔（类型权重生效）');
   ok(getTurretAttackPower({ ratio: 30 }) > getTurretAttackPower({ ratio: 18 }),
     '中环基础塔 > 中环速射塔（类型权重生效）');
-  ok(Math.abs(getTurretAttackPower({ ratio: 30 }) - pAtk2 * 0.6 * 30 / 75) < 1e-9,
-    '中环基础塔 = 上限 × 30/75 = 0.24 倍玩家攻击力',
+  ok(Math.abs(getTurretAttackPower({ ratio: 30 }) - pAtk2 * 1.0 * 30 / 75) < 1e-9,
+    '中环基础塔 = 上限 × 30/75 = 0.4 倍玩家攻击力',
     `got ${getTurretAttackPower({ ratio: 30 }).toFixed(3)}`);
   // 真的走一遍图腾开火：造一座中环基础塔（ratio = 30 × 1.0）、放一只怪，跑够一个冷却周期
   const T = { x: 400, y: 280, r: 14, type: 'basic', emoji: '🗼', color: '#88aacc',
@@ -1822,9 +1839,9 @@ if (!HAS_V925) {
   const mHpBefore = G.monsters[0].hp;
   update();
   const dealt = mHpBefore - G.monsters[0].hp;
-  const expectTurret = pAtk2 * 0.6 * 30 / 75;
+  const expectTurret = pAtk2 * 1.0 * 30 / 75;
   ok(Math.abs(dealt - expectTurret) < 1e-6,
-    '图腾单发伤害 = 玩家攻击力 × 0.6 × ratio/75',
+    '图腾单发伤害 = 玩家攻击力 × 1.0 × ratio/75',
     `got ${dealt.toFixed(3)}，期望 ${expectTurret.toFixed(3)}`);
   // 削减圈不会让塔突破上限，只会往下削
   ok(getTurretAttackPower({ ratio: 75 }) * 0.6 < getTurretAttackPower({ ratio: 75 }),
@@ -1968,6 +1985,155 @@ if (!HAS_V925) {
   let fsThrew = null;
   try { syncGameOverUI(); } catch (e) { fsThrew = e; }
   ok(!fsThrew, 'syncGameOverUI() 在没有真实 DOM 的环境里不抛异常', fsThrew && fsThrew.message);
+
+  // ------------------------------------------------------------------
+  // 19r 密文版掉落：开局 6 张 / 每 20 杀 30% / BOSS 每磨 25% 血 1~4 张
+  // ------------------------------------------------------------------
+  ok(START_CARDS === 6, '开局白送 6 张', `got ${START_CARDS}`);
+  ok(KILL_CARD_EVERY === 20, '每 20 杀判定一次', `got ${KILL_CARD_EVERY}`);
+  ok(Math.abs(KILL_CARD_CHANCE - 0.30) < 1e-12, '击杀奖励概率 30%', `got ${KILL_CARD_CHANCE}`);
+  ok(Math.abs(BOSS_CARD_STEP - 0.25) < 1e-12, 'BOSS 每 25% 血判定一次', `got ${BOSS_CARD_STEP}`);
+
+  // 概率分布：50% 1 张 / 20% 2 张 / 20% 3 张 / 10% 4 张（合计 100%，只掷一次骰子）
+  const rollHist = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  const ROLL_N = 40000;
+  let rollBad = null;
+  for (let i = 0; i < ROLL_N; i++) {
+    const n = rollBossCardCount();
+    if (!Number.isInteger(n) || n < 1 || n > 4) { rollBad = n; break; }
+    rollHist[n]++;
+  }
+  ok(rollBad === null, 'rollBossCardCount() 只返回 1~4 的整数', `got ${rollBad}`);
+  const rollPct = k => rollHist[k] / ROLL_N;
+  ok(Math.abs(rollPct(1) - 0.50) < 0.03 && Math.abs(rollPct(2) - 0.20) < 0.03
+     && Math.abs(rollPct(3) - 0.20) < 0.03 && Math.abs(rollPct(4) - 0.10) < 0.03,
+    `${ROLL_N} 次抽样的分布 ≈ 50/20/20/10`,
+    `1:${(rollPct(1) * 100).toFixed(2)}% 2:${(rollPct(2) * 100).toFixed(2)}% ` +
+    `3:${(rollPct(3) * 100).toFixed(2)}% 4:${(rollPct(4) * 100).toFixed(2)}%`);
+
+  // 发牌：张数进手牌，并且「获得的个数」要在画布的 G.notifications 里读得到
+  // （不能只写 setFeedback —— 那是右侧面板，手机端在收起的抽屉里，战斗时看不见）
+  fresh();
+  G.hand.length = 0;
+  G.notifications.length = 0;
+  const granted = grantCards(3, '测试来源');
+  ok(G.hand.length === 3 && granted.length === 3, 'grantCards(3) 手牌 +3',
+    `hand=${G.hand.length} granted=${granted.length}`);
+  const noteText = G.notifications.map(n => n.text).join(' | ');
+  ok(/×3/.test(noteText), '屏幕上打出「获得 3 张」的通知', noteText);
+  ok(G.notifications.length === 1, '一次发 3 张只弹一条通知（不是刷 3 行）',
+    `got ${G.notifications.length}`);
+  ok(grantCards(0, '零张') .length === 0 && G.hand.length === 3, 'grantCards(0) 是空操作');
+  // 不传参的老调用点行为不变（老 dropBalancedCard() 只是一张牌 + 一条反馈）
+  const oldCard = dropBalancedCard();
+  ok(oldCard && oldCard.id && G.hand.length === 4 && oldCard.ratio === undefined,
+    'dropBalancedCard() 不传参仍按老样子发 1 张并返回这张牌',
+    `hand=${G.hand.length} card=${oldCard && oldCard.id}`);
+
+  // 每 20 杀 30%：把骰子钉死，逐条验证「第 20/40 杀命中、未命中时一张不发」
+  const realRandom = Math.random;
+  fresh();
+  G.killCount = 0; G.hand.length = 0;
+  Math.random = () => 0.01;                 // 必中 30%
+  for (let i = 0; i < KILL_CARD_EVERY - 1; i++) registerKill();
+  ok(G.hand.length === 0, '第 19 杀还没到判定点（不足 20 不发）', `got ${G.hand.length}`);
+  registerKill();                           // 第 20 杀
+  ok(G.hand.length === 1, '第 20 杀命中 30% → 1 张密文版', `got ${G.hand.length}`);
+  for (let i = 0; i < KILL_CARD_EVERY; i++) registerKill();
+  ok(G.hand.length === 2, '第 40 杀再中一次（计数是累计击杀，不是层内击杀）',
+    `got ${G.hand.length}`);
+  Math.random = () => 0.99;                 // 必不中
+  const handBeforeMiss = G.hand.length;
+  for (let i = 0; i < KILL_CARD_EVERY * 3; i++) registerKill();
+  ok(G.hand.length === handBeforeMiss, '30% 没中时一张都不发', `got ${G.hand.length}`);
+  // 教程局不发（沙盒里脚本自己发牌，多出来的随机牌会冲掉教学节奏）
+  Tutorial.tookOver = true;
+  Math.random = () => 0.01;
+  const handBeforeTut = G.hand.length;
+  for (let i = 0; i < KILL_CARD_EVERY; i++) registerKill();
+  ok(G.hand.length === handBeforeTut, '教程局里击杀不发牌', `got ${G.hand.length}`);
+  Tutorial.tookOver = false;
+  Math.random = realRandom;
+
+  // BOSS 磨血：25/50/75 各结算一次，100%（打死那一下）不结算——否则和击杀掉落双重发牌
+  fresh();
+  G.hand.length = 0;
+  Math.random = () => 0.01;                 // rollBossCardCount() → 1 张
+  const bossM = mkM(400, 280);
+  bossM.isBoss = true; bossM.hp = bossM.maxHp = 1000;
+  G.monsters = [bossM];
+  bossM.hp = 800; tickBossCardMilestones();
+  ok(G.hand.length === 0, '只磨掉 20%，不到 25% 不发', `got ${G.hand.length}`);
+  bossM.hp = 750; tickBossCardMilestones();
+  ok(G.hand.length === 1, '磨掉 25% → 发 1 张', `got ${G.hand.length}`);
+  tickBossCardMilestones(); tickBossCardMilestones();
+  ok(G.hand.length === 1, '同一道坎只结算一次（每帧轮询也不会重复发）', `got ${G.hand.length}`);
+  bossM.hp = 500; tickBossCardMilestones();
+  ok(G.hand.length === 2, '磨掉 50% → 再发一次', `got ${G.hand.length}`);
+  bossM.hp = 250; tickBossCardMilestones();
+  ok(G.hand.length === 3, '磨掉 75% → 第三次', `got ${G.hand.length}`);
+  bossM.hp = 100; tickBossCardMilestones();
+  ok(G.hand.length === 3, '第 4 道坎（100% = 击杀）不重复发牌', `got ${G.hand.length}`);
+  bossM.hp = 0; tickBossCardMilestones();
+  ok(G.hand.length === 3, 'BOSS 血量为 0（已死）时不再发', `got ${G.hand.length}`);
+  // 一帧跨两道坎（重击 / 消除）要补两次，不能只发一次
+  bossM.hp = bossM.maxHp = 1000; bossM._cardMilestone = 0;
+  G.hand.length = 0;
+  bossM.hp = 400; tickBossCardMilestones();     // 直接掉到 60% → 跨过 25% 与 50% 两道
+  ok(G.hand.length === 2, '一帧跨两道坎补发两次（不漏发）', `got ${G.hand.length}`);
+  // 换了骰子之后张数跟着走：4 张那条支路
+  Math.random = () => 0.95;                     // → 4 张
+  bossM.hp = bossM.maxHp = 1000; bossM._cardMilestone = 0;
+  G.hand.length = 0;
+  bossM.hp = 500; tickBossCardMilestones();
+  ok(G.hand.length === 8, '50% 那档直接进 4 张分支 → 一次发 4（两道坎共 8）',
+    `got ${G.hand.length}`);
+  // 通知里要有张数
+  ok(G.notifications.some(n => /×4/.test(n.text)), '屏幕上打出「×4」',
+    G.notifications.map(n => n.text).join(' | '));
+  // 小怪不该触发磨血奖励
+  fresh();
+  G.hand.length = 0;
+  const smallM = mkM(400, 280); smallM.hp = 10; smallM.maxHp = 1000;
+  G.monsters = [smallM];
+  tickBossCardMilestones();
+  ok(G.hand.length === 0, '非 BOSS 的小怪不触发磨血奖励', `got ${G.hand.length}`);
+  Math.random = realRandom;
+
+  // 正式开局发 6 张；教程局不发（判定读 Tutorial.seen）
+  fresh();
+  Tutorial.seen = false; Tutorial.finished = false;
+  G.hand.length = 0;
+  selectClass(0);
+  ok(G.hand.length === 0, '教程局选完职业不发开局 6 张', `got ${G.hand.length}`);
+  fresh();
+  Tutorial.seen = true;
+  G.hand.length = 0;
+  selectClass(0);
+  ok(G.hand.length === START_CARDS, `正式开局选完职业白送 ${START_CARDS} 张`,
+    `got ${G.hand.length}`);
+  ok(G.notifications.some(n => /×6/.test(n.text)), '开局也把「×6」打在屏幕上',
+    G.notifications.map(n => n.text).join(' | '));
+  Tutorial.seen = false;
+
+  // ------------------------------------------------------------------
+  // 19s 启动自检 + 全屏引导的点击穿透防护（HTML / CSS 层面的保证）
+  // 「只看到职业选择标题、没有卡」那个报障本机复现不出来，只能把这些
+  // 兜底本身锁住——至少下一次报障时能拿到真实报错。
+  // ------------------------------------------------------------------
+  ok(html.indexOf('bootErrorBar') > -1, '页面里有启动自检条 #bootErrorBar');
+  ok(html.indexOf('__bootError') > -1, '页面里有 __bootError 兜底函数');
+  ok(html.indexOf('__bootError') < html.lastIndexOf('<script>'),
+    '__bootError 定义在主脚本之前（否则它自己抛的错就抓不到）',
+    `__bootError@${html.indexOf('__bootError')} vs 主脚本@${html.lastIndexOf('<script>')}`);
+  ok(/__booted/.test(html), '有「启动已完成」标记 __booted（避免把运行时报错也糊到屏幕上）');
+  ok(/fs-dismissing\s+\.class-card\s*\{\s*pointer-events:\s*none/.test(html),
+    '摘掉全屏引导后的 400ms 里职业卡不吃点击（挡掉点按合成出来的那一次 mousedown）');
+  ok(html.indexOf('fs-dismissing') < html.lastIndexOf('<script>'),
+    'fs-dismissing 的 CSS 在主脚本之前就位');
+  // 主脚本必须是 </body> 前最后一个 <script>——探针靠这条定位源码
+  ok(html.lastIndexOf('<script>') > html.lastIndexOf('</head>'),
+    '主脚本在 </head> 之后（<head> 里那段自检不会顶替它）');
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);

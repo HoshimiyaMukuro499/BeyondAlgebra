@@ -478,3 +478,7 @@
     // 启动游戏循环
     tutorialCheckBalance();
     gameLoop();
+
+    // v9.25: 启动已跑完——之后再抛的错都是运行期问题，不该再触发底部那条
+    // 自检条（它只负责「启动失败」，见 template.html 的 __bootError）。
+    window.__booted = true;

@@ -340,7 +340,7 @@
     const ELIMINATE_COOLDOWN = 30 * 60;
 
     // ---------- v9.25 玩家 / 图腾的出手强度 ----------
-    // 玩家图腾（建筑）的攻击力**上限**是玩家攻击力的 0.6 倍，但类型之间仍按旧比例分：
+    // 玩家图腾（建筑）的攻击力**上限**是玩家攻击力的 1.0 倍，但类型之间仍按旧比例分：
     //
     //   单发伤害 = 玩家攻击力 × TURRET_ATK_CEILING × (d × m) / TURRET_RATIO_NORM
     //
@@ -353,8 +353,8 @@
     // 场上的塔会立刻跟着变强，不是召唤时的快照。
     //
     // ⚠️ TURRET_RATIO_NORM 写死为 `50 × 1.5`（最大 d × 最大 m）。改类型表的 d 列或
-    //    改成大环倍率，这里必须一起改，否则上限就不再是 0.6。
-    const TURRET_ATK_CEILING = 0.6;
+    //    改成大环倍率，这里必须一起改，否则上限就不再是 TURRET_ATK_CEILING。
+    const TURRET_ATK_CEILING = 1.0;
     const TURRET_RATIO_NORM = 50 * 1.5;
     // 敌图腾（怪物的敌对建筑）**单独算**——它不吃玩家的攻击力，走自己那套
     // `3 + f × 0.2`（见 05-update.js 的 updateEnemyTotems）。
@@ -362,7 +362,23 @@
     // 后期被 Math.max(24, …) 的地板吃掉，看着改了实际没生效。
     const PLAYER_FIRE_RATE_MUL = 1.2;
 
-    // ---------- v9.23 每层清空奖励的卡牌数 ----------
+    // ---------- v9.25 密文版掉落（开局 / 击杀 / BOSS 磨血） ----------
+    // 三个新来源，全部走「平衡掉落」（触发板与效果板按手牌数量取少的那边，
+    // 见 07-ui.js 的 dropBalancedCard），抽到几张都一次结算、只弹一条汇总。
+    const START_CARDS = 6;              // 正式开局白送 6 张
+    const KILL_CARD_EVERY = 20;         // 每击杀 20 个怪物判定一次
+    const KILL_CARD_CHANCE = 0.30;
+    // BOSS 每被磨掉 25% 血量判定一次。概率表是一张**完整的**分布（50+20+20+10=100），
+    // 所以只掷一次骰子，落在哪段就是几张——不是「先判中不中、再判中几张」。
+    const BOSS_CARD_STEP = 0.25;
+    function rollBossCardCount() {
+        const r = Math.random();
+        if (r < 0.50) return 1;
+        if (r < 0.70) return 2;
+        if (r < 0.90) return 3;
+        return 4;
+    }
+
     // 基础式仍是 2 + 层数/10（第 5 层 2 张、第 50 层 7 张、第 100 层 12 张），
     // 再按「前期 ×1.1、后期 ×0.9」缩放。拐点沿用难度的 DIFF_KNEE = 30。
     // 只影响清层奖励——BOSS 掉落、商人、休整那三个来源不动。

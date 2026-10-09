@@ -130,6 +130,12 @@
     <div class="fs-sub">横屏游玩体验最好 · 显示不全时请旋转设备</div>
 </div>
 
+<!-- v9.25 启动自检条。手机端报过「只看到职业选择标题、既没有卡牌也没有按钮」——
+     那正好是「脚本没跑完」的样子（#classRow 靠 JS 填、#fsOverlay 靠 JS 点亮）。
+     本机复现不出来，所以留一个兜底：启动期的任何异常都直接写在屏幕底部，
+     玩家截个图就能定位，而不是对着一片空白干瞪眼。见 template.html 的 __bootError。 -->
+<div class="boot-error" id="bootErrorBar"></div>
+
 <!-- v9.4 职业选择 -->
 <div class="class-overlay active" id="classOverlay">
     <h2>🧙 选择你的密文法师</h2>

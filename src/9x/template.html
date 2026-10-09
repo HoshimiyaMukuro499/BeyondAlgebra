@@ -9,6 +9,37 @@
     <style>
 {{CSS}}
     </style>
+
+    <!-- v9.25 启动自检。必须在主脚本之前挂上，才能抓到主脚本自己抛出来的异常。
+         手机端报过「只看到『选择你的密文法师』这一行字，没有全屏引导、也没有职业卡」，
+         而那正是「主脚本没跑完」的样子：#classRow 靠 JS 填、#fsOverlay 靠 JS 点亮，
+         两者同时缺席就说明脚本在 initClassSelection() 之前就断了。
+         本机（桌面 Chrome / iPhone UA 的 headless Chrome / DevTools 设备模拟）全都
+         复现不出来，所以先留一个兜底把真实报错显示出来，而不是继续猜。 -->
+    <script>
+    (function () {
+        window.__booted = false;
+        window.__bootErrorShown = false;
+        // 只报一次、且只在启动期报——进游戏之后的运行时报错跟这个兜底无关，
+        // 不该再往屏幕上糊一条红字。
+        window.__bootError = function (msg) {
+            try {
+                if (window.__bootErrorShown) return;
+                window.__bootErrorShown = true;
+                var bar = document.getElementById('bootErrorBar');
+                if (!bar) return;
+                bar.textContent = '⚠️ 启动出错，请截图发给作者：' + String(msg);
+                bar.classList.add('active');
+            } catch (e) { /* 兜底本身不能再抛 */ }
+        };
+        window.addEventListener('error', function (e) {
+            if (window.__booted) return;
+            var m = (e && e.message) || 'unknown error';
+            if (e && e.filename) m += ' @ ' + e.filename + ':' + e.lineno;
+            window.__bootError(m);
+        });
+    })();
+    </script>
 </head>
 <body>
 {{BODY}}

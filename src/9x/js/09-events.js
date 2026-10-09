@@ -374,33 +374,54 @@
     }
 
     // 初始化：识别设备 → 切布局（桌面端这里什么都不会发生）
-    G.mobileMode = detectMobileMode();
-    applyMobileLayout();
-    syncFullscreenBtns();
+    // v9.25: 整块裹一层 try/catch。这段全是**手机端增强项**（全屏引导、摇杆视觉、
+    // 转屏补量），任何一项在某个具体机型上炸了，都不该把后面的 initClassSelection()
+    // 一起带走——那正是「只看到职业选择标题、没有卡牌」的样子（#classRow 靠 JS 填）。
+    // 挂掉时把真实报错交给页面底部的自检条（template.html 的 __bootError），
+    // 玩家截图就能定位；游戏本体照常能开。
+    try {
+        G.mobileMode = detectMobileMode();
+        applyMobileLayout();
+        syncFullscreenBtns();
 
-    // ---- 全屏引导（v9.25）----
-    // requestFullscreen() 必须由用户手势触发，所以只能做「点一下再进」。此前只在顶栏
-    // 放了个 ⛶ 小按钮，玩家注意不到，进去也只是个带地址栏的窄条。
-    // 盖在 #classOverlay 之上（z-index 更高，见 styles.css），点掉之后才露出职业选择。
-    // active 只在这里加这一次、resetGame() 全程不碰——「只弹一次」是结构自带的，
-    // 不需要再存一个 flag。
-    const fsOverlay = document.getElementById('fsOverlay');
-    if (G.mobileMode && fsOverlay) {
-        if (!document.fullscreenElement) fsOverlay.classList.add('active');
-        const enterFullscreenOnce = () => {
-            // 无论成功与否都摘掉这一层：iOS Safari 不支持 documentElement 全屏，
-            // 不能让玩家卡在引导页上进不去。
-            fsOverlay.classList.remove('active');
-            toggleFullscreen();
-        };
-        fsOverlay.addEventListener('touchend', e => { e.preventDefault(); enterFullscreenOnce(); }, { passive: false });
-        fsOverlay.addEventListener('mousedown', e => { e.preventDefault(); enterFullscreenOnce(); });
+        // ---- 全屏引导（v9.25）----
+        // requestFullscreen() 必须由用户手势触发，所以只能做「点一下再进」。此前只在顶栏
+        // 放了个 ⛶ 小按钮，玩家注意不到，进去也只是个带地址栏的窄条。
+        // 盖在 #classOverlay 之上（z-index 更高，见 styles.css），点掉之后才露出职业选择。
+        // active 只在这里加这一次、resetGame() 全程不碰——「只弹一次」是结构自带的，
+        // 不需要再存一个 flag。
+        const fsOverlay = document.getElementById('fsOverlay');
+        if (G.mobileMode && fsOverlay) {
+            if (!document.fullscreenElement) fsOverlay.classList.add('active');
+            const enterFullscreenOnce = () => {
+                // 无论成功与否都摘掉这一层：iOS Safari 不支持 documentElement 全屏，
+                // 不能让玩家卡在引导页上进不去。
+                fsOverlay.classList.remove('active');
+                toggleFullscreen();
+                // v9.25: 摘掉这一层之后，**同一次点按**还会再派发一次合成事件
+                // （touchend → mousedown → click），落点正是刚才那一层所在的位置——
+                // 也就是屏幕正中，而职业卡也正好排在屏幕正中。不挡住的话，玩家点一下
+                // 「进入全屏」，职业就被那一下顺手选掉了，等于**根本没有机会选职业**。
+                // 这里给 body 挂 400ms 的 `.fs-dismissing`，CSS 把 .class-card 的
+                // pointer-events 关掉，让合成事件落到遮罩上而不是卡片上。
+                if (document.body) {
+                    document.body.classList.add('fs-dismissing');
+                    setTimeout(() => document.body.classList.remove('fs-dismissing'), 400);
+                }
+            };
+            fsOverlay.addEventListener('touchend', e => { e.preventDefault(); enterFullscreenOnce(); }, { passive: false });
+            fsOverlay.addEventListener('mousedown', e => { e.preventDefault(); enterFullscreenOnce(); });
+        }
+
+        // 闲置提示环的尺寸要在第一次按下之前就量准，所以开局先算一次。
+        // 转屏 / 地址栏收放都会改画面高度，摇杆半径跟着变——没在按的时候补量一次。
+        if (G.mobileMode) sizeJoyVisual(joyRadiusPx());
+        window.addEventListener('resize', () => {
+            if (G.mobileMode && !G.stickActive) sizeJoyVisual(joyRadiusPx());
+        });
+    } catch (err) {
+        // 兜底要能失败得很安静：报错只走自检条 + 控制台，不再往外抛。
+        if (window.__bootError) window.__bootError('手机端初始化失败：' + (err && err.message));
+        if (window.console && console.error) console.error('[boot/mobile]', err);
     }
-
-    // 闲置提示环的尺寸要在第一次按下之前就量准，所以开局先算一次。
-    // 转屏 / 地址栏收放都会改画面高度，摇杆半径跟着变——没在按的时候补量一次。
-    if (G.mobileMode) sizeJoyVisual(joyRadiusPx());
-    window.addEventListener('resize', () => {
-        if (G.mobileMode && !G.stickActive) sizeJoyVisual(joyRadiusPx());
-    });
 

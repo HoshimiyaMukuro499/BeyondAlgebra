@@ -657,6 +657,26 @@
         .mobile-actions, .drawer-close,
         .joy, .joy-hint, .gameover-restart, .fs-overlay { display: none; }
 
+        /* v9.25 启动自检条——**故意不放进上面那张手机端专用清单**：
+           它要在桌面端和手机端都出现（用户报的那次是在手机上，但启动失败不分平台）。
+           平时不占位，只在 __bootError() 写进内容时亮起。z-index 压过所有遮罩，
+           因为启动失败时它是最该被看见的那一行字。 */
+        .boot-error { display: none; }
+        .boot-error.active {
+            display: block;
+            position: fixed;
+            left: 8px; right: 8px; bottom: 8px;
+            z-index: 900;
+            padding: 10px 14px;
+            border: 1px solid #a33;
+            border-radius: 10px;
+            background: rgba(42, 18, 24, 0.96);
+            color: #ffb3b3;
+            font-size: 12px;
+            line-height: 1.6;
+            word-break: break-all;
+        }
+
         body.mobile {
             display: block;
             min-height: 100vh;
@@ -916,6 +936,12 @@
         }
         body.mobile .fs-title { font-size: 22px; color: #cfe4ff; }
         body.mobile .fs-sub { font-size: 13px; color: #7d9cba; }
+
+        /* 摘掉全屏引导后的 400ms 里，职业卡不吃点击。
+           原因见 09-events.js 的 enterFullscreenOnce()：点掉引导的那一下会再派发一次
+           合成事件，落点正好在屏幕正中，而职业卡也排在屏幕正中——不挡住就等于
+           「点一下进全屏，顺手把职业也选了」，玩家根本没机会选。 */
+        body.mobile.fs-dismissing .class-card { pointer-events: none; }
 
         /* 键盘提示在手机上没有意义 */
         body.mobile .controls-hint { display: none; }
