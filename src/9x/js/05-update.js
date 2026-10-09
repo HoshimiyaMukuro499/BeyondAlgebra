@@ -68,11 +68,264 @@
         return [ox / ol * spd, oy / ol * spd];
     }
 
+    // ============================================================
+    //  v9.24 词条钩子
+    // ============================================================
+    // 词条从「给怪物自己加数值」翻转成「干扰玩家」。三个统一入口：
+    //   tickAffixes(m)     每帧逐怪 —— 区域类 / 火焰区 / 突进 / 群生
+    //   onAffixCoreHit(m)  撞核心时 —— 封印
+    //   onAffixDeath(m)    死亡时   —— 敌图腾
+    // 老的 6 个（再生/荆棘/迅捷/巨人/吸血/爆裂）仍然走原来的内联写法，这里不动它们。
+    // 新词条的行为写在 00-data.js 的 AFFIXES 里（zone / fireZone / dash / vortex /
+    // swarm …），钩子只读这些声明式字段——以后加词条不用再改这个文件。
+
+    // 取某只怪身上指定词条的 zone 定义；没有就返回 null。
+    function zoneOf(m, id) {
+        if (!m.affixes || m.affixes.indexOf(id) < 0) return null;
+        if (typeof affixDef !== 'function') return null;
+        const def = affixDef(id);
+        return (def && def.zone) ? def.zone : null;
+    }
+
+    // 玩家当前吃到的区域修正。两只怪覆盖同一片区域时取**最强**的那一个而不是连乘——
+    // 连乘的话三只怪叠在一起玩家等于被冻住，那已经超出「减速」的语义了。
+    function getPlayerAtkZoneMul() {
+        let mul = 1;
+        for (const m of G.monsters) {
+            const z = zoneOf(m, 'weaken');
+            if (z && dist(m, G.player) <= z.r + G.player.r) mul = Math.min(mul, z.playerAtkMul);
+        }
+        return mul;
+    }
+
+    function getPlayerSpeedZoneMul() {
+        let mul = 1;
+        for (const m of G.monsters) {
+            const z = zoneOf(m, 'slowzone');
+            if (z && dist(m, G.player) <= z.r + G.player.r) mul = Math.min(mul, z.playerSpeedMul);
+        }
+        return mul;
+    }
+
+    // 「牵引」：玩家自己走完这一帧之后再往怪那边拉一把。
+    // 先动后拉，手感是「被吸过去」；反过来先拉后动就变成「走不动」了。
+    function applyVortexPull(p) {
+        let px = 0, py = 0;
+        for (const m of G.monsters) {
+            if (!m.affixes || m.affixes.indexOf('vortex') < 0) continue;
+            if (typeof affixDef !== 'function') continue;
+            const def = affixDef('vortex');
+            if (!def || !def.vortex) continue;
+            const d = dist(m, p);
+            if (d > def.vortex.r || d < 1) continue;
+            const a = angleTo(p, m);
+            // 越近拉得越狠（线性衰减到 0），免得站在远处也被硬拽
+            const strength = def.vortex.pull * (1 - d / def.vortex.r);
+            px += Math.cos(a) * strength;
+            py += Math.sin(a) * strength;
+        }
+        if (px === 0 && py === 0) return;
+        p.x = clamp(p.x + px, 20, 760);
+        p.y = clamp(p.y + py, 20, 540);
+    }
+
+    // 逐帧词条钩子。在怪物循环的最开头调用——它可能改写 m.x/m.y（突进）
+    // 或往场景里推火焰，先做完这些，后面所有判定用的才是这一帧的真实位置。
+    function tickAffixes(m) {
+        // 探针与调试钩子会手工造怪，不一定补齐 v9.24 的运行时字段——这里兜一层底
+        if (!m._affixZones) m._affixZones = [];
+        m._dashMove = false;
+        if (!m.affixes || m.affixes.length === 0) { m._affixZones.length = 0; m._dash = null; return; }
+        if (typeof affixDef !== 'function') return;
+
+        const busy = (m.frozen > 0 || m.stunned > 0);
+        m._affixTimer = (m._affixTimer || 0) + 1;
+        m._affixZones.length = 0;
+
+        for (const id of m.affixes) {
+            const def = affixDef(id);
+            if (!def) continue;
+
+            // 区域类只把半径和颜色带出来给渲染；真正的判定在
+            // getPlayerAtkZoneMul / getPlayerSpeedZoneMul 里逐帧现算。
+            if (def.zone) m._affixZones.push({ r: def.zone.r, color: def.color });
+            if (def.vortex) m._affixZones.push({ r: def.vortex.r, color: def.color });
+
+            // 冰冻/眩晕期间一切「主动」词条都停摆，只留下区域的光圈
+            if (busy) continue;
+
+            if (def.fireZone && m._affixTimer % def.fireZone.every === 0) {
+                spawnAffixFire(m);
+            }
+
+            if (def.dash) {
+                if (m._dash) {
+                    // 插值推进，而不是设速度——保证总位移恰好是 dist，且无视地形。
+                    const d = m._dash;
+                    m.x += (d.tx - m.x) * 0.28;
+                    m.y += (d.ty - m.y) * 0.28;
+                    if (--d.t <= 0) m._dash = null;
+                    m._dashMove = true;
+                } else if (m._affixTimer % def.dash.every === 0) {
+                    const a = angleTo(m, G.player);
+                    m._dash = {
+                        tx: clamp(m.x + Math.cos(a) * def.dash.dist, 20, 760),
+                        ty: clamp(m.y + Math.sin(a) * def.dash.dist, 20, 540),
+                        t: 12,
+                    };
+                }
+            }
+
+            if (def.swarm && (m._swarmCount || 0) < def.swarm.max
+                && m._affixTimer % def.swarm.every === 0) {
+                spawnSwarmClone(m, def.swarm);
+                m._swarmCount = (m._swarmCount || 0) + 1;
+            }
+        }
+    }
+
+    // 「火焰区」：直接沿用灼烧怪的火轨迹结构推进 G.fireTrails。
+    // v9.23 刚做的「火焰烧图腾」因此自动生效，这里不需要再写一遍。
+    function spawnAffixFire(m) {
+        const ang = rand(0, Math.PI * 2);
+        const tl = 8;
+        G.fireTrails.push({
+            x1: m.x - Math.cos(ang) * tl, y1: m.y - Math.sin(ang) * tl,
+            x2: m.x + Math.cos(ang) * tl, y2: m.y + Math.sin(ang) * tl,
+            life: 150,
+        });
+        if (G.fireTrails.length > 80) G.fireTrails.shift();
+    }
+
+    // 「群生」：分裂出残影。刻意不复用 splitMonster()——那个是「子体继承母体的
+    // 一个固定比例」，这里是「按母体当前最大血的 20% 另起一只」，而且残影
+    // 不该再带词条（否则词条会指数级扩散出去）。
+    function spawnSwarmClone(m, cfg) {
+        const angle = rand(0, Math.PI * 2);
+        const d = m.r + 16 + rand(0, 14);
+        const hp = Math.max(1, m.maxHp * cfg.hpFrac);
+        const clone = {
+            x: clamp(m.x + Math.cos(angle) * d, 20, 760),
+            y: clamp(m.y + Math.sin(angle) * d, 20, 540),
+            r: m.r * 0.7,
+            hp, maxHp: hp,
+            speed: m.speed * 1.1,
+            isElite: false,
+            atk: m.atk * 0.4,
+            hitCooldown: 0, trailDamageCooldown: 0,
+            scoreValue: m.scoreValue * 0.15,
+            type: m.type, typeLabel: '残影', typeEmoji: '👥',
+            color: '#66dd88',
+            isHealer: false, healAmount: 0,
+            isSplitter: false, canSplit: false,
+            healCooldown: 0, isChild: true,
+            isScorcher: false, fireTrailInterval: 8, fireTrailLife: 150,
+            isWraith: false, bulletResist: 0,
+            moveInterval: 50, moveTimer: rand(0, 100),
+            isMoving: Math.random() < 0.5,
+            alwaysMoving: true,
+            affixes: [],
+            frozen: 0, stunned: 0, slowTimer: 0,
+            vx_prev: 0, vy_prev: 0, _fireCounter: 0,
+            _affixTimer: 0, _dash: null, _swarmCount: 0, _affixZones: [],
+        };
+        G.monsters.push(clone);
+        spawnParticles(clone.x, clone.y, '#66dd88', 5);
+    }
+
+    // 「封印」：撞核心时随机压住玩家一个被动。只在核心真被打到的那一下触发。
+    const SEAL_FRAMES = 240;   // 4 秒
+    function onAffixCoreHit(m) {
+        if (!m.affixes || m.affixes.indexOf('seal') < 0) return;
+        const owned = [];
+        for (const tid of Object.keys(G.passives)) {
+            for (const p of G.passives[tid]) {
+                if (p.count > 0) owned.push({ tid, eid: p.effectId });
+            }
+        }
+        if (owned.length === 0) return;   // 没被动可封，这条词条就是空的
+        const pick = owned[Math.floor(Math.random() * owned.length)];
+        for (const s of G.sealedPassives) {
+            if (s.tid === pick.tid && s.eid === pick.eid) { s.timer = SEAL_FRAMES; return; }
+        }
+        G.sealedPassives.push({ tid: pick.tid, eid: pick.eid, timer: SEAL_FRAMES });
+        showFloatingText(G.player.x, G.player.y - G.player.r - 8, '🔒 被动被封', '#ddcc44');
+    }
+
+    function updateSeals() {
+        for (let i = G.sealedPassives.length - 1; i >= 0; i--) {
+            if (--G.sealedPassives[i].timer <= 0) G.sealedPassives.splice(i, 1);
+        }
+    }
+
+    // 「敌图腾」：怪物死亡后原地留下。12 秒寿命，每 60 帧对「玩家 / 玩家图腾」
+    // 里更近的一个打一发即时伤害（不引入新弹道系统——那要配一套新的碰撞、
+    // 渲染与上限，成本远大于这条词条的价值）。
+    const ENEMY_TOTEM_LIFE = 720;
+    const ENEMY_TOTEM_RANGE = 200;
+    function onAffixDeath(m) {
+        if (!m.affixes || m.affixes.indexOf('totem') < 0) return;
+        G.enemyTotems.push({
+            x: m.x, y: m.y, r: 15,
+            life: ENEMY_TOTEM_LIFE, maxLife: ENEMY_TOTEM_LIFE,
+            fireTimer: 30, _lastFire: -999,
+        });
+        spawnParticles(m.x, m.y, '#ff8844', 10);
+    }
+
+    function updateEnemyTotems() {
+        if (G.enemyTotems.length === 0) return;
+        for (let i = G.enemyTotems.length - 1; i >= 0; i--) {
+            const et = G.enemyTotems[i];
+            if (--et.life <= 0) {
+                spawnParticles(et.x, et.y, '#ff8844', 12);
+                showFloatingText(et.x, et.y - et.r - 6, '🗿 熄灭', '#ff8844');
+                G.enemyTotems.splice(i, 1);
+                continue;
+            }
+            if (--et.fireTimer > 0) continue;
+            // 目标：玩家与玩家图腾里更近的那一个（和怪物索敌同一套规则）
+            const nT = nearestTurret(et);
+            const dPlayer = dist(et, G.player);
+            const onTurret = nT && nT.d < dPlayer && nT.d <= ENEMY_TOTEM_RANGE;
+            const target = onTurret ? nT.t : G.player;
+            if (dist(et, target) > ENEMY_TOTEM_RANGE) continue;
+            et.fireTimer = 60;
+            et._lastFire = G.frame;
+            const dmg = 3 + G.floor * 0.2;
+            if (onTurret) {
+                target.hp -= dmg;
+                spawnParticles(target.x, target.y, '#ff8844', 6);
+                showFloatingText(target.x, target.y - target.r - 6, '-' + Math.ceil(dmg), '#ff8844');
+            } else {
+                // 护盾优先，护盾破了才打到核心——和怪物撞核心同一套结算
+                if (G.player.hp > 0) {
+                    G.player.hp = Math.max(0, G.player.hp - dmg);
+                    spawnParticles(G.player.x, G.player.y, '#ff8844', 6);
+                    showFloatingText(G.player.x, G.player.y - G.player.r, '-' + Math.ceil(dmg), '#ff8844');
+                    if (G.player.hp <= 0) setFeedback('🛡️ 护盾耗尽！核心暴露！', '#ff4444');
+                } else {
+                    G.core.hp -= dmg;
+                    spawnParticles(G.core.x, G.core.y, '#ff3333', 6);
+                    showFloatingText(G.core.x, G.core.y - G.core.r, '-' + Math.ceil(dmg), '#ff3333');
+                }
+            }
+        }
+    }
+
     // ---------- 更新 ----------
     function update() {
         if (G.gameOver) return;
         // 教程调度必须跑在暂停/遮罩守卫之外：节点地图（selectingActive）期间也要能出字幕
         if (!G.simMode) { tutorialSyncPointer(); Tutorial.tick(); }
+        // v9.24: 教程播完（或点了「跳过教程」）后的整局重置。必须放在 tick() 之后、
+        // 其余逻辑之前——resetGame() 会清空 G 的绝大部分字段，中间夹着别的更新
+        // 就会读到半清空的状态；这里直接 return，本帧剩下的部分整帧跳过。
+        if (Tutorial.pendingRestart) {
+            Tutorial.pendingRestart = false;
+            restartRunAfterTutorial();
+            return;
+        }
         if (!G.simMode && (G.paused || G.selectingActive)) return;
         G.frame++;
 
@@ -86,17 +339,31 @@
 
         // v9.22: 玩家减速（playerSlowTimer / playerSlowAmount）整块删除——
         // 唯一写入点是 m.isSlow，而没有任何怪物类型定义过这个字段，恒为 false。
+        // v9.24: 再乘一项「减速区」（🟦 词条）——多只怪覆盖同一片区域时取最强的一个
+        // 而不是连乘，否则三只怪叠一起玩家直接冻住，那已经超出「减速」了。
         const playerSpeedMult = G.buffs.speedUp * G.fateBuffs.speedMul;
-        const speed = p.speed * playerSpeedMult;
+        const speed = p.speed * playerSpeedMult * getPlayerSpeedZoneMul();
 
         let dx = 0,
             dy = 0;
-        if (G.keys.w) dy = -1;
-        if (G.keys.s) dy = 1;
-        if (G.keys.a) dx = -1;
-        if (G.keys.d) dx = 1;
-        if (dx !== 0 && dy !== 0) { dx *= 0.707;
-            dy *= 0.707; }
+        // v9.24: 手机端摇杆优先于键盘四向。摇杆是模拟量（模长 0..1），
+        // 直接当 dx/dy 用——轻推慢走、满推全速，还天然带八向以外的角度。
+        if (G.mobileMode && G.stickActive) {
+            dx = G.stick.x;
+            dy = G.stick.y;
+        } else {
+            if (G.keys.w) dy = -1;
+            if (G.keys.s) dy = 1;
+            if (G.keys.a) dx = -1;
+            if (G.keys.d) dx = 1;
+            if (dx !== 0 && dy !== 0) { dx *= 0.707;
+                dy *= 0.707; }
+        }
+        // 轨迹方向单独归一化：模拟摇杆下 dx/dy 的模长可以很小（轻推 0.1），
+        // 直接拿去算轨迹长度会画出短到看不见的线段。方向与位移强度分开处理。
+        let tdx = dx, tdy = dy;
+        const tmag = Math.hypot(tdx, tdy);
+        if (tmag > 1e-6) { tdx /= tmag; tdy /= tmag; } else { tdx = 0; tdy = 0; }
         let newX = p.x + dx * speed;
         let newY = p.y + dy * speed;
         // v9.4: 玩家地形碰撞
@@ -110,13 +377,17 @@
         p.x = clamp(newX, 20, 760);
         p.y = clamp(newY, 20, 540);
 
-        if (G.frame % 2 === 0 && (dx !== 0 || dy !== 0)) {
+        // v9.24: 「牵引」在玩家自行移动之后再施加——先动后拉，手感才是「被吸过去」，
+        // 而不是「走不动」。内部自带边界 clamp。
+        applyVortexPull(p);
+
+        if (G.frame % 2 === 0 && tmag > 0.01) {
             const trailLen = 6;
-            const t = addTrail(p.x - dx * trailLen, p.y - dy * trailLen, p.x + dx * trailLen, p.y + dy * trailLen);
+            const t = addTrail(p.x - tdx * trailLen, p.y - tdy * trailLen, p.x + tdx * trailLen, p.y + tdy * trailLen);
             // v9.7: 冲刺轨迹（Shift键）——更宽更亮
             if (G.keys.shift) {
                 const sprintLen = 12;
-                const st = { x1: p.x - dx * sprintLen, y1: p.y - dy * sprintLen, x2: p.x + dx * sprintLen, y2: p.y + dy * sprintLen, life: 180, layer: 2, trailType: G.activeTrailType, isSprint: true };
+                const st = { x1: p.x - tdx * sprintLen, y1: p.y - tdy * sprintLen, x2: p.x + tdx * sprintLen, y2: p.y + tdy * sprintLen, life: 180, layer: 2, trailType: G.activeTrailType, isSprint: true };
                 G.sprintTrails.push(st);
                 if (G.sprintTrails.length > 60) G.sprintTrails.shift();
             }
@@ -190,11 +461,15 @@
         for (let i = G.monsters.length - 1; i >= 0; i--) {
             const m = G.monsters[i];
 
+            // v9.24: 词条逐帧钩子。必须在最前面——「突进」会直接改写 m.x/m.y，
+            // 「火焰区」会往场景里推火焰，这些都得在本帧其余判定之前落定。
+            tickAffixes(m);
+
             // v9.1: 冰冻/眩晕处理
             if (m.frozen > 0) m.frozen--;
             if (m.stunned > 0) m.stunned--;
             if (m.slowTimer > 0) m.slowTimer--;   // v9.19: E14 延缓
-            const disabled = m.frozen > 0 || m.stunned > 0;
+            const disabled = m.frozen > 0 || m.stunned > 0 || m._dashMove;
 
             if (!disabled) {
                 // v9.17: 索敌「图腾与核心中离自己更近的那一个」
@@ -315,6 +590,9 @@
                             showFloatingText(m.x, m.y - m.r, '+' + Math.floor(vampHeal), '#ff3366');
                         }
                         m.hitCooldown = 24;
+                        // v9.24: 「封印」词条——撞击核心的怪随机压住玩家一个被动 4 秒。
+                        // 放在护盾结算之后：玩家刚挨完这一下，正是「被惩罚」的时机。
+                        onAffixCoreHit(m);
                         // v9.4: 荆棘光环遗物反伤
                         if (G.relicBuffs.thornsDmg) {
                             m.hp -= G.relicBuffs.thornsDmg;
@@ -355,6 +633,7 @@
                     // （原来说的是未受本层精华上限钳制的 10+层，跟真掉的对不上）
                     const drops = Math.round((2 + Math.floor(Math.random() * 2)) * (G.fateBuffs.dropRateMul || 1));
                     for (let d = 0; d < drops; d++) dropBalancedCard();
+                    onAffixDeath(m);
                     G.monsters.splice(i, 1);
                     setFeedback(`👑 BOSS击杀！+${Math.floor(m.scoreValue)}分 · 掉落${drops}张牌 · 💎+${bossGot}`, '#ff3366');
                     continue;
@@ -404,6 +683,9 @@
                     triggerPassive('T08', m);
                     addScore(G.killStreak * 2);
                 }
+                // v9.24: 「敌图腾」词条——死亡后原地留下敌意图腾。
+                // 放在 splice 之前，此时 m 还在数组里且坐标有效。
+                onAffixDeath(m);
                 G.monsters.splice(i, 1);
                 continue;
             }
@@ -504,6 +786,11 @@
             }
         }
 
+
+        // v9.24: 「敌图腾」（词条产物）与「封印」的倒计时。
+        // 放在玩家图腾循环之后——两者是同一类东西，读代码时挨着看更顺。
+        updateEnemyTotems();
+        updateSeals();
 
         // v9.7: 冲刺轨迹衰减
         for (let i = G.sprintTrails.length - 1; i >= 0; i--) {

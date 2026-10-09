@@ -3,9 +3,23 @@
     <div class="game-row">
         <div class="canvas-wrap">
             <canvas id="gameCanvas" width="780" height="560"></canvas>
+
+            <!-- v9.24 手机端覆盖层。全部只在 body.mobile 下显示（见 styles.css），
+                 桌面端一行都不渲染——这样桌面布局与 9.23 完全一致。
+                 放在 .canvas-wrap 内部而不是挂在 body 上：抽屉展开时这一块整体
+                 右移缩到右半屏，覆盖层跟着走，不需要任何 JS 去同步位置。 -->
+            <div class="mobile-topbar" id="mobileHud"></div>
+            <button class="mobile-icon-btn" id="mobileFullscreenBtn" title="全屏">⛶ 全屏</button>
+            <button class="mobile-icon-btn" id="mobileCodexBtn" title="机制图鉴">📖 图鉴</button>
+            <button class="mobile-drawer-btn" id="drawerToggleBtn" title="密文版 / 被动">🔮 面板</button>
+            <div class="mobile-actions">
+                <button class="mobile-act-btn" id="mobileDashBtn">💨<span>冲刺</span></button>
+                <button class="mobile-act-btn ult" id="mobileUltBtn">⚡<span>终极技</span></button>
+            </div>
         </div>
 
         <div class="panel" id="panelRoot">
+            <button class="drawer-close" id="drawerCloseBtn">◀ 收起面板</button>
             <div class="panel-box">
                 <h4>📊 密文轨迹 demo {{VERSION}} · 新手教程（古老的石板 1-5）</h4>
                 <div class="stat-row"><span>🏰 核心</span><span class="stat-val" id="coreDisplay">100%</span></div>
@@ -71,6 +85,7 @@
                 <span><kbd>P</kbd> 暂停</span>
                 <span><kbd>Q</kbd> 终极技</span>
                 <span>轨迹阻挡 · 围剿伤害</span>
+                <button class="btn-reset" id="fullscreenBtn">⛶ 全屏</button>
                 <button class="btn-reset" id="logBtn" style="background:#2a4a3a;border-color:#4a8a5a;color:#aaddbb;">📋 导出记录</button>
                 <button class="btn-reset" id="resetBtn">↺ 重开</button>
             </div>

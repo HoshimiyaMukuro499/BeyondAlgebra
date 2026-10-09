@@ -1,5 +1,9 @@
     // ---------- 核心游戏逻辑 ----------
     function startFloor() {
+        // v9.24: 词条留下的场地残留逐层清空。敌图腾与「封印」都是挂在上一层的
+        // 产物，带到下一层会变成没来由的持续掉血 / 被动失灵。
+        G.enemyTotems.length = 0;
+        G.sealedPassives.length = 0;
         // 教程层：走脚本出怪，不走加权随机
         Tutorial.onFloorStart();
         if (Tutorial.tookOver) {
@@ -58,6 +62,10 @@
         const speed = 7;
         // v9.19: 射速降到 1/4，单发伤害补 15%，免得整体输出腰斩
         let atk = (p.atk + G.buffs.atkUp) * (1 + G.buffs.multUp) * G.fateBuffs.atkMul * G.fateBuffs.bulletDmgMul * 1.15;
+        // v9.24: 「削减区」词条——玩家站在怪身边开火时子弹伤害打折。
+        // 这里是子弹伤害唯一的出口，改这一处就覆盖主弹与额外弹丸（额外弹丸在下面按 atk 的 0.6 派生）。
+        // 只压子弹，不压轨迹——轨迹是玩家的核心输出手段，一起压会让这条词条变成纯粹的数值墙。
+        atk *= getPlayerAtkZoneMul();
         // v9.4: 低血量狂暴
         if (G.relicBuffs.lowHpBerserk && G.player.hp < G.player.maxHp * 0.3) atk *= 2;
         // v9.4: 暴击

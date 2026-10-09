@@ -185,6 +185,51 @@
             if(t.hp<t.maxHp){ctx.fillStyle='#cfe4ff';ctx.font='9px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText(Math.ceil(t.hp)+'/'+t.maxHp,t.x,by-2);ctx.textBaseline='middle';}
         }
 
+        // v9.24: 敌意图腾（「🗿 敌图腾」词条的产物）。形状沿用玩家图腾那套菱形，
+        // 但底色压成暗红、边缘加一圈血红脉动——玩家要能一眼分清敌我，
+        // 所以刻意不复用玩家图腾的颜色体系。
+        for (const et of G.enemyTotems) {
+            const s = et.r;
+            const fade = Math.min(1, et.life / 90);
+            ctx.globalAlpha = fade;
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.beginPath(); ctx.ellipse(et.x, et.y + s * 0.5, s, s * 0.25, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#2a1016';
+            ctx.beginPath();
+            ctx.moveTo(et.x, et.y - s); ctx.lineTo(et.x + s * 0.9, et.y);
+            ctx.lineTo(et.x, et.y + s * 0.4); ctx.lineTo(et.x - s * 0.9, et.y);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = '#ff4455'; ctx.lineWidth = 2; ctx.stroke();
+            ctx.fillStyle = '#140a0c';
+            ctx.beginPath(); ctx.arc(et.x, et.y, s * 0.55, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = '#ff8844'; ctx.lineWidth = 2; ctx.stroke();
+            const pulse = 0.5 + 0.5 * Math.sin(G.frame * 0.08);
+            ctx.beginPath(); ctx.arc(et.x, et.y, s * 0.35 * pulse, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255,68,85,0.6)'; ctx.fill();
+            ctx.fillStyle = '#ffaa88'; ctx.font = 'bold ' + Math.floor(s * 0.7) + 'px sans-serif';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText('🗿', et.x, et.y);
+            // 索敌范围虚线 + 开火光束（和玩家图腾同一套读法）
+            ctx.beginPath(); ctx.arc(et.x, et.y, ENEMY_TOTEM_RANGE, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255,68,85,0.15)'; ctx.lineWidth = 1;
+            ctx.setLineDash([4, 10]); ctx.stroke(); ctx.setLineDash([]);
+            if (et._lastFire && G.frame - et._lastFire < 18) {
+                ctx.beginPath();
+                ctx.moveTo(et.x, et.y); ctx.lineTo(G.player.x, G.player.y);
+                ctx.strokeStyle = '#ff4455'; ctx.lineWidth = 1.5;
+                ctx.globalAlpha = fade * (18 - G.frame + et._lastFire) / 18;
+                ctx.stroke();
+                ctx.globalAlpha = fade;
+            }
+            // 剩余寿命：图腾脚下的细横条
+            const bw = s * 2, bh = 3;
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(et.x - bw / 2 - 1, et.y + s + 3, bw + 2, bh + 2);
+            ctx.fillStyle = '#ff4455';
+            ctx.fillRect(et.x - bw / 2, et.y + s + 4, bw * (et.life / et.maxLife), bh);
+            ctx.globalAlpha = 1;
+        }
+
         // v9.7: 冲刺轨迹（更宽更亮）
         for (const t of G.sprintTrails) {
             const alpha = Math.min(1, t.life / 90);
@@ -432,18 +477,44 @@
                 ctx.stroke();
                 ctx.setLineDash([]);
             }
-            // v9.1: 词缀光环
+            // v9.1: 词缀光环。v9.24: 不再只画第一个——BOSS 现在带 2 个，
+            // 精英最多 3 个。多词条时每多一个就把半径往外推 4px，一圈一个色。
             if (m.affixes && m.affixes.length > 0) {
-                const affixDef = AFFIXES.find(a => a.id === m.affixes[0]);
-                if (affixDef) {
-                    ctx.strokeStyle = affixDef.color;
-                    ctx.lineWidth = 2.5;
-                    ctx.setLineDash([3, 5]);
+                ctx.lineWidth = 2.5;
+                ctx.setLineDash([3, 5]);
+                for (let ai = 0; ai < m.affixes.length; ai++) {
+                    const ad = AFFIXES.find(a => a.id === m.affixes[ai]);
+                    if (!ad) continue;
+                    ctx.strokeStyle = ad.color;
                     ctx.beginPath();
-                    ctx.arc(m.x, m.y, m.r + 10, 0, Math.PI * 2);
+                    ctx.arc(m.x, m.y, m.r + 10 + ai * 4, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+                ctx.setLineDash([]);
+            }
+            // v9.24: 区域类词条的地面光圈（削减区/减速区/牵引），
+            // 直接读 tickAffixes() 每帧填好的 m._affixZones。
+            if (m._affixZones && m._affixZones.length > 0) {
+                for (const z of m._affixZones) {
+                    ctx.fillStyle = z.color + '14';
+                    ctx.beginPath();
+                    ctx.arc(m.x, m.y, z.r, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = z.color + '66';
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([6, 8]);
+                    ctx.beginPath();
+                    ctx.arc(m.x, m.y, z.r, 0, Math.PI * 2);
                     ctx.stroke();
                     ctx.setLineDash([]);
                 }
+            }
+            // v9.24: 突进残影——冲刺途中每帧在身后留一个淡色圆点
+            if (m._dashMove) {
+                ctx.fillStyle = 'rgba(204, 102, 255, 0.35)';
+                ctx.beginPath();
+                ctx.arc(m.x - (m.vx_prev || 0) * 3, m.y - (m.vy_prev || 0) * 3, m.r * 0.8, 0, Math.PI * 2);
+                ctx.fill();
             }
             // v9.1: 冰冻冰晶
             if (m.frozen > 0) {
@@ -614,6 +685,27 @@
             // 改显示「还要几秒」——玩家能据此决定是现在进场还是先遛一会儿。
             const ultLeft = (1 - ratio) * getUltimateChargeFrames() / 60;
             ctx.fillText(ratio >= 1 ? '⚡ 就绪 [Q]' : `⚡ ${ultLeft.toFixed(1)}s`, w / 2, gY - 4);
+        }
+
+        // v9.24: 手机端虚拟摇杆。画在 canvas 上（而不是做一个 DOM 元素），
+        // 因为它跟着 canvas 一起缩放——抽屉展开时画面缩到右半屏，摇杆自动跟着缩。
+        // 底座固定在左下角，位置与触摸判定的区域一一对应（见 09-events.js）。
+        if (G.mobileMode) {
+            const jx = JOYSTICK.x, jy = h - JOYSTICK.y;
+            const baseR = JOYSTICK.r;
+            ctx.globalAlpha = G.stickActive ? 0.42 : 0.22;
+            ctx.fillStyle = '#88aacc';
+            ctx.beginPath(); ctx.arc(jx, jy, baseR, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = G.stickActive ? 0.85 : 0.4;
+            ctx.strokeStyle = '#cfe4ff'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(jx, jy, baseR, 0, Math.PI * 2); ctx.stroke();
+            if (G.stickActive) {
+                const kx = jx + G.stick.x * baseR * 0.62;
+                const ky = jy + G.stick.y * baseR * 0.62;
+                ctx.fillStyle = '#cfe4ff';
+                ctx.beginPath(); ctx.arc(kx, ky, baseR * 0.34, 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.globalAlpha = 1;
         }
 
         drawTutorial();

@@ -148,3 +148,178 @@
         });
     }
 
+    // ============================================================
+    //  v9.24 手机端适配
+    // ============================================================
+    // 桌面端保留原来的布局（右侧 280px 侧栏 + WASD），只多一个全屏按钮。
+    // 手机端把这些搬走：摇杆移动、屏幕按钮、密文版与被动折进左侧抽屉、
+    // 顶部数据条顶替右侧栏。识别到移动设备就自动切，桌面端不开放手动开关。
+
+    // 设备识别只跑一次。**必须带 matchMedia 守卫**——离线探针（web/probe-9x.mjs）
+    // 的假 window 上没有这个 API，不守卫的话整套断言会一起崩。
+    function detectMobileMode() {
+        try {
+            const coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+            const ua = /Android|iPhone|iPad|iPod|Mobile/i.test((navigator && navigator.userAgent) || '');
+            return coarse || ua;
+        } catch (err) { return false; }
+    }
+
+    function applyMobileLayout() {
+        if (!G.mobileMode) return;
+        if (document.body) document.body.classList.add('mobile');
+        syncOrientation();
+    }
+
+    // 竖屏盖一层「请旋转设备」。判定写在这里而不是只听 orientationchange——
+    // 桌面浏览器里开发者工具模拟设备时不一定发那个事件。
+    function syncOrientation() {
+        if (!document.body) return;
+        const w = window.innerWidth, h = window.innerHeight;
+        if (typeof w !== 'number' || typeof h !== 'number') return;
+        document.body.classList.toggle('portrait', h > w);
+    }
+    window.addEventListener('resize', syncOrientation);
+
+    // 抽屉展开时把全局时间压到 50%（子弹时间）。所有计时都以帧为单位，
+    // 隔帧 update() 就是一次一致的时间缩放，见 08-main.js 的 gameLoop()。
+    function setDrawer(open) {
+        G.drawerOpen = !!open;
+        if (document.body) document.body.classList.toggle('drawer-open', G.drawerOpen);
+        G.timeScale = G.drawerOpen ? 0.5 : 1;
+    }
+
+    function toggleFullscreen() {
+        try {
+            if (document.fullscreenElement) {
+                if (document.exitFullscreen) document.exitFullscreen();
+            } else if (document.documentElement && document.documentElement.requestFullscreen) {
+                // 必须由用户手势触发，所以只做按钮，不做自动全屏
+                document.documentElement.requestFullscreen();
+            }
+        } catch (err) { /* 不支持全屏（iOS Safari）时静默降级 */ }
+    }
+    function syncFullscreenBtns() {
+        const on = !!document.fullscreenElement;
+        for (const id of ['fullscreenBtn', 'mobileFullscreenBtn']) {
+            const b = document.getElementById(id);
+            if (b) b.textContent = on ? '⛶ 退出' : '⛶ 全屏';
+        }
+    }
+    document.addEventListener('fullscreenchange', syncFullscreenBtns);
+
+    function toggleCodex() {
+        Tutorial.codexOpen = !Tutorial.codexOpen;
+        Tutorial.codexPage = 0;
+    }
+
+    // ---- 摇杆 ----
+    // 底座位置读的是 00-data.js 的 JOYSTICK，和 06-render.js 画出来的那一个同源。
+    function canvasPointFromTouch(t) {
+        const rect = canvas.getBoundingClientRect();
+        const sx = canvas.width / rect.width;
+        const sy = canvas.height / rect.height;
+        return {
+            x: clamp((t.clientX - rect.left) * sx, 0, 780),
+            y: clamp((t.clientY - rect.top) * sy, 0, 560),
+        };
+    }
+    function setStickFromTouch(t) {
+        const p = canvasPointFromTouch(t);
+        const jx = JOYSTICK.x, jy = (G.canvasHeight || 560) - JOYSTICK.y;
+        let dx = p.x - jx, dy = p.y - jy;
+        const d = Math.hypot(dx, dy);
+        if (d > JOYSTICK.r && d > 0) { dx = dx / d * JOYSTICK.r; dy = dy / d * JOYSTICK.r; }
+        G.stick.x = dx / JOYSTICK.r;
+        G.stick.y = dy / JOYSTICK.r;
+        G.stickActive = true;
+    }
+    function releaseStick() {
+        G.stick.x = 0; G.stick.y = 0;
+        G.stickActive = false;
+        G._stickTouchId = null;
+    }
+
+    canvas.addEventListener('touchstart', e => {
+        if (!G.mobileMode) return;
+        const t = e.changedTouches && e.changedTouches[0];
+        if (!t) return;
+        // 只接管落在摇杆那一侧的触摸。右半屏没有射击需求（自动开火），
+        // 留给屏幕按钮，免得拇指按大招时把角色一起带跑。
+        const p = canvasPointFromTouch(t);
+        if (p.x > 400) return;
+        e.preventDefault();
+        G._stickTouchId = t.identifier;
+        setStickFromTouch(t);
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', e => {
+        if (!G.mobileMode || !G.stickActive) return;
+        const list = e.changedTouches;
+        if (!list) return;
+        for (let i = 0; i < list.length; i++) {
+            if (list[i].identifier === G._stickTouchId) {
+                e.preventDefault();
+                setStickFromTouch(list[i]);
+                return;
+            }
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', e => {
+        if (!G.mobileMode) return;
+        // 只有「按着摇杆的那根手指」抬起才松手，别的指头抬起来不影响移动
+        const list = e.changedTouches;
+        if (!list) { releaseStick(); return; }
+        for (let i = 0; i < list.length; i++) {
+            if (list[i].identifier === G._stickTouchId) { releaseStick(); return; }
+        }
+    });
+    canvas.addEventListener('touchcancel', () => { if (G.mobileMode) releaseStick(); });
+
+    // ---- 屏幕按钮 ----
+    // 全部复用现有入口（G.keys / activateUltimate / Tutorial.codexOpen），
+    // 不新增任何战斗逻辑——桌面端按 Shift/Q/H 走的就是这几条路径。
+    function bindMobileButton(id, onDown, onUp) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('touchstart', e => {
+            e.preventDefault(); e.stopPropagation();
+            el.classList.add('pressed');
+            onDown();
+        }, { passive: false });
+        const end = () => { el.classList.remove('pressed'); if (onUp) onUp(); };
+        el.addEventListener('touchend', end);
+        el.addEventListener('touchcancel', end);
+        // 桌面端也能点（方便在开发者工具里验证）
+        el.addEventListener('mousedown', e => { e.preventDefault(); onDown(); });
+        el.addEventListener('mouseup', end);
+        el.addEventListener('mouseleave', end);
+    }
+
+    bindMobileButton('mobileDashBtn', () => { G.keys.shift = true; }, () => { G.keys.shift = false; });
+    bindMobileButton('mobileUltBtn', () => {
+        if (G.ultimateGauge >= G.ultimateMax && !G.ultimateActive && !G.gameOver && !G.paused) {
+            activateUltimate();
+        }
+    });
+    bindMobileButton('mobileFullscreenBtn', toggleFullscreen);
+    bindMobileButton('mobileCodexBtn', toggleCodex);
+    bindMobileButton('drawerToggleBtn', () => setDrawer(!G.drawerOpen));
+    // 抽屉里的「收起」：点一下回到战斗
+    bindMobileButton('drawerCloseBtn', () => setDrawer(false));
+
+    // 桌面端的全屏按钮（v9.24 唯一新增的桌面入口）
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+    if (fullscreenBtn) {
+        fullscreenBtn.addEventListener('mousedown', function(e) {
+            e.preventDefault(); e.stopPropagation();
+            toggleFullscreen();
+        });
+    }
+
+    // 初始化：识别设备 → 切布局（桌面端这里什么都不会发生）
+    G.mobileMode = detectMobileMode();
+    applyMobileLayout();
+    syncFullscreenBtns();
+

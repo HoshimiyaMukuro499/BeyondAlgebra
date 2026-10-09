@@ -17,6 +17,25 @@
         updatePassiveUI();
         const btn = document.getElementById('combineBtn');
         if (btn) btn.disabled = G.combineCooldown || !G.triggerSlot || !G.effectSlot || G.gameOver;
+        updateMobileHud();
+    }
+
+    // v9.24: 手机端顶部数据条。桌面端的右侧侧栏在手机上被折叠进左侧抽屉，
+    // 于是「核心/楼层/精华/得分/护盾」这五个数字需要一个常驻的位置——
+    // 就放在右上角，用最紧凑的写法。数据源仍是这里，不另开一条数据流。
+    function updateMobileHud() {
+        const el = document.getElementById('mobileHud');
+        if (!el) return;
+        const core = Math.round(G.core.hp);
+        const shield = Math.round(G.player.hp);
+        // 护盾见底时闪红——这是手机上唯一一眼能看到的危险信号
+        const shieldColor = shield <= 0 ? '#ff4455' : (shield < 30 ? '#ffb347' : '#7bd9a0');
+        el.innerHTML =
+            `<span>🏰${core}%</span>` +
+            `<span>🏢${G.floor}</span>` +
+            `<span>💎${G.essence}</span>` +
+            `<span>⭐${fmtScore(G.score)}</span>` +
+            `<span style="color:${shieldColor}">🛡${shield}</span>`;
     }
 
     // v9.3: 移除被动
@@ -60,6 +79,14 @@
             for (const p of G.passives[triggerId]) {
                 const effect = EFFECTS.find(e => e.id === p.effectId);
                 const effectLabel = effect ? effect.label : p.effectId;
+                // v9.24: 「封印」词条压住的被动划掉并标出剩余秒数。
+                // 被动本身没被删除，只是 triggerPassive() 会跳过它——所以这里
+                // 显示的是「暂时失效」而不是「没了」。
+                const sealed = getSealedFrames(triggerId, p.effectId);
+                if (sealed > 0) {
+                    html += `<div class="item" style="opacity:0.45;text-decoration:line-through;"><span>🔒 ${emoji} ${label}+${effectLabel}</span><span class="count">${(sealed / 60).toFixed(1)}s</span></div>`;
+                    continue;
+                }
                 html += `<div class="item"><span>${emoji} ${label}+${effectLabel}</span><span class="count">×${p.count}</span><span style="cursor:pointer;color:#ff6644;margin-left:4px;font-size:9px;" data-tid="${triggerId}" data-eid="${p.effectId}">✕</span></div>`;
             }
         }
@@ -329,6 +356,10 @@
     }
 
     // ---------- v9.4 职业选择 ----------
+    // 职业遮罩的原始标题（第一次 initClassSelection 时抓下来，之后在「教程开局」
+    // 和「正式开局」之间来回切）。见下面的用法。
+    let _classOverlayTitle = null;
+
     function initClassSelection() {
         const overlay = document.getElementById('classOverlay');
         const row = document.getElementById('classRow');
@@ -352,6 +383,13 @@
         });
 
         // 教程：开局遮罩上的说明 + 跳过教程（只看没看过教程的那一次）
+        const h2 = overlay.querySelector('h2');
+        if (h2) {
+            // v9.24: 教程结束后会再弹一次这个遮罩（就是「正式开局」），
+            // 标题必须跟着变，否则看起来像什么都没发生。
+            if (!_classOverlayTitle) _classOverlayTitle = h2.textContent;
+            h2.textContent = Tutorial.seen ? '正式开局 · 再选一次职业' : _classOverlayTitle;
+        }
         if (Tutorial.seen) {
             const h = document.getElementById('tutorialClassHint');
             const s = document.getElementById('tutorialSkipBtn');
@@ -364,11 +402,14 @@
             hint.id = 'tutorialClassHint';
             hint.style.cssText = 'color:#8ab3d0;font-size:13px;max-width:640px;text-align:center;' +
                 'line-height:1.7;margin-top:-6px;';
+            // v9.24: 教程现在是**纯沙盒**——播完（或跳过）会清空一切、回到第 1 层。
+            // 这句话必须写在最显眼的地方，否则玩家会以为教程里攒的东西能带走。
             hint.innerHTML =
                 '<b style="color:#f5c542;">古老的石板-1 · 选一个开局流派。</b>' +
-                '教程期间选哪个都能过关，之后每次开局都能重选。<br>' +
+                '教程期间选哪个都能过关。<br>' +
+                '<b style="color:#ffb347;">教程是独立沙盒</b>：结束（或跳过）时会清空教程里获得的' +
+                '密文版 / 被动 / 精华 / 得分，从第 1 层正式开局，这里会让你重选一次职业。<br>' +
                 '🐾 <b>轨迹编织者</b> 最适合新手：轨迹更宽、更持久。';
-            const h2 = overlay.querySelector('h2');
             if (h2) h2.insertAdjacentElement('afterend', hint);
 
             const skip = document.createElement('button');
@@ -379,7 +420,8 @@
                 'font-size:12px;cursor:pointer;font-family:inherit;';
             skip.addEventListener('mousedown', function(e) {
                 e.preventDefault(); e.stopPropagation();
-                if (!G.playerClass) selectClass(0);
+                // v9.24: 不再顺手 selectClass(0)——那会先 startFloor() 再被重置，白跑一趟。
+                // 直接让 Tutorial.skip() 挂上 pendingRestart，由 update() 统一重开。
                 Tutorial.skip();
             });
             overlay.style.position = 'fixed';

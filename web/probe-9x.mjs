@@ -100,6 +100,31 @@ const factory = new Function(
   ' bossSummonInterval: (typeof bossSummonInterval !== "undefined") ? bossSummonInterval : null,' +
   ' spawnBoss: (typeof spawnBoss !== "undefined") ? spawnBoss : null,' +
   ' FIRE_TURRET_DMG_PER_FRAME: (typeof FIRE_TURRET_DMG_PER_FRAME !== "undefined") ? FIRE_TURRET_DMG_PER_FRAME : null,' +
+  // v9.24 词条重做 + 手机端 + 教程沙盒
+  ' AFFIXES: (typeof AFFIXES !== "undefined") ? AFFIXES : null,' +
+  ' affixDef: (typeof affixDef !== "undefined") ? affixDef : null,' +
+  ' pickAffixes: (typeof pickAffixes !== "undefined") ? pickAffixes : null,' +
+  ' MONSTER_STAT_MUL: (typeof MONSTER_STAT_MUL !== "undefined") ? MONSTER_STAT_MUL : null,' +
+  ' MONSTER_TYPES: (typeof MONSTER_TYPES !== "undefined") ? MONSTER_TYPES : null,' +
+  ' getDifficultyMultiplier: (typeof getDifficultyMultiplier !== "undefined") ? getDifficultyMultiplier : null,' +
+  ' getPlayerAtkZoneMul: (typeof getPlayerAtkZoneMul !== "undefined") ? getPlayerAtkZoneMul : null,' +
+  ' getPlayerSpeedZoneMul: (typeof getPlayerSpeedZoneMul !== "undefined") ? getPlayerSpeedZoneMul : null,' +
+  ' tickAffixes: (typeof tickAffixes !== "undefined") ? tickAffixes : null,' +
+  ' onAffixCoreHit: (typeof onAffixCoreHit !== "undefined") ? onAffixCoreHit : null,' +
+  ' onAffixDeath: (typeof onAffixDeath !== "undefined") ? onAffixDeath : null,' +
+  ' isPassiveSealed: (typeof isPassiveSealed !== "undefined") ? isPassiveSealed : null,' +
+  ' restartRunAfterTutorial: (typeof restartRunAfterTutorial !== "undefined") ? restartRunAfterTutorial : null,' +
+  ' ENEMY_TOTEM_LIFE: (typeof ENEMY_TOTEM_LIFE !== "undefined") ? ENEMY_TOTEM_LIFE : null,' +
+  ' ENEMY_TOTEM_RANGE: (typeof ENEMY_TOTEM_RANGE !== "undefined") ? ENEMY_TOTEM_RANGE : null,' +
+  ' JOYSTICK: (typeof JOYSTICK !== "undefined") ? JOYSTICK : null,' +
+  ' setDrawer: (typeof setDrawer !== "undefined") ? setDrawer : null,' +
+  ' detectMobileMode: (typeof detectMobileMode !== "undefined") ? detectMobileMode : null,' +
+  ' SEAL_FRAMES: (typeof SEAL_FRAMES !== "undefined") ? SEAL_FRAMES : null,' +
+  ' updateSeals: (typeof updateSeals !== "undefined") ? updateSeals : null,' +
+  ' spawnAffixFire: (typeof spawnAffixFire !== "undefined") ? spawnAffixFire : null,' +
+  ' applyVortexPull: (typeof applyVortexPull !== "undefined") ? applyVortexPull : null,' +
+  ' updateEnemyTotems: (typeof updateEnemyTotems !== "undefined") ? updateEnemyTotems : null,' +
+  ' TUTORIAL_OUTRO: (typeof TUTORIAL_OUTRO !== "undefined") ? TUTORIAL_OUTRO : null,' +
   // 已删符号的存在性探针——拿 KILL_BURSTS/MAP_NODES 这类名字去断言「确实删干净了」
   ' deletedSymbols: { KILL_BURSTS: typeof KILL_BURSTS !== "undefined",' +
   '  MAP_NODES: typeof MAP_NODES !== "undefined",' +
@@ -125,6 +150,14 @@ const HAS_CAP = !!(TRIG_ && TRIG_.some(t => t.id === 'T13') && randomTrigger && 
 const { randomEffect, effectAoeTargets, nearestMonsterTo, EFFECT_AOE_RADIUS,
         getFloorClearCards, getBossHp, bossSummonInterval, spawnBoss, FIRE_TURRET_DMG_PER_FRAME } = api;
 const HAS_V923 = !!(randomEffect && effectAoeTargets && getFloorClearCards && getBossHp && FIRE_TURRET_DMG_PER_FRAME);
+const { AFFIXES, affixDef, pickAffixes, MONSTER_STAT_MUL, spawnMonster: spawnMonsterProbe,
+        MONSTER_TYPES, getDifficultyMultiplier, getPlayerAtkZoneMul, getPlayerSpeedZoneMul,
+        tickAffixes, onAffixCoreHit, onAffixDeath,
+        isPassiveSealed, restartRunAfterTutorial, ENEMY_TOTEM_LIFE, ENEMY_TOTEM_RANGE,
+        JOYSTICK, setDrawer, detectMobileMode, SEAL_FRAMES, TUTORIAL_OUTRO,
+        updateSeals, spawnAffixFire, applyVortexPull, updateEnemyTotems } = api;
+const HAS_V924 = !!(AFFIXES && AFFIXES.length === 14 && tickAffixes && getPlayerAtkZoneMul
+                    && restartRunAfterTutorial && JOYSTICK && setDrawer);
 
 let pass = 0, fail = 0;
 const ok = (cond, label, extra = '') => {
@@ -594,14 +627,15 @@ if (!HAS_FEEL) {
   fresh();
   ok(EFFECTS.some(e => e.id === 'E14' && e.label === '延缓'), 'EFFECTS 里有 E14「延缓」');
   G.terrain = []; G.trails = []; G.sprintTrails = [];
-  const slowA = mkM(200, 200), slowB = mkM(200, 400);
+  // v9.24: 范围从 90px 放大到 225px，B 必须挪到 225px 之外才测得出「范围外不受影响」
+  const slowA = mkM(200, 200), slowB = mkM(720, 520);
   G.monsters = [slowA, slowB];
   addPassive('T06', 'E14');   // isInitial=true 只是登记，不触发（与 E13 一致）
   ok(slowA.slowTimer === 0, 'addPassive 只登记、不立即触发（isInitial 语义与 E13 一致）', `got ${slowA.slowTimer}`);
   api.triggerPassive('T06', slowA);  // T06 是高频触发 → 30 帧；A 是这次触发的靶心
   if (HAS_V923) {
     ok(slowA.slowTimer >= 29, '靶心挂上 slowTimer（T06 高频 → 30 帧）', `got ${slowA.slowTimer}`);
-    ok(slowB.slowTimer === 0, '200px 外的怪不受影响（v9.23 范围收到 90px）', `got ${slowB.slowTimer}`);
+    ok(slowB.slowTimer === 0, '225px 外的怪不受影响（v9.24 范围 = 命中目标 + 225px）', `got ${slowB.slowTimer}`);
   } else {
     ok(slowA.slowTimer >= 29 && slowB.slowTimer >= 29,
        'triggerPassive 后全场怪物挂上 slowTimer（T06 高频 → 30 帧）', `got ${slowA.slowTimer}`);
@@ -1033,12 +1067,14 @@ if (HAS_TUT) {
         ` paused=${G.paused} 怪=${G.monsters.length} 待出=${G.monstersToSpawn} 塔=${G.turrets.length}` +
         ` kills=${Tutorial.kills} 轨迹=${G.trails.length} 分=${G.score}`);
     }
-    if (Tutorial.finished) break;
+    // v9.24: 教程收尾 = 清空重开，Tutorial.finished 会在同一次 update() 里被
+    // resetGame() 打回 false，所以要认 restarted 这个信号（而不是 finished）。
+    if (Tutorial.finished || Tutorial.restarted) break;
     if (G.gameOver) break;
   }
 
   ok(!G.gameOver, '5 层教程跑完没有 gameOver（核心没被打爆）');
-  ok(Tutorial.finished, `教程在第 6 层之前结束（跑了 ${frames} 帧 ≈ ${(frames / 60).toFixed(0)} 秒）`);
+  ok(Tutorial.restarted, `教程收尾后整局已重置（跑了 ${frames} 帧 ≈ ${(frames / 60).toFixed(0)} 秒）`);
 
   // 顺序断言：同一层内 idx 必须严格递增 1（不许跳步、不许回退）
   const byFloor = new Map();
@@ -1074,8 +1110,17 @@ if (HAS_TUT) {
   ok(QPresses > 0, `教程流程里真的按过 Q（${QPresses} 次）`);
 
   // 收尾：教程状态正确关闭
-  ok(Tutorial.seen === true, '教程结束后 seen = true（第 6 层起恢复随机）');
+  ok(Tutorial.seen === true, '教程结束后 seen = true（正式开局不再重播教程）');
   ok(Tutorial.active === false, '教程结束后 active = false');
+  // v9.24: 教程是沙盒——播完必须清空一切、回到第 1 层、重选职业。
+  ok(G.floor === 1, '教程结束后回到第 1 层（不再空降到第 6 层）', `got ${G.floor}`);
+  ok(Object.keys(G.passives).length === 0, '教程里攒的被动已清空',
+    `got ${Object.keys(G.passives).join(',')}`);
+  ok(G.hand.length === 0, '教程里攒的密文版已清空', `got ${G.hand.length} 张`);
+  ok(G.essence === 0 && G.score === 0, '教程里攒的精华与得分已清空',
+    `精华 ${G.essence} / 得分 ${G.score}`);
+  ok(G.selectingActive === true && G.paused === true,
+    '教程结束后停在职业选择遮罩上（重选职业）');
 
   // 16c 图鉴文案不能提到已删的机制
   const codexText = CODEX_PAGES.flatMap(p => p.lines).join('\n');
@@ -1155,22 +1200,26 @@ if (!HAS_V923) {
   // Math.floor 会截掉浮点尾巴（0.9×2.89×10 万 = 260099.999…），差 1 属于正常
   ok(Math.abs(bossAt(30) - 260100) <= 1, '第 30 层 28.9 万 → ≈26.01 万', `got ${bossAt(30)}`);
 
-  // 17d BOSS 召唤爪牙速率 +5%（间隔 ×1/1.05）
-  ok(bossSummonInterval(100) === 95, 'bossSummonInterval(100) = 95', `got ${bossSummonInterval(100)}`);
-  ok(bossSummonInterval(150) === 143, 'bossSummonInterval(150) = 143', `got ${bossSummonInterval(150)}`);
-  ok(bossSummonInterval(50) === 48, 'bossSummonInterval(50) = 48', `got ${bossSummonInterval(50)}`);
+  // 17d BOSS 召唤爪牙速率：9.23 +5%、9.24 再 +5%（累计 1.05² = 1.1025）
+  ok(bossSummonInterval(100) === 91, 'bossSummonInterval(100) = 91（9.23 的 95 → 91）',
+    `got ${bossSummonInterval(100)}`);
+  ok(bossSummonInterval(150) === 136, 'bossSummonInterval(150) = 136', `got ${bossSummonInterval(150)}`);
+  ok(bossSummonInterval(50) === 45, 'bossSummonInterval(50) = 45', `got ${bossSummonInterval(50)}`);
   fresh();
   G.floor = 1;
   spawnBoss();
   const bs = G.monsters.find(x => x.isBoss);
-  ok(bs && bs.spawnTimer === 95, 'BOSS 首次召唤间隔 100 → 95 帧', `got ${bs && bs.spawnTimer}`);
+  const firstSummon = bossSummonInterval(100);
+  ok(bs && bs.spawnTimer === firstSummon, `BOSS 首次召唤间隔 100 → ${firstSummon} 帧`,
+    `got ${bs && bs.spawnTimer}`);
   if (bs) {
-    // 跑满 95 帧刚好触发第一次召唤（初始 95 → 第 95 帧归零并重置）。
-    // 多跑一帧就会被再减一次，读到的就不是重置值了。
-    for (let i = 0; i < 95; i++) { G.frame = 100 + i; update(); }
+    // 跑满 firstSummon 帧刚好触发第一次召唤（初始 firstSummon → 最后一帧归零并重置）。
+    // 多跑一帧就会被再减一次，读到的就不是重置值了。用变量而不是写死 95，
+    // 免得下次再调速率时又要手改这个循环次数。
+    for (let i = 0; i < firstSummon; i++) { G.frame = 100 + i; update(); }
     const want = bossSummonInterval(Math.max(50, 150 - G.floor * 2));
     ok(bs.spawnTimer === want,
-      `召唤后重置到 max(50, 150-层数×2)/1.05 = ${want}`, `got ${bs.spawnTimer}`);
+      `召唤后重置到 max(50, 150-层数×2)/1.1025 = ${want}`, `got ${bs.spawnTimer}`);
     ok(bs.spawnTimer < Math.max(50, 150 - G.floor * 2), '确实比原来的间隔短（速率更高）',
       `${bs.spawnTimer} vs ${Math.max(50, 150 - G.floor * 2)}`);
   }
@@ -1184,17 +1233,23 @@ if (!HAS_V923) {
   ok(cards(30) === 5, '第 30 层 5 张（5×0.9 取整，拐点切到后期）', `got ${cards(30)}`);
   ok(cards(100) === 11, '第 100 层 11 张（12×0.9）', `got ${cards(100)}`);
 
-  // 17f E13/E14 的作用范围 = 命中目标 + 90px
+  // 17f E13/E14 的作用范围 = 命中目标 + 225px（v9.24: 90 × 2.5）
   fresh();
   const t0 = mkM(300, 300);
   const near = mkM(300, 300 + EFFECT_AOE_RADIUS - 20);
   const farM = mkM(300, 300 + EFFECT_AOE_RADIUS + 60);
   G.monsters = [t0, near, farM];
-  ok(EFFECT_AOE_RADIUS === 90, '范围半径 = 90px', `got ${EFFECT_AOE_RADIUS}`);
+  ok(EFFECT_AOE_RADIUS === 225, '范围半径 = 225px（9.23 的 90 → 225）',
+    `got ${EFFECT_AOE_RADIUS}`);
   const tgt = effectAoeTargets(t0);
   ok(tgt.indexOf(t0) >= 0, '靶心自己在范围内');
-  ok(tgt.indexOf(near) >= 0, '90px 内的怪被带上');
-  ok(tgt.indexOf(farM) < 0, '90px 外的怪不受影响');
+  ok(tgt.indexOf(near) >= 0, '225px 内的怪被带上');
+  ok(tgt.indexOf(farM) < 0, '225px 外的怪不受影响');
+  // 9.23 的 90px 现在应当落在范围内——这就是这次放大要解决的问题
+  const mid = mkM(300, 300 + 90);
+  G.monsters = [t0, mid];
+  ok(effectAoeTargets(t0).indexOf(mid) >= 0, '站在 90px 处的怪现在也能被带上（旧的边界）');
+  G.monsters = [t0, near, farM];
   const tgt2 = effectAoeTargets(null);   // 无目标 → 就近兜底
   ok(tgt2.indexOf(t0) >= 0 && tgt2.indexOf(near) >= 0, '没传目标时就近取玩家最近的怪当靶心');
   G.monsters = [];
@@ -1216,7 +1271,234 @@ if (!HAS_V923) {
   const codexAll = CODEX_PAGES ? CODEX_PAGES.flatMap(p => p.lines).join('\n') : '';
   ok(!codexAll.includes('E04'), '机制图鉴里不再列 E04');
   ok(codexAll.includes('上限 10 座'), '机制图鉴里的图腾上限写的是 10 座');
-  ok(codexAll.includes('90px'), '机制图鉴里写了 E13/E14 的 90px 范围');
+  ok(codexAll.includes('225px'), '机制图鉴里写了 E13/E14 的 225px 范围');
+}
+
+// ---------- 18. v9.24 词条重做 · 怪物数值 · 手机端 · 教程沙盒 ----------
+section('18. v9.24 14 个词条 · 怪 −20% · 手机端 · 教程沙盒');
+if (!HAS_V924) {
+  console.log('  （跳过：这是 9.23 及更早的产物）');
+} else {
+  // 带词条的测试怪：mkM 补上残影/区域钩子需要的字段
+  function mkA(x, y, affixes) {
+    const m = mkM(x, y);
+    m.affixes = affixes.slice();
+    m.maxHp = m.hp = 1000;
+    m.scoreValue = 10;
+    m._affixTimer = 0; m._dash = null; m._swarmCount = 0; m._affixZones = [];
+    return m;
+  }
+
+  // 18a 词条池
+  ok(AFFIXES.length === 14, '词条池 6 → 14', `got ${AFFIXES.length}`);
+  const oldIds = ['regen', 'thorns', 'swift', 'giant', 'vampiric', 'explosive'];
+  const newIds = ['weaken', 'slowzone', 'firezone', 'dash', 'vortex', 'seal', 'swarm', 'totem'];
+  const missingOld = oldIds.filter(id => !affixDef(id));
+  const missingNew = newIds.filter(id => !affixDef(id));
+  ok(missingOld.length === 0, '原有 6 个词条一个没丢', missingOld.join(','));
+  ok(missingNew.length === 0, '新增 8 个词条全部登记在册', missingNew.join(','));
+
+  // 18b pickAffixes 的排除与数量（词条都有 minWave 门槛，先把楼层推到池子全开）
+  G.floor = 30;
+  const picked = pickAffixes(2, ['dash', 'swarm']);
+  ok(picked.length === 2, 'pickAffixes(2) 恰好给 2 个', `got ${picked.length}`);
+  ok(picked.indexOf('dash') < 0 && picked.indexOf('swarm') < 0,
+    '排除列表里的词条不会被抽中', picked.join(','));
+  ok(picked.every(id => !!affixDef(id)), '抽出来的都是真实词条 id', picked.join(','));
+
+  // 18c 普通怪 HP 与攻击 ×0.8
+  ok(MONSTER_STAT_MUL === 0.8, 'MONSTER_STAT_MUL = 0.8', `got ${MONSTER_STAT_MUL}`);
+  fresh();
+  G.floor = 5;
+  G.monsters = [];
+  spawnMonsterProbe({ key: 'basic', elite: false });
+  const mm = G.monsters[0];
+  const bType = MONSTER_TYPES.BASIC;
+  const diff5 = getDifficultyMultiplier();
+  const wantHp = (bType.baseHp + bType.hpScale) * diff5 * MONSTER_STAT_MUL;
+  ok(mm && Math.abs(mm.hp - wantHp) < 1e-6,
+    '普通怪 HP = (base + scale) × 难度 × 0.8', `got ${mm && mm.hp}，期望 ${wantHp}`);
+  const wantAtk = (bType.baseAtk + bType.atkScale) * Math.min(Math.pow(diff5, 0.35), 12) * MONSTER_STAT_MUL;
+  ok(mm && Math.abs(mm.atk - Math.min(wantAtk, 120)) < 1e-6,
+    '普通怪攻击同样 ×0.8', `got ${mm && mm.atk}，期望 ${wantAtk}`);
+
+  // 18d BOSS 恰好带 2 个词条，且不抽「对它无意义」的突进 / 群生
+  let bossBad = 0, bossCounts = {};
+  for (let i = 0; i < 200; i++) {
+    fresh();
+    G.floor = 30;
+    G.monsters = [];
+    spawnBoss();
+    const b = G.monsters.find(x => x.isBoss);
+    if (!b) { bossBad++; continue; }
+    bossCounts[b.affixes.length] = (bossCounts[b.affixes.length] || 0) + 1;
+    if (b.affixes.indexOf('dash') >= 0 || b.affixes.indexOf('swarm') >= 0) bossBad++;
+    if (!b.affixes.every(id => !!affixDef(id))) bossBad++;
+  }
+  ok(bossCounts[2] === 200, '200 次生成里 BOSS 都是恰好 2 个词条',
+    JSON.stringify(bossCounts));
+  ok(bossBad === 0, 'BOSS 不会抽到突进 / 群生，也不会有假词条', `异常 ${bossBad} 次`);
+
+  // 18e 🟥削减区：站进圈里子弹伤害打折
+  fresh();
+  const zw = mkA(300, 300, ['weaken']);
+  G.monsters = [zw];
+  G.player.x = 340; G.player.y = 300;
+  ok(Math.abs(getPlayerAtkZoneMul() - 0.6) < 1e-9, '站在削减区里攻击 ×0.6',
+    `got ${getPlayerAtkZoneMul()}`);
+  G.player.x = 700; G.player.y = 520;
+  ok(getPlayerAtkZoneMul() === 1, '走出圈外攻击恢复 ×1', `got ${getPlayerAtkZoneMul()}`);
+
+  // 18f 🟦减速区：两只重叠取最强，不连乘
+  fresh();
+  G.monsters = [mkA(300, 300, ['slowzone']), mkA(320, 300, ['slowzone'])];
+  G.player.x = 330; G.player.y = 300;
+  ok(Math.abs(getPlayerSpeedZoneMul() - 0.65) < 1e-9,
+    '两只减速区重叠仍是 ×0.65（取最强而非连乘 0.4225）', `got ${getPlayerSpeedZoneMul()}`);
+  G.player.x = 720; G.player.y = 30;
+  ok(getPlayerSpeedZoneMul() === 1, '走出圈外移速恢复 ×1', `got ${getPlayerSpeedZoneMul()}`);
+
+  // 18g 🔥火焰区：每 240 帧在脚下留一条火
+  fresh();
+  const zf = mkA(300, 300, ['firezone']);
+  G.monsters = [zf];
+  G.fireTrails = [];
+  for (let i = 0; i < 239; i++) tickAffixes(zf);
+  ok(G.fireTrails.length === 0, '不到 240 帧不点火（节流生效）', `got ${G.fireTrails.length}`);
+  tickAffixes(zf);
+  ok(G.fireTrails.length === 1, '第 240 帧在脚下留下一条火焰', `got ${G.fireTrails.length}`);
+  const ft = G.fireTrails[0];
+  ok(ft && Math.abs(Math.hypot(ft.x2 - ft.x1, ft.y2 - ft.y1) - 16) < 1e-6,
+    '留下的火焰是一段有长度的轨迹（能被判环逻辑看见）',
+    `got ${ft && Math.hypot(ft.x2 - ft.x1, ft.y2 - ft.y1).toFixed(2)}`);
+
+  // 18h 🌀突进：每 180 帧朝玩家冲一段，冰冻时不发动
+  fresh();
+  const zd = mkA(300, 300, ['dash']);
+  G.monsters = [zd];
+  G.player.x = 700; G.player.y = 300;
+  const dBefore = Math.hypot(zd.x - G.player.x, zd.y - G.player.y);
+  for (let i = 0; i < 180; i++) tickAffixes(zd);
+  ok(!!zd._dash, '第 180 帧起手突进（_dash 挂上）', `got ${String(zd._dash)}`);
+  for (let i = 0; i < 12; i++) tickAffixes(zd);
+  const dAfter = Math.hypot(zd.x - G.player.x, zd.y - G.player.y);
+  ok(zd.x > 300 + 60, '12 帧插值推进了实打实的一段距离', `x ${zd.x.toFixed(1)}`);
+  ok(dAfter < dBefore - 60, '突进后离玩家明显更近', `${dBefore.toFixed(1)} → ${dAfter.toFixed(1)}`);
+  ok(zd._dash === null, '插值帧数走完自动收手（不会一直飘）', `got ${String(zd._dash)}`);
+
+  fresh();
+  const zfz = mkA(300, 300, ['dash']);
+  zfz.frozen = 1e9;
+  G.monsters = [zfz];
+  for (let i = 0; i < 200; i++) tickAffixes(zfz);
+  ok(zfz._dash === null, '冰冻期间突进整个停摆', `got ${String(zfz._dash)}`);
+
+  // 18i 🌪牵引：圈内被拽向怪物，圈外不管
+  fresh();
+  G.monsters = [mkA(300, 300, ['vortex'])];
+  G.player.x = 400; G.player.y = 300;
+  applyVortexPull(G.player);
+  ok(G.player.x < 400 && G.player.x > 300, '圈内被往怪物那边拉',
+    `x ${G.player.x.toFixed(2)}`);
+  G.player.x = 700; G.player.y = 300;
+  applyVortexPull(G.player);
+  ok(G.player.x === 700, '圈外（>160px）一点不受影响', `x ${G.player.x}`);
+
+  // 18j 🔒封印：撞核心压住一个被动 4 秒，期间该组合整条失效
+  fresh();
+  api.simAutoSelectClass();
+  G.passives = {};
+  addPassive('T06', 'E13');
+  const zs = mkA(90, 90, ['seal']);
+  G.sealedPassives = [];
+  onAffixCoreHit(zs);
+  ok(G.sealedPassives.length === 1, '封印住了恰好一个被动', `got ${G.sealedPassives.length}`);
+  ok(isPassiveSealed('T06', 'E13') === true, 'isPassiveSealed 认得出被压的组合');
+  ok(G.sealedPassives[0] && G.sealedPassives[0].timer === SEAL_FRAMES,
+    `封印时长 = ${SEAL_FRAMES} 帧（4 秒）`, `got ${G.sealedPassives[0] && G.sealedPassives[0].timer}`);
+  const zt = mkM(300, 300);
+  G.monsters = [zt];
+  api.triggerPassive('T06', zt);
+  ok(zt.frozen === 0, '被封印的组合触发时是空操作（E13 没冻住怪）', `got ${zt.frozen}`);
+  for (let i = 0; i < SEAL_FRAMES; i++) updateSeals();
+  ok(G.sealedPassives.length === 0, '4 秒后封印自然解除', `got ${G.sealedPassives.length}`);
+
+  // 18k 👥群生：每 360 帧分裂出 20% HP 的残影，残影不再带词条
+  fresh();
+  const zsw = mkA(300, 300, ['swarm']);
+  G.monsters = [zsw];
+  G.monstersToSpawn = 0;
+  for (let i = 0; i < 360; i++) tickAffixes(zsw);
+  ok(G.monsters.length === 2, '第 360 帧分裂出一只残影', `got ${G.monsters.length}`);
+  const clone = G.monsters[1];
+  ok(clone && clone.isChild === true, '残影标记为子体');
+  ok(clone && Math.abs(clone.maxHp - zsw.maxHp * 0.20) < 1e-9,
+    '残影血量 = 母体上限的 20%', `got ${clone && clone.maxHp}，期望 ${zsw.maxHp * 0.2}`);
+  ok(clone && clone.affixes.length === 0, '残影不带词条（否则会指数扩散）',
+    `got ${clone && clone.affixes.join(',')}`);
+  ok(zsw._swarmCount === 1, '母体记下已分裂 1 只（受上限 3 约束）', `got ${zsw._swarmCount}`);
+
+  // 18l 🗿敌图腾：死亡后原地留下，12 秒后熄灭
+  fresh();
+  G.enemyTotems = [];
+  const zt2 = mkA(80, 500, ['totem']);
+  onAffixDeath(zt2);
+  ok(G.enemyTotems.length === 1, '带敌图腾的怪死后留下 1 座图腾', `got ${G.enemyTotems.length}`);
+  ok(G.enemyTotems[0] && G.enemyTotems[0].life === ENEMY_TOTEM_LIFE,
+    `图腾寿命 = ${ENEMY_TOTEM_LIFE} 帧（12 秒）`, `got ${G.enemyTotems[0] && G.enemyTotems[0].life}`);
+  ok(ENEMY_TOTEM_RANGE === 200, '索敌半径 200px', `got ${ENEMY_TOTEM_RANGE}`);
+  G.player.x = 760; G.player.y = 20;   // 站远点，别被顺手打到
+  for (let i = 0; i < ENEMY_TOTEM_LIFE; i++) updateEnemyTotems();
+  ok(G.enemyTotems.length === 0, '寿命走完后图腾熄灭', `got ${G.enemyTotems.length}`);
+
+  // 18m 换层时敌图腾与封印都清干净
+  fresh();
+  api.simAutoSelectClass();
+  G.enemyTotems.push({ x: 10, y: 10, r: 15, life: 720, maxLife: 720, fireTimer: 30, _lastFire: 0 });
+  G.sealedPassives.push({ tid: 'T06', eid: 'E13', timer: 240 });
+  api.startFloor();
+  ok(G.enemyTotems.length === 0, '开始新一层时敌图腾被清空', `got ${G.enemyTotems.length}`);
+  ok(G.sealedPassives.length === 0, '开始新一层时封印被清空', `got ${G.sealedPassives.length}`);
+
+  // 18n 教程沙盒：收尾后清空一切、重选职业、回到第 1 层
+  fresh();
+  api.simAutoSelectClass();
+  G.floor = 5;
+  G.hand = [{ id: 'x' }];
+  G.essence = 99; G.score = 888;
+  addPassive('T06', 'E13');
+  Tutorial.pendingRestart = true;
+  restartRunAfterTutorial();
+  ok(G.floor === 1, '教程结束后回到第 1 层', `got ${G.floor}`);
+  ok(Object.keys(G.passives).length === 0, '被动清空', `got ${Object.keys(G.passives).join(',')}`);
+  ok(G.hand.length === 0, '手牌清空', `got ${G.hand.length}`);
+  ok(G.essence === 0 && G.score === 0, '精华与得分清零', `${G.essence} / ${G.score}`);
+  ok(G.selectingActive === true, '停在职业选择遮罩上（重选职业）');
+  ok(Tutorial.seen === true, 'seen 仍为 true —— 重开不会再播一遍教程');
+  ok(Tutorial.restarted === true, 'reset() 之后 restarted 被重新置真（探针的收尾信号）');
+
+  // 18o 教程收尾字幕里说清了「清空重来」
+  const outroText = ((TUTORIAL_OUTRO && TUTORIAL_OUTRO.steps) || []).map(s => s.text || '').join('\n');
+  ok(outroText.includes('清空') && outroText.includes('职业'),
+    '收尾字幕交代了清空教程所得并重选职业');
+
+  // 18p 手机端识别：探针的假 window 没有 matchMedia，必须带守卫而不是崩掉
+  let devOk = true, devVal = null;
+  try { devVal = detectMobileMode(); } catch (e) { devOk = false; }
+  ok(devOk, 'detectMobileMode() 在缺少 matchMedia 的环境里不抛异常');
+  ok(devVal === false, '桌面（userAgent = node）识别为非手机', `got ${String(devVal)}`);
+  ok(JOYSTICK && JOYSTICK.r > 0 && JOYSTICK.x > 0 && JOYSTICK.y > 0,
+    '摇杆几何参数已定义', JSON.stringify(JOYSTICK));
+
+  // 18q 抽屉开合驱动全局子弹时间
+  fresh();
+  G.timeScale = 1;
+  setDrawer(true);
+  ok(G.timeScale === 0.5, '抽屉打开 → 全局时间 ×0.5（子弹时间）', `got ${G.timeScale}`);
+  ok(G.drawerOpen === true, 'drawerOpen 同步置真');
+  setDrawer(false);
+  ok(G.timeScale === 1, '抽屉收起 → 时间恢复 ×1', `got ${G.timeScale}`);
+  ok(G.drawerOpen === false, 'drawerOpen 同步置假');
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);

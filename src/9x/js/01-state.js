@@ -59,6 +59,21 @@
         simSpeed: 3,              // 每tick跑几个update()
         simSkipDraw: true,        // 跳过渲染
         simSkipEffects: true,     // 跳过粒子/浮动文字
+
+        // ---------- v9.24 ----------
+        // 词条钩子用到的运行时状态。全部在 resetGame() 里一并重置。
+        // 敌图腾**不复用 G.turrets**——混进玩家数组会连带污染图腾上限、
+        // turretLoops 判环、以及 v9.23 的「火焰烧塔」。另开一条独立数组。
+        enemyTotems: [],
+        // 被「封印」词条暂时压住的被动：{ tid, eid, timer }。timer 归零即解封，
+        // 被动本身不删除，只是 triggerPassive() 会跳过它。
+        sealedPassives: [],
+        // 移动端：摇杆模拟量，模长 0..1。非 0 时优先于 G.keys 的四向输入。
+        stick: { x: 0, y: 0 },
+        stickActive: false,
+        mobileMode: false,        // 设备识别结果，见 09-events.js 的 detectMobileMode()
+        drawerOpen: false,        // 手机端左侧抽屉（密文版/被动）是否展开
+        timeScale: 1,             // 抽屉展开时压到 0.5（子弹时间），见 08-main.js 的 gameLoop()
     };
 
     // ---------- v9.10 自动模拟检测 ----------

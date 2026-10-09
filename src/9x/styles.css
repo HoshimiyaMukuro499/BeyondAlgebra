@@ -637,3 +637,218 @@
         .panel { width: 280px; flex-shrink: 0; overflow-y: auto; max-height: 600px; }
         .canvas-wrap { min-width: 750px; flex-shrink: 1; }
         #gameCanvas { min-width: 750px; }
+
+        /* ============================================================
+           v9.24 手机端布局
+           ------------------------------------------------------------
+           上面所有规则一条都不动——切换完全靠 body.mobile 这一个类，
+           由 09-events.js 的 detectMobileMode() 在启动时判定（桌面端不提供
+           手动开关）。桌面端看到的还是 9.23 那一套右侧 280px 侧栏。
+
+           手机上：
+             · 战斗界面铺满整屏，摇杆压在其左下角（画在 canvas 上，见 06-render.js）
+             · 密文版 / 被动 / 遗物折进左侧抽屉，展开时占半屏 + 全局 50% 子弹时间
+             · 楼层 / 精华 / 得分 / 护盾收进右上角的一条数据带
+             · 冲刺与终极技做成右下角的大圆钮
+           ============================================================ */
+
+        /* 这些元素只在手机端存在。桌面上不占位、不显示。 */
+        .mobile-topbar, .mobile-icon-btn, .mobile-drawer-btn,
+        .mobile-actions, .drawer-close { display: none; }
+
+        body.mobile {
+            display: block;
+            min-height: 100vh;
+            overflow: hidden;
+            background: #05070d;
+            touch-action: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body.mobile .wrapper {
+            min-width: 0;
+            max-width: none;
+            width: 100vw;
+            height: 100vh;
+            padding: 0;
+            border: none;
+            border-radius: 0;
+            box-shadow: none;
+            background: #0a0a16;
+            display: flex;
+            flex-direction: column;
+        }
+        body.mobile .game-row {
+            flex: 1;
+            min-height: 0;
+            gap: 0;
+            flex-wrap: nowrap;
+            align-items: stretch;
+            justify-content: flex-start;
+        }
+        /* 战斗界面。抽屉关着时铺满，开着时整体右移并缩到右半屏。 */
+        body.mobile .canvas-wrap {
+            flex: none;
+            width: 100vw;
+            min-width: 0;
+            height: 100%;
+            padding: 0;
+            margin: 0;
+            border: none;
+            border-radius: 0;
+            background: #0a111b;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            /* 触摸要能落到 canvas 上（桌面端这两层默认是 none，见上面的注释） */
+            pointer-events: auto;
+            transform: translateX(0);
+            transition: transform .18s ease-out, width .18s ease-out;
+        }
+        body.mobile.drawer-open .canvas-wrap {
+            transform: translateX(50vw);
+            width: 50vw;
+        }
+        /* canvas 内部坐标系固定 780×560 不变，这里只是等比缩放。
+           缩放后 09-events.js 的坐标映射（走 getBoundingClientRect）自动正确。
+           用 max-width/max-height 等比适配：手机横屏比 780:560 更宽，
+           所以通常是「顶到高度、左右留黑边」，不会裁掉战斗区域。 */
+        body.mobile #gameCanvas {
+            min-width: 0;
+            width: auto;
+            height: auto;
+            max-width: 100%;
+            max-height: 100%;
+            aspect-ratio: 780 / 560;
+            border-radius: 0;
+            cursor: default;
+            pointer-events: auto;
+            touch-action: none;
+        }
+
+        /* ---------- 左侧抽屉 ---------- */
+        body.mobile .panel {
+            position: fixed;
+            left: 0; top: 0; bottom: 0;
+            width: 50vw;
+            max-height: none;
+            z-index: 60;
+            padding: 8px;
+            gap: 8px;
+            background: #0d1219;
+            border-right: 1px solid #2a3a50;
+            transform: translateX(-100%);
+            transition: transform .18s ease-out;
+        }
+        body.mobile.drawer-open .panel { transform: translateX(0); pointer-events: auto; }
+        /* 抽屉收着的时候不能拦住右半屏的触摸（它只是滑到了屏幕外） */
+        body.mobile:not(.drawer-open) .panel { pointer-events: none; }
+        body.mobile .drawer-close {
+            display: block;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            width: 100%;
+            padding: 9px;
+            background: #1b2836;
+            border: 1px solid #33506e;
+            border-radius: 12px;
+            color: #8ab3d0;
+            font-family: inherit;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        /* 手机上信息密度可以松一点：抽屉里的字号本来就小，触控目标要够大 */
+        body.mobile .panel-box { padding: 9px 10px; }
+
+        /* ---------- 顶部按钮与数据条 ---------- */
+        body.mobile .mobile-drawer-btn,
+        body.mobile .mobile-icon-btn {
+            display: block;
+            position: absolute;
+            top: 8px;
+            z-index: 30;
+            padding: 8px 12px;
+            background: rgba(20, 30, 44, 0.9);
+            border: 1px solid #33506e;
+            border-radius: 12px;
+            color: #cfe4ff;
+            font-family: inherit;
+            font-size: 12px;
+            cursor: pointer;
+            touch-action: none;
+        }
+        body.mobile .mobile-drawer-btn { left: 8px; }
+        #mobileFullscreenBtn { right: 8px; }
+        #mobileCodexBtn { right: 94px; }
+        body.mobile .mobile-icon-btn:active,
+        body.mobile .mobile-drawer-btn:active { background: #2a4a6a; }
+
+        body.mobile .mobile-topbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            position: absolute;
+            top: 52px;
+            right: 8px;
+            z-index: 20;
+            padding: 5px 12px;
+            background: rgba(12, 18, 28, 0.8);
+            border: 1px solid #253544;
+            border-radius: 14px;
+            font-size: 13px;
+            color: #cfe4ff;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+
+        /* ---------- 右下角大圆钮 ---------- */
+        body.mobile .mobile-actions {
+            display: flex;
+            gap: 14px;
+            position: absolute;
+            right: 14px;
+            bottom: 14px;
+            z-index: 30;
+        }
+        body.mobile .mobile-act-btn {
+            width: 82px;
+            height: 82px;
+            border-radius: 50%;
+            border: 2px solid #3a5670;
+            background: rgba(24, 34, 48, 0.88);
+            color: #cfe4ff;
+            font-family: inherit;
+            font-size: 24px;
+            line-height: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            cursor: pointer;
+            touch-action: none;
+        }
+        body.mobile .mobile-act-btn span { font-size: 10px; color: #8ab3d0; }
+        body.mobile .mobile-act-btn.ult { border-color: #8a6a2a; background: rgba(40, 30, 12, 0.9); color: #ffdd44; }
+        body.mobile .mobile-act-btn.ult span { color: #d8b45a; }
+        body.mobile .mobile-act-btn.pressed { transform: scale(0.92); background: rgba(60, 90, 120, 0.95); }
+
+        /* 键盘提示在手机上没有意义 */
+        body.mobile .controls-hint { display: none; }
+
+        /* ---------- 竖屏：只做横屏，直接盖一层提示 ---------- */
+        body.mobile.portrait::after {
+            content: '📱 请把设备横过来\A本游戏只支持横屏游玩';
+            white-space: pre-line;
+            position: fixed;
+            inset: 0;
+            z-index: 999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            line-height: 2;
+            background: #05070d;
+            color: #8ab3d0;
+            font-size: 17px;
+        }

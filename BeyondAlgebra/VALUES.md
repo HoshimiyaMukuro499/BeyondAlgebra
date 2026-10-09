@@ -1,6 +1,6 @@
 # 数值与公式总表 · 9.x（AI 拓展版）
 
-> 调试用速查。所有数值直接摘自 [`src/9x/js/`](../src/9x/js/)（v9.23 状态），每个条目都标了出处。
+> 调试用速查。所有数值直接摘自 [`src/9x/js/`](../src/9x/js/)（v9.24 状态），每个条目都标了出处。
 > 行号是**当时的锚点**，源码一改就会漂——对不上时按函数名/关键字在文件里搜，别按行号硬找。
 > 调数值请改 `src/9x/`，改完跑 `npm run build:game` 重新拼装根目录的单文件 HTML——
 > 根目录的 `密文轨迹demo9.XX.html` 是**产物**，直接编辑会被下次构建覆盖。
@@ -43,9 +43,13 @@
 | 浮动文字寿命 | 35 帧 | `01-state.js:136` |
 | 火焰伤害流转上限 | 40 条 | `05-update.js:441` |
 | 火焰烧图腾 | 0.012 / 帧（≈0.72 血/秒） | `05-update.js:9` |
-| E13/E14 范围半径 | 90px | `02-combat.js:30` |
+| E13/E14 范围半径 | 225px | `02-combat.js:42` |
+| 普通怪 HP / 攻击乘子 | ×0.8（移速不动） | `02-combat.js:280` |
 | BOSS 血量乘子 | ×0.9 | `00-data.js:229` |
-| BOSS 召唤速率乘子 | ×1.05（间隔 ÷1.05） | `00-data.js:232` |
+| BOSS 召唤速率乘子 | ×1.1025（间隔 ÷1.1025） | `00-data.js:232` |
+| 封印时长 | 240 帧（4 秒） | `05-update.js:237` |
+| 敌图腾寿命 / 索敌半径 | 720 帧 / 200px | `05-update.js:264-265` |
+| 摇杆几何 | 圆心 (95, 105)、半径 62（距左下角） | `00-data.js` v9.24 块 |
 | 轨迹段上限 | 120（普通）/ 60（冲刺） | `04-trail.js:97`、`05-update.js:115` |
 | 火焰轨迹上限 | 80 | `05-update.js:222` |
 | 手牌上限 | 20（满了替换最老一张） | `07-ui.js:138,409` |
@@ -105,7 +109,7 @@ getSpawnInterval() = max(6, 25 / 1.06^(f - 1))      // fastRush 关卡 ×0.4
 
 ### 精英词缀数量
 
-`01-state.js:188-199`，词缀池开放门槛 `minWave = 5`
+`01-state.js:188-199`，词缀池开放门槛 `minWave = 5`（**14 个词条全部 minWave = 5**）
 
 | 楼层 | 数量 |
 |:--|:--|
@@ -113,6 +117,9 @@ getSpawnInterval() = max(6, 25 / 1.06^(f - 1))      // fastRush 关卡 ×0.4
 | 5 ≤ f < 15 | 30% 出 1 个，否则 0 |
 | 15 ≤ f < 25 | 1 个；30% 变 2 个 |
 | f ≥ 25 | 2 个；20% 变 3 个 |
+
+BOSS 不按上表——`spawnBoss()` 固定 `pickAffixes(2, ['dash', 'swarm'])`，
+即**恰好 2 个**，且排除突进与群生。
 
 ### 关卡类型权重
 
@@ -337,12 +344,18 @@ getTrailDamage() = (buffs.trailDmg + log2(f + 1) × 0.5) × fateBuffs.trailDmgMu
 ### 生成公式
 
 ```
-hp  = (baseHp + hpScale)        × D × hpMult        // 精英：(baseHp + hpScale × 1.5)
-spd = (baseSpeed + speedScale)  × min(D, 3.0)       // 精英：speedScale × 1.2
-atk = (baseAtk + atkScale)      × min(D^0.35, 12)   // 精英：atkScale × 1.3
+hp  = (baseHp + hpScale)        × D × hpMult × 0.8  // 精英：(baseHp + hpScale × 1.5)
+spd = (baseSpeed + speedScale)  × min(D, 3.0)       // 精英：speedScale × 1.2（不乘 0.8）
+atk = (baseAtk + atkScale)      × min(D^0.35, 12) × 0.8   // 精英：atkScale × 1.3
 ```
 
 硬钳：`hp ≤ 1e9`、`speed ≤ 6.0`、`atk ≤ 120`。
+
+> **v9.24 起普通怪 HP 与攻击各 ×0.8**（`MONSTER_STAT_MUL`），**移速不动**——
+> 出怪变密之后再削移速只会变成「又慢又肉又没威胁」，纯拖时间。
+> 作用域仅 `spawnMonster()`；`spawnBoss()` / `spawnBossMinion()`（已 0.5×）/
+> `spawnDebugMonster()` 与分裂子体、群生残影都**不**再乘一次
+> （子体的数值从母体派生，母体已经吃过这一刀）。
 
 `hpMult`：重装关卡 ×2；教程 `hpMul`（第 1 层 0.6）。
 
@@ -400,7 +413,7 @@ getBossHp() = floor(0.9 × 100000 × 1.7^(min(floor(f/10), 3) - 1) × max(1, f/3
 
 - v9.23 起整体 ×0.9（`BOSS_HP_MUL`）：10 层 9 万 / 20 层 15.3 万 / 30 层 26 万
 - `atk = 45 × min(D^0.35, 12)`
-- 爪牙：间隔 `round(max(50, 150 - f × 2) / 1.05)` 帧（v9.23 起速率 +5%），首次 95 帧；数量 `1 + floor(f / 15)`，只出 basic/fast/tank
+- 爪牙：间隔 `round(max(50, 150 - f × 2) / 1.1025)` 帧（v9.24 累计 +10.25%），首次 91 帧；数量 `1 + floor(f / 15)`，只出 basic/fast/tank
 - 爪牙数值：r ×0.8，hp 50%，speed ×1.2，atk ×0.5，分值 ×0.3
 - 每 10 层出现（`f % 10 === 0`）；节点地图上 BOSS 节点只在 `f % 10 === 9` 可选
 
@@ -425,7 +438,10 @@ getBossHp() = floor(0.9 × 100000 × 1.7^(min(floor(f/10), 3) - 1) × max(1, f/3
 
 ## 6. 精英词缀
 
-`00-data.js:181-194`，全部 `minWave = 5`。
+`00-data.js:181-194`，**14 个，全部 `minWave = 5`**。抽池走
+`pickAffixes(n, exclude)`（`00-data.js`），普通怪 / BOSS / 残影三处共用。
+
+**前 6 个——强化怪物自身**（老词条，内联写法）：
 
 | id | 名称 | 效果 | 精确数值 | 出处 |
 |:--|:--|:--|:--|:--|
@@ -435,6 +451,26 @@ getBossHp() = floor(0.9 × 100000 × 1.7^(min(floor(f/10), 3) - 1) × max(1, f/3
 | `giant` | 巨人 🦍 | HP 与体型翻倍 | `hp × 2`，`r × 1.5` | `02-combat.js:262-263` |
 | `vampiric` | 吸血 🩸 | 攻击时回血（仅当玩家护盾已空） | `dmg × (0.15 + f × 0.01)` | `05-update.js:309-313` |
 | `explosive` | 爆裂 💥 | 死亡时范围爆炸 | `(20 + f × 4) × D`，半径 80 | `05-update.js:367-381` |
+
+**后 8 个——干扰玩家**（v9.24 新增，声明式行为字段 + `05-update.js` 的统一钩子）：
+
+| id | 名称 | 效果 | 精确数值 | 钩子 |
+|:--|:--|:--|:--|:--|
+| `weaken` | 削减区 🟥 | 玩家攻击打折 | `playerAtkMul = 0.6`，`r = 100` | `getPlayerAtkZoneMul()`（`04-trail.js` 的 `atk` 末尾） |
+| `slowzone` | 减速区 🟦 | 玩家移速打折 | `playerSpeedMul = 0.65`，`r = 90` | `getPlayerSpeedZoneMul()` |
+| `firezone` | 火焰区 🔥 | 脚下留火 | 每 240 帧一条，长 16px，寿命 150 | `tickAffixes` → `spawnAffixFire` |
+| `dash` | 突进 🌀 | 朝玩家猛冲 | 每 180 帧冲 90px，12 帧插值（0.28 逼近），**无视地形** | `tickAffixes` |
+| `vortex` | 牵引 🌪 | 把玩家往自己拽 | `r = 160`，`pull = 0.15 × (1 - d/r)` | `applyVortexPull()` |
+| `seal` | 封印 🔒 | 撞核心封一个被动 | `SEAL_FRAMES = 240`（4 秒） | `onAffixCoreHit` |
+| `swarm` | 群生 👥 | 分裂残影 | 每 360 帧一只，`hpFrac = 0.20`，上限 3 只 | `tickAffixes` → `spawnSwarmClone` |
+| `totem` | 敌图腾 🗿 | 死后留图腾 | 寿命 720 帧，索敌 200px，每 60 帧一发 `3 + f × 0.2` | `onAffixDeath` |
+
+> **区域重叠取最强（`Math.min`）而非连乘**——三只怪叠在一起若连乘，玩家等于被冻住，
+> 那就超出「减速」的语义了。
+> **封印**只在玩家真有被动时才有意义（没有可封的组合时这条词条是空的）；
+> 被封印的组合**不删除**，只是这 4 秒 `triggerPassive` 整条跳过。
+> **残影不带词条**（`affixes: []`），否则词条会指数级扩散。
+> **敌图腾不复用 `G.turrets`**，走独立的 `G.enemyTotems`，避免污染玩家的图腾上限与环 key。
 
 ---
 
@@ -655,10 +691,10 @@ KILL_STREAK_WINDOW = 180 帧（3 秒）
 
 **E14 延缓**：对作用范围内的每只怪 `m.slowTimer = max(m.slowTimer, d)`（30 / 60 帧）。
 
-**E13 / E14 的作用范围（v9.23 改）**：
+**E13 / E14 的作用范围（v9.23 引入，v9.24 放大到 225px）**：
 
 ```
-作用对象 = 命中目标 + 它周围 90px 内的怪（EFFECT_AOE_RADIUS，02-combat.js:30）
+作用对象 = 命中目标 + 它周围 225px 内的怪（EFFECT_AOE_RADIUS，02-combat.js:42）
 没有目标的触发器（T01 对自身 / T02 对敌群 / T10 残血 / T12 闭环）
   → 就近兜底：取离玩家最近的那只怪当靶心
   场上无怪 → 空数组，效果空放
@@ -907,13 +943,19 @@ r = 55，life = 600 帧（10 秒）
 
 ## 14. 教程
 
-`02-combat.js:495-497`（定义）、`03-tutorial.js:550-553`（超时逻辑）
+`03-tutorial.js`（超时逻辑）
 
 | 常量 | 值 | 含义 |
 |:--|:--|:--|
-| `TUTORIAL_MAX_FLOOR` | 5 | 逐层脚本覆盖 1–5 层 |
 | `TUTORIAL_TIMEOUT` | 25 × 60 = 1500 帧 | 超时后给更直白的提示（`fallback`） |
 | `TUTORIAL_FORCE` | 20 × 60 = 1200 帧 | 再超时自动放行，绝不卡流程 |
+| `Tutorial.pendingRestart` | 布尔 | `finish()` / `skip()` 置真，`update()` 里统一执行重置 |
+| `SEAL_FRAMES` | 240 帧 | 「封印」词条的压制时长 |
+
+> v9.24 删掉了 `TUTORIAL_MAX_FLOOR`——教程不再是「播完空降第 6 层」，
+> 而是**纯沙盒**：收尾字幕播完（或点「跳过教程」）走同一条
+> `restartRunAfterTutorial()`，清空密文版 / 被动 / 精华 / 得分，
+> 回到第 1 层并重选职业。
 
 逐层脚本（`03-tutorial.js:1-153`）：
 
@@ -925,7 +967,11 @@ r = 55，life = 600 帧（10 秒）
 | 4 | 画一个闭环 | — | 70 | basic ×4 + scorcher ×2 | 1 杀→T12，2 杀→E12 |
 | 5 | 精英、虚灵与终极技 | — | 60 | basic ×4 + fast ×2 + 精英 basic ×1 + wraith ×1 | 杀精英→T10、E03 |
 
-第 3 层预设手牌 `[T06, E10]`；第 5 层 `ultFull = true`（终极技直接充满）。第 5 层结束 → 节点地图 → 第 6 层收尾字幕。
+第 3 层预设手牌 `[T06, E10]`；第 5 层 `ultFull = true`（终极技直接充满）。
+第 5 层结束 → 节点地图 → `TUTORIAL_OUTRO` 收尾（4 步）→ 清空重开。
+
+> **手机端联动（v9.24）**：教程步骤指向 `hand` / `combine` / `slot` 时自动展开左侧抽屉，
+> 该步骤播完自动收起——`Tutorial.drawerAutoOpened` 记住是「自己开的」才会去关。
 
 ---
 

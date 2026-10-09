@@ -193,6 +193,15 @@
     };
 
     // ---------- 精英词缀 ----------
+    // v9.24: 前 6 个（再生/荆棘/迅捷/巨人/吸血/爆裂）都是「给怪物自己加数值」。
+    // 后 8 个换了方向——不去加强怪物，而是去干扰**玩家的三个系统**：
+    //   移动   → 突进 / 牵引
+    //   输出   → 削减区 / 减速区
+    //   召唤物 → 敌图腾 / 群生（外加火焰区同时烧玩家和图腾）
+    // 所以它们不能只靠 spawnMonster() 里乘一个系数实现，需要一个逐帧钩子。
+    // 行为一律写在下面这些声明式字段里（zone / fireZone / dash / vortex /
+    // swarm / onCoreHit / onDeath），由 05-update.js 的 tickAffixes()、
+    // onAffixCoreHit()、onAffixDeath() 三个统一入口去读——加词条只需要动这张表。
     const AFFIXES = [
         { id: 'regen',     label: '再生', emoji: '💚', color: '#44ff88',
           desc: '每帧回复生命', minWave: 5 },
@@ -206,7 +215,46 @@
           desc: '攻击时回复生命', minWave: 5 },
         { id: 'explosive', label: '爆裂', emoji: '💥', color: '#ff6622',
           desc: '死亡时范围爆炸', minWave: 5 },
+
+        // ---- v9.24 新增 ----
+        { id: 'weaken',    label: '削减区', emoji: '🟥', color: '#ff4455',
+          desc: '周围 100px 内玩家攻击 ×0.6', minWave: 5,
+          zone: { r: 100, playerAtkMul: 0.6 } },
+        { id: 'slowzone',  label: '减速区', emoji: '🟦', color: '#4499ff',
+          desc: '周围 90px 内玩家移速 ×0.65', minWave: 5,
+          zone: { r: 90, playerSpeedMul: 0.65 } },
+        { id: 'firezone',  label: '火焰区', emoji: '🔥', color: '#ff6622',
+          desc: '每 4 秒在脚下留下火焰', minWave: 5,
+          fireZone: { every: 240 } },
+        { id: 'dash',      label: '突进', emoji: '🌀', color: '#cc66ff',
+          desc: '每 3 秒朝玩家猛冲一段', minWave: 5,
+          dash: { every: 180, dist: 90 } },
+        { id: 'vortex',    label: '牵引', emoji: '🌪', color: '#88ddff',
+          desc: '持续把周围玩家往自己拉', minWave: 5,
+          vortex: { r: 160, pull: 0.15 } },
+        { id: 'seal',      label: '封印', emoji: '🔒', color: '#ddcc44',
+          desc: '撞核心时随机封印玩家一个被动 4 秒', minWave: 5,
+          onCoreHit: 'seal' },
+        { id: 'swarm',     label: '群生', emoji: '👥', color: '#66dd88',
+          desc: '每 6 秒分裂出 20% HP 的残影（上限 3）', minWave: 5,
+          swarm: { every: 360, hpFrac: 0.20, max: 3 } },
+        { id: 'totem',     label: '敌图腾', emoji: '🗿', color: '#ff8844',
+          desc: '死亡后原地留下敌意图腾', minWave: 5,
+          onDeath: 'enemyTotem' },
     ];
+
+    // 按 id 查词条定义。渲染、钩子、图鉴都要用，直接下标取容易漏。
+    function affixDef(id) {
+        return AFFIXES.find(a => a.id === id) || null;
+    }
+    // 从「当前楼层已解锁」的词条里随机抽 n 个（不重复）。BOSS 带 2 个就走这里。
+    // exclude 用来剔掉对它没意义的词条——见 spawnBoss()。
+    function pickAffixes(n, exclude) {
+        const skip = exclude || [];
+        const pool = AFFIXES.filter(a => G.floor >= a.minWave && skip.indexOf(a.id) < 0);
+        const shuffled = [...pool].sort(() => Math.random() - 0.5);
+        return shuffled.slice(0, Math.min(n, shuffled.length)).map(a => a.id);
+    }
 
     // ---------- v9.2 命运抉择 ----------
     const FATE_CHOICES = [
@@ -227,12 +275,25 @@
 
     // v9.23: BOSS 血量整体 −10%（第 10 层 9 万、第 30 层 26 万）。
     const BOSS_HP_MUL = 0.9;
-    // v9.23: BOSS 召唤爪牙的速率 +5%，于是每次召唤的间隔 ×(1/1.05)。
+    // v9.23: BOSS 召唤爪牙的速率 +5%。v9.24: 再加 5%，累计 1.1025。
+    // 写成乘积而不是 1.1025，是为了让两次调整的出处都留在代码里。
     // 初始间隔（type.spawnInterval = 100）和后续的 max(50, 150-层数×2) 都除这一项。
-    const BOSS_SUMMON_RATE_MUL = 1.05;
+    const BOSS_SUMMON_RATE_MUL = 1.05 * 1.05;
     function bossSummonInterval(base) {
         return Math.max(1, Math.round(base / BOSS_SUMMON_RATE_MUL));
     }
+
+    // v9.24: 普通怪 HP 与攻击力各 −20%。配合「BOSS 爪牙更密」一起，
+    // 整体方向是「怪更多、每只更脆」。移速**不动**——出怪变密之后如果怪还变慢，
+    // 就只剩「又慢又肉又没威胁」，纯粹拖时间，不会更紧张。
+    // 只作用于 spawnMonster() 与分裂子体；BOSS / 爪牙 / 调试生成都不吃这一项。
+    const MONSTER_STAT_MUL = 0.8;
+
+    // ---------- v9.24 手机端虚拟摇杆 ----------
+    // 位置用「离左下角多少像素」表达（x 从左、y 从下），因为 canvas 的高度是
+    // 固定的 560，但底部还压着终极技充能条，用底距比用顶距好算。
+    // 触摸判定（09-events.js）与绘制（06-render.js）都读这一份，改一处两边同步。
+    const JOYSTICK = { x: 95, y: 105, r: 62 };
 
     // ---------- v9.23 每层清空奖励的卡牌数 ----------
     // 基础式仍是 2 + 层数/10（第 5 层 2 张、第 50 层 7 张、第 100 层 12 张），

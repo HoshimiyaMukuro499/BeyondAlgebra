@@ -11,20 +11,40 @@
 
     // v9.23: target 是「这次触发的生效目标」——T03/T06/T07/T08 传被命中的那只怪。
     // 只有需要范围效果的 E13/E14 用它（见下面的 effectAoeTargets()），其余效果忽略。
+    // v9.24: 被「封印」词条压住的组合整条跳过——被动不删除，只是这 4 秒不生效。
     function triggerPassive(triggerId, target) {
         if (!G.passives[triggerId]) return;
         for (const p of G.passives[triggerId]) {
+            if (isPassiveSealed(triggerId, p.effectId)) continue;
             for (let i = 0; i < p.count; i++) {
                 applyPassiveEffect(triggerId, p.effectId, false, target);
             }
         }
     }
 
+    // 某个组合当前是否被封印。G.sealedPassives 的清理在 05-update.js 的 updateSeals()。
+    function isPassiveSealed(triggerId, effectId) {
+        for (const s of G.sealedPassives) {
+            if (s.tid === triggerId && s.eid === effectId) return true;
+        }
+        return false;
+    }
+
+    // 同一件事的「还剩多少帧」版本，给 UI 显示剩余秒数用（07-ui.js 的 updatePassiveUI）。
+    function getSealedFrames(triggerId, effectId) {
+        for (const s of G.sealedPassives) {
+            if (s.tid === triggerId && s.eid === effectId) return s.timer;
+        }
+        return 0;
+    }
+
     // ---------- v9.23 E13/E14 的作用范围 ----------
-    // 从「全场」改成「命中目标 + 它周围 90px 内的怪」。
+    // 从「全场」改成「命中目标 + 它周围 N px 内的怪」。
     // 没有具体目标的触发器（T01 对自身 / T02 对敌群 / T10 残血 / T12 闭环）
     // 就近兜底：取离玩家最近的那只怪当靶心；场上一只怪都没有时返回空数组。
-    const EFFECT_AOE_RADIUS = 90;
+    // v9.24: 90 → 225（90 × 2.5）。90px 在后期密集怪群里几乎只打到靶心那一只，
+    // 「范围效果」和「单体效果」手感上没有区别，等于白改。
+    const EFFECT_AOE_RADIUS = 225;
     function nearestMonsterTo(x, y) {
         let best = null, bestD = Infinity;
         for (const m of G.monsters) {
@@ -243,31 +263,32 @@
         // 教程：类型由脚本钦定，绕过解锁门槛与权重（按 id 查，MONSTER_TYPES 的键是大写）
         const type = forced ? (MONSTER_TYPE_LIST.find(t => t.id === forced.key) || selectedType) : selectedType;
 
-        // v9.1: 精英词缀分配
+        // v9.1: 精英词缀分配（v9.24: 抽池逻辑挪到 00-data.js 的 pickAffixes()，
+        // 普通怪、BOSS、残影三处共用一份，词条池也从 6 个扩到 14 个）
         let affixes = [];
         if (isElite) {
             // 教程钦定的精英一定带词缀，否则「精英带词缀」这句教学会落空
             const affixCount = (forced && forced.elite) ? Math.max(1, getAffixCount()) : getAffixCount();
-            const available = AFFIXES.filter(a => G.floor >= a.minWave);
-            const shuffled = [...available].sort(() => Math.random() - 0.5);
-            affixes = shuffled.slice(0, Math.min(affixCount, shuffled.length)).map(a => a.id);
+            affixes = pickAffixes(affixCount);
         }
 
         let hpMult = 1;
         if (G.stageType === 'siege') hpMult = 2;
         if (forced && forced.hpMul) hpMult *= forced.hpMul; // 教程：压低前几层的血量
+        // v9.24: 最后再乘一次 MONSTER_STAT_MUL（HP 与攻击各 −20%）。
+        // 放在这里而不是打进各分档里，是为了让「−20%」在代码里只有一个出处。
         let hp = (isElite ?
             (type.baseHp + type.hpScale * 1.5) * diff :
-            (type.baseHp + type.hpScale) * diff) * hpMult;
+            (type.baseHp + type.hpScale) * diff) * hpMult * MONSTER_STAT_MUL;
         let spd = isElite ?
             (type.baseSpeed + type.speedScale * 1.2) * Math.min(diff, 3.0) :
             (type.baseSpeed + type.speedScale) * Math.min(diff, 3.0);
         // v9.15: 攻击不再第 10 层就冻结。旧写法 ×Math.min(diff,4.0) 让怪物伤害
         // 永远停在 24 点，配合玩家的 100 点护盾，等于「永远不会死」。
         // 改成随难度缓涨（0.35 次幂）并留 12 倍安全阀。
-        let atk = isElite ?
+        let atk = (isElite ?
             (type.baseAtk + type.atkScale * 1.3) * Math.min(Math.pow(diff, 0.35), 12) :
-            (type.baseAtk + type.atkScale) * Math.min(Math.pow(diff, 0.35), 12);
+            (type.baseAtk + type.atkScale) * Math.min(Math.pow(diff, 0.35), 12)) * MONSTER_STAT_MUL;
         let radius = isElite ? type.eliteRadius : type.radius;
 
         // 巨人词缀：HP和体型翻倍
@@ -318,6 +339,11 @@
             vx_prev: 0,
             vy_prev: 0,
             _fireCounter: 0,
+            // v9.24: 词条钩子的运行时状态，见 05-update.js 的 tickAffixes()
+            _affixTimer: 0,     // 通用帧计数（火焰区 / 突进 / 群生共用）
+            _dash: null,        // 突进：{ tx, ty, t }，t 倒数到 0 为止
+            _swarmCount: 0,     // 群生：已经分裂出几只残影
+            _affixZones: [],    // 本帧生效的区域，只给渲染用（见 06-render.js）
         };
         G.monsters.push(monster);
     }
@@ -379,6 +405,11 @@
             vx_prev: 0,
             vy_prev: 0,
             _fireCounter: 0,
+            // v9.24: 词条钩子的运行时状态，见 05-update.js 的 tickAffixes()
+            _affixTimer: 0,     // 通用帧计数（火焰区 / 突进 / 群生共用）
+            _dash: null,        // 突进：{ tx, ty, t }，t 倒数到 0 为止
+            _swarmCount: 0,     // 群生：已经分裂出几只残影
+            _affixZones: [],    // 本帧生效的区域，只给渲染用（见 06-render.js）
         };
         G.monsters.push(monster);
         spawnParticles(monster.x, monster.y, type.color, 8);
@@ -396,6 +427,8 @@
             const child = {
                 x: m.x + Math.cos(angle) * dist2,
                 y: m.y + Math.sin(angle) * dist2,
+                // v9.24: 不额外乘 MONSTER_STAT_MUL——子体的 hp/atk 都是从母体派生的，
+                // 母体在 spawnMonster() 里已经吃过那一刀了，这里再乘就是 −36%。
                 r: m.r * 0.55,
                 hp: m.maxHp * 0.3,
                 maxHp: m.maxHp * 0.3,
@@ -419,6 +452,11 @@
                 moveTimer: rand(0, 80),
                 isMoving: Math.random() < 0.5,
                 alwaysMoving: G.floor >= 10 && Math.random() < Math.min(0.10 + 0.09 * (G.floor - 10), 1.0),
+                // v9.24: 子体不带词条（_zones 之类仍然给全套空值，tickAffixes 会逐只过）
+                affixes: [],
+                frozen: 0, stunned: 0, slowTimer: 0,
+                vx_prev: 0, vy_prev: 0, _fireCounter: 0,
+                _affixTimer: 0, _dash: null, _swarmCount: 0, _affixZones: [],
             };
             G.monsters.push(child);
             spawnParticles(child.x, child.y, '#88cc66', 4);
@@ -453,6 +491,11 @@
             spawnTimer: bossSummonInterval(type.spawnInterval),   // v9.23: 召唤速率 +5%
             moveInterval: type.moveInterval, moveTimer: rand(0, 120),
             isMoving: true, alwaysMoving: true,
+            // v9.24: BOSS 从词条池里随机带 2 个。
+            // 排除 dash 与 swarm——BOSS 已经是 alwaysMoving，本体也已经有专属的爪牙
+            // 召唤器，这两条对它属于「已经有的东西的弱化版」，白占 2 个槽位之一。
+            affixes: pickAffixes(2, ['dash', 'swarm']),
+            _affixTimer: 0, _dash: null, _swarmCount: 0, _affixZones: [],
         };
         G.monsters.push(boss);
         spawnParticles(x, y, '#ff2266', 35);
@@ -481,6 +524,11 @@
             healCooldown: 0, isChild: true, isBoss: false,
             moveInterval: 40, moveTimer: rand(0, 80), isMoving: true,
             alwaysMoving: Math.random() < 0.5,
+            // v9.24: 爪牙不带词条
+            affixes: [],
+            frozen: 0, stunned: 0, slowTimer: 0,
+            vx_prev: 0, vy_prev: 0, _fireCounter: 0,
+            _affixTimer: 0, _dash: null, _swarmCount: 0, _affixZones: [],
         };
         G.monsters.push(m);
         spawnParticles(m.x, m.y, '#ff4466', 3);
@@ -516,7 +564,8 @@
     //           essence(精华≥n) / sprint(按住Shift) / map(节点地图已开)
     //           event(具名事件：hit/pickup/combine/chair/split/loop/enclosure/ultimate)
     // ============================================================
-    const TUTORIAL_MAX_FLOOR = 5;
+    // v9.24: TUTORIAL_MAX_FLOOR 删除——它唯一的用途是 skip() 里把玩家空降到第 6 层，
+    // 而「跳过教程」现在和「播完教程」一样走清空重开（见 03-tutorial.js）。
     const TUTORIAL_TIMEOUT = 25 * 60; // 25s：先给更直白的提示
     const TUTORIAL_FORCE = 20 * 60;   // 再 20s：自动放行，绝不卡流程
     const TUTORIAL_FONT = '"Courier New","PingFang SC","Microsoft YaHei",monospace';

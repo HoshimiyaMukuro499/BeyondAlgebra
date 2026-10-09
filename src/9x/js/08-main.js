@@ -34,6 +34,11 @@
         G.essenceThisFloor = 0; G.shopRefreshCount = 1;   // v9.18 经济
         G._revived = false; G.fireRate = 40; G.stage = 1;   // v9.19: 10 → 40，与 01-state.js 保持一致
         G.gameLog = []; G.floorKills = 0; G.floorCardsObtained = 0;
+        // v9.24: 词条残留与手机端输入状态。timeScale 归 1——重置之后抽屉一定是关的，
+        // 留个 0.5 会让新一局一开局就是慢动作。
+        G.enemyTotems = []; G.sealedPassives = [];
+        G.stick = { x: 0, y: 0 }; G.stickActive = false;
+        G.drawerOpen = false; G.timeScale = 1;
         Tutorial.reset();
         document.getElementById('pauseOverlay').classList.remove('active');
         document.getElementById('pauseWorkshop').classList.remove('active');
@@ -42,6 +47,8 @@
         document.getElementById('merchantOverlay').classList.remove('active');
         G.debug = false;
         document.getElementById('selectionOverlay').classList.remove('active');
+        // v9.24: 手机端抽屉也要一起收起来——重开一局却还开着上一局的抽屉很出戏
+        if (document.body) document.body.classList.remove('drawer-open');
         updateRelicUI(); updateBatchUI();
         updateUI();
         initClassSelection();
@@ -69,12 +76,20 @@
         ctx.restore();
     }
 
+    // v9.24: 抽屉展开时的「子弹时间」累加器。G.timeScale = 0.5 时 update() 隔帧跑一次。
+    // 游戏里所有计时都以「帧」为单位（怪物移动、充能、火焰寿命、教程节拍），
+    // 所以隔帧 update 等于整体时间缩放，不需要去动任何一个具体计时器。
+    let _timeAcc = 0;
     function gameLoop() {
         if (G.simMode) {
             simLoop();
             return;
         }
-        update();
+        _timeAcc += G.timeScale;
+        if (_timeAcc >= 1) {
+            _timeAcc -= 1;
+            update();
+        }
         draw();
         drawFps();
         requestAnimationFrame(gameLoop);

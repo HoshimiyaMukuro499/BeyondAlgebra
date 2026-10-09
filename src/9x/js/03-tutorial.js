@@ -108,9 +108,13 @@
                   text: '⭕ 闭环成立！图腾会自动攻击范围内最近的怪物。它现在有血量，被打光才会碎。',
                   fallback: '绕一个大圈回到起点，把轨迹首尾接上。' },
                 { on: 'after', d: 180, hold: 460,
-                  text: '闭环越大，图腾越强也越结实：🥉小环 ×0.6 · 2血 / 🥈中环 ×1.0 · 4血 / 🥇大环 ×1.5 · 6血。' },
+                  text: '闭环越大，图腾越强也越结实：🥉小环 ×0.6 · 2血 / 🥈中环 ×1.0 · 4血 / 🥇大环 ×1.5 · 6血。全场最多 10 座。' },
+                { on: 'after', d: 240, hold: 460,
+                  text: '注意：图腾泡在火焰里会被烧掉血——包括灼烧怪留下的火。别把塔画在火里。' },
                 { on: 'after', d: 240, hold: 480,
                   text: '图腾类型由 T12 绑定的效果板决定：E01→速射 / E12→雷电 / E13→冰霜 / E06→轨迹。' },
+                { on: 'after', d: 240, hold: 480,
+                  text: '💧 冰冻 E13 和 🐢 延缓 E14 现在是范围技：命中目标周围 225px 内的怪一起吃，不再只打一只。' },
                 { on: 'after', d: 240, hold: 480,
                   text: '🔒 围剿：怪物周围 8 个方向被轨迹封住 6 个以上，就会触发包围伤害 + 眩晕。' },
                 { on: 'event', name: 'enclosure', needsMob: true, hold: 420,
@@ -136,7 +140,7 @@
                 { kind: 'banner', on: 'enter', hold: 120 },
                 { on: 'enter', d: 60, spawn: [{ type: 'basic', n: 1, elite: true }],
                   point: 'elite', hold: 480,
-                  text: '⭐ 精英怪登场，带词缀：再生 / 荆棘 / 迅捷 / 巨人 / 吸血 / 爆裂。第 5 层起出现，越深词缀越多。',
+                  text: '⭐ 精英怪登场，带词缀。词缀池现在有 14 个——除了原来的 6 个，还有 🟥削减区 🟦减速区 🔥火焰区 🌀突进 🌪牵引 🔒封印 👥群生 🗿敌图腾。',
                   fallback: '场上那只更大、带 ⭐ 的怪就是精英。' },
                 { on: 'enter', d: 360, spawn: [{ type: 'wraith', n: 1 }],
                   point: 'wraith', hold: 440,
@@ -163,15 +167,18 @@
         ],
     };
 
-    // 第 6 层：收尾
+    // 收尾。v9.24: 新增第三条——教程现在是沙盒，播完会清空重开，
+    // 这一条必须在最后一步说，否则玩家会以为教程里攒的东西被吞了。
     const TUTORIAL_OUTRO = {
         title: '从这里开始是你的冒险',
         steps: [
             { kind: 'banner', on: 'enter', hold: 150, text: '教程结束 · 从这里开始是你的冒险' },
             { on: 'after', d: 180, hold: 520,
-              text: '还没讲到的，第 6 层起会自己撞上：🎁 遗物、🧙 商人、🔮 命运抉择（每 10 层）、👑 BOSS（每 10 层）。' },
+              text: '还没讲到的，正式开局后会自己撞上：🎁 遗物、🧙 商人、🔮 命运抉择（每 10 层）、👑 BOSS（每 10 层）。' },
             { on: 'after', d: 360, hold: 520,
-              text: '随时按 H 打开机制图鉴，全部机制都在里面。祝你好运。' },
+              text: '随时按 H 打开机制图鉴，全部机制都在里面。' },
+            { on: 'after', d: 360, hold: 620,
+              text: '🎓 教程到此为止。接下来会清空教程里获得的密文版 / 被动 / 精华 / 得分，让你重选一次职业，从第 1 层正式开始。' },
         ],
     };
 
@@ -199,6 +206,14 @@
                 '## 操作',
                 'W A S D 移动 · Shift 冲刺 · 鼠标点手牌填槽 · 空格 宣读组合',
                 'Q 终极技 · P 暂停/批量宣读 · H 开关本图鉴 · ` 调试模式（数字键 1-8 生成怪物）',
+                '⛶ 全屏按钮在右侧面板底部。',
+                '',
+                '## 手机 / 平板（横屏）',
+                '自动识别移动设备，切换成触屏布局：左下角虚拟摇杆移动，右下角两个圆钮',
+                '（💨 冲刺 / ⚡ 终极技），顶部一条精简数据带（核心 / 楼层 / 精华 / 得分 / 护盾）。',
+                '密文版、被动、遗物都折进左侧抽屉——点左上角 🔮 面板展开，展开时画面缩到右半屏',
+                '并全局减速到 50%（子弹时间），方便从容配牌。',
+                '只支持横屏：竖屏时会盖一层「请把设备横过来」。',
             ],
         },
         {
@@ -222,7 +237,9 @@
                 'E07 轨迹爆伤 · E10 怪物反噬 · E11 自速暴涨',
                 'E12 闪电链 · E13 冰冻 · E14 延缓',
                 'E02 / E11 与 T08 的出率比其他牌子低 30%；「移速减慢」那块板已删除。',
-                'E13 / E14 现在只作用在「命中目标 + 周围 90px」内的怪，不再打全场。',
+                'E13 / E14 只作用在「命中目标 + 周围 225px」内的怪，不再打全场。',
+                '（9.23 时这个半径是 90px，9.24 放大到 2.5 倍——90px 在后期密集怪群里',
+                '几乎只打得到靶心那一只。）',
                 '',
                 '## 🦽 轮椅组合（6 组）',
                 '轨迹反噬 = T06+E10 → 轨迹变红，轨迹伤害 +4',
@@ -245,11 +262,26 @@
                 '治疗怪给同伴回血；分裂怪死后裂成 4 只子体；',
                 '灼烧怪留下火焰轨迹（会烧到你）；虚灵怪免疫轨迹伤害，子弹抗性 30%。',
                 '第 8 层起灼烧怪登场，第 12 层起虚灵怪登场。',
+                '9.24：普通怪 HP 与攻击各 −20%（移速不变），整体方向是「怪更多、每只更脆」。',
                 '',
-                '## 精英词缀（6 种）',
+                '## 词缀（14 种）',
                 '⭐ 精英第 5 层起出现。词缀数：5 层起 30% 带 1 个，15 层起 1-2 个，25 层起 2-3 个。',
+                '👑 BOSS 每 10 层必带 2 个（不抽突进与群生——BOSS 本来就一直在动、也自带爪牙召唤）。',
+                '',
+                '— 加数值（6 个）—',
                 '再生 💚 每帧回血 / 荆棘 🌿 反弹伤害 / 迅捷 💨 速度+40%',
                 '巨人 🦍 双倍HP与体型 / 吸血 🩸 攻击回血 / 爆裂 💥 死亡爆炸',
+                '',
+                '— 干扰你（8 个，9.24 新增）—',
+                '🟥 削减区：周围 100px 内你的子弹伤害 ×0.6（轨迹伤害不受影响）',
+                '🟦 减速区：周围 90px 内你的移速 ×0.65',
+                '🔥 火焰区：每 4 秒在脚下留一团火焰，会烧你也会烧你的图腾',
+                '🌀 突进：每 3 秒朝你猛冲 90px（无视地形，身后留残影）',
+                '🌪 牵引：160px 内持续把你往它身上拽，越近越狠',
+                '🔒 封印：撞核心时随机压住你一个被动 4 秒（面板上打叉显示秒数）',
+                '👥 群生：每 6 秒分裂出一只 20% 血的残影，最多 3 只（残影不带词缀）',
+                '🗿 敌图腾：死亡后原地留下暗红图腾，12 秒内持续打你和你的图腾',
+                '多个同类区域重叠时取最强的那一个，不叠乘。',
                 '',
                 '## 轨迹判环 → 图腾 / 围剿',
                 '当前存留的轨迹自己绕成闭环（面积≥800px²）就召唤 🗼 图腾，上限 10 座（HUD 右下角有计数）。',
@@ -277,6 +309,7 @@
                 '连杀 = 连续击杀：3 秒没有击杀、或核心挨打就断，断了可以重新冲。',
                 '连杀不加伤害，但每杀一只得 连杀数×2 分（BOSS×5），也是 T08「连环击杀」的触发条件。',
                 '👑 BOSS 每 10 层，血量 = 100000 × 1.7^(层数/10 - 1)（30 层后增速放缓），持续召唤爪牙。',
+                '爪牙召唤节奏在 9.23 加快 5%、9.24 再加快 5%（累计 ×1.1025）：首次 100 帧，之后 max(50, 150−层数×2)。',
                 '⭐ 得分按 lg 显示（对数），因为后期会跨十几个数量级。',
             ],
         },
@@ -292,6 +325,18 @@
         dropQueue: [], spawnQueue: [], combos: 0,
         hpMul: 1, spawnInterval: 0,
         tookOver: false, outroPending: false,
+        // v9.24: 手机上「这一步的提示指向抽屉里的节点，所以我们替玩家拉开了抽屉」。
+        // 收起来的时候只收自己拉开的，不动玩家手动开的。
+        drawerAutoOpened: false,
+        // v9.24: 教程收尾后整局已重置。只在 restartRunAfterTutorial() 里置真，
+        // 且必须放在 resetGame() **之后**——reset() 会把它清回 false。
+        // 用途：离线探针 / 模拟器需要这个信号，否则它们只会看到 finished 被重置，
+        // 然后继续替一个已经结束的教程跑下去。
+        restarted: false,
+        // v9.24: 「教程播完/被跳过 → 需要重开一局」的请求位。finish() / skip() 只置位，
+        // 真正的清空重开由 05-update.js 的 update() 在 tick() 之后统一执行——
+        // 直接在 tick() 里调 resetGame() 是重入（tick 由 update 调用），有风险。
+        pendingRestart: false,
         codexOpen: false, codexPage: 0, _btns: [],
 
         // ---------- 查询 ----------
@@ -384,6 +429,9 @@
             this.finished = false;
             this.codexOpen = false;
             this.outroPending = false;
+            this.pendingRestart = false;
+            this.drawerAutoOpened = false;
+            this.restarted = false;
             this.tookOver = false;
             this.floor = 1; this.cfg = null; this.idx = -1;
             this.text = null; this.hint = null; this.banner = null;
@@ -468,6 +516,15 @@
                 `古老的石板-${this.floor} · ${this.cfg.title}` : s.text;
             this.text = { step: s, text };
             if (s.kind === 'banner') this.banner = { text, life: s.hold || 120, maxLife: s.hold || 120 };
+            // v9.24: 手机上这些节点（手牌 / 宣读按钮 / 槽位）都在左侧抽屉里，
+            // 默认是收起来的——讲到它们时自动把抽屉拉开。抽屉顺带把时间压到 50%，
+            // 正好配合教程的阅读节奏；这一步播完由 advance() 收起。
+            if (typeof setDrawer === 'function' && G.mobileMode
+                && (s.point === 'hand' || s.point === 'combine' || s.point === 'slot')) {
+                setDrawer(true);
+                // 只记「是我们自己拉开的」——玩家手动开的抽屉不该被教程关掉
+                this.drawerAutoOpened = true;
+            }
 
             // 步骤钦定的怪：讲到这里才放出来，边讲边登场
             if (s.spawn) {
@@ -488,6 +545,11 @@
         advance() {
             const cur = this.text && this.text.step;
             if (cur && cur.gate && this.gateLeft > 0) this.gateLeft--;
+            // v9.24: 收起教程自动拉开的抽屉（手机上），把画面还回战斗
+            if (typeof setDrawer === 'function' && G.mobileMode && this.drawerAutoOpened) {
+                setDrawer(false);
+            }
+            this.drawerAutoOpened = false;
             this.text = null;
             this.hint = null;
             this.stepTimer = 0;
@@ -498,10 +560,13 @@
             this.active = false;
             this.finished = true;
             this.seen = true;
+            this.outroPending = false;
             this.text = null;
             this.banner = null;
             this.hint = null;
-            setFeedback('🎓 教程结束 · 第 6 层起恢复随机', '#f5c542');
+            // v9.24: 教程是纯沙盒——播完不再带着教程里攒的东西继续打第 6 层。
+            // 真正的重开交给 update() 统一执行（见 restartRunAfterTutorial 的注释）。
+            this.pendingRestart = true;
         },
 
         tick() {
@@ -561,6 +626,9 @@
         },
 
         // ---------- 跳过 / 重看 ----------
+        // v9.24: 跳过教程走的是和「播完」完全一样的路径——清空 + 重选职业 + 第 1 层。
+        // 旧版这里会白送 3 组被动 / 40 精华 / 500 分，然后空降到第 6 层；
+        // 教程改成沙盒之后那套奖励没有意义了（而且会让跳过的人凭空领先）。
         skip() {
             if (!this.active || !this.cfg) return;
             this.active = false;
@@ -570,23 +638,13 @@
             this.text = null;
             this.banner = null;
             this.hint = null;
-            G.hand = [];
-            ['T06', 'E10', 'T07', 'E12', 'T12'].forEach(id => dropScriptedCard(id, true));
-            addPassive('T06', 'E10');
-            addPassive('T07', 'E12');
-            addPassive('T12', 'E12');
-            G.essence += 40;
-            addScore(500);
-            G.stageType = 'mixed';
-            G.floor = TUTORIAL_MAX_FLOOR; // advanceFloor 会 +1 → 第 6 层
-            advanceFloor();
-            setFeedback('⏭ 已跳过教程 · 从第 6 层开始', '#88ccff');
+            this.pendingRestart = true;
         },
 
         replay() {
             this.seen = false;
             this.finished = false;
-            resetGame();
+            resetGame();   // reset() 会把 restarted 一并清掉
             setFeedback('🎓 重新开始教程 · 古老的石板 1', '#7bb3ff');
         },
 
@@ -613,6 +671,26 @@
             return false;
         },
     };
+
+    // ============================================================
+    //  v9.24 教程结束 → 清空一切重开
+    // ============================================================
+    // 教程是独立沙盒：里面拿到的密文版 / 被动 / 精华 / 得分 / 层数全部作废，
+    // 从第 1 层正式开局，并让玩家重选一次职业（resetGame() 末尾会调
+    // initClassSelection()）。finish() 与 skip() 走的就是这一条路径。
+    function restartRunAfterTutorial() {
+        // 顺序不能反：initClassSelection() 会读 Tutorial.seen 决定要不要把
+        // 「教程提示 + 跳过教程」按钮插回来。必须先把 seen 立起来，
+        // 否则重置完又弹一次教程说明，看着像没重置。
+        // （Tutorial.reset() 本身不清 seen，所以 resetGame() 走完之后它仍然是 true。）
+        Tutorial.seen = true;
+        Tutorial.pendingRestart = false;
+        resetGame();
+        // resetGame() 会调 Tutorial.reset()（那里面会把这个标记清回 false），
+        // 所以必须放在它之后。
+        Tutorial.restarted = true;
+        setFeedback('🎓 教程结束 · 从第 1 层重新开始', '#f5c542');
+    }
 
     // 脚本掉落：按 id 直接发放
     function dropScriptedCard(cardId, silent) {
