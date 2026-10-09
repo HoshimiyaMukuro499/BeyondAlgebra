@@ -263,13 +263,13 @@
         // 教程：类型由脚本钦定，绕过解锁门槛与权重（按 id 查，MONSTER_TYPES 的键是大写）
         const type = forced ? (MONSTER_TYPE_LIST.find(t => t.id === forced.key) || selectedType) : selectedType;
 
-        // v9.1: 精英词缀分配（v9.24: 抽池逻辑挪到 00-data.js 的 pickAffixes()，
-        // 普通怪、BOSS、残影三处共用一份，词条池也从 6 个扩到 14 个）
+        // v9.1: 精英词缀分配（v9.24: 抽池逻辑挪到 00-data.js 的 pickAffixes()；
+        // v9.25: 只有 BOSS 专属的那 8 个不再从这里出——bossOnly: false 限定老 6 个）
         let affixes = [];
         if (isElite) {
             // 教程钦定的精英一定带词缀，否则「精英带词缀」这句教学会落空
             const affixCount = (forced && forced.elite) ? Math.max(1, getAffixCount()) : getAffixCount();
-            affixes = pickAffixes(affixCount);
+            affixes = pickAffixes(affixCount, { bossOnly: false });
         }
 
         let hpMult = 1;
@@ -364,13 +364,12 @@
         const isElite = Math.random() < getEliteChance();
         let radius = isElite ? type.eliteRadius : type.radius;
 
-        // v9.1 词缀
+        // v9.1 词缀（v9.25: 改用 pickAffixes()——这里原本内联复制了一份抽池逻辑，
+        // 是唯一绕开 pickAffixes 的地方，改抽池规则时最容易漏掉。调试生成看全池，
+        // 所以传 'any'。）
         let affixes = [];
         if (isElite) {
-            const affixCount = getAffixCount();
-            const available = AFFIXES.filter(a => G.floor >= a.minWave);
-            const shuffled = [...available].sort(() => Math.random() - 0.5);
-            affixes = shuffled.slice(0, Math.min(affixCount, shuffled.length)).map(a => a.id);
+            affixes = pickAffixes(getAffixCount(), { bossOnly: 'any' });
         }
         if (affixes.includes('giant')) { hp *= 2;
             radius *= 1.5; }
@@ -481,7 +480,9 @@
             // 而下面的提示语印的是未钳的 hp，两个数对不上）。
             hp: Math.min(hp, 1e8), maxHp: Math.min(hp, 1e8),
             speed: type.baseSpeed * (1 - G.buffs.slowAll),
-            isElite: false, atk: type.baseAtk * Math.min(Math.pow(getDifficultyMultiplier(), 0.35), 12),
+            // v9.25: 攻击也吃前期减压系数（用户说的是「数值」，HP 与攻击都算）。
+            isElite: false,
+            atk: type.baseAtk * Math.min(Math.pow(getDifficultyMultiplier(), 0.35), 12) * bossEarlyMul(),
             hitCooldown: 0, trailDamageCooldown: 0,
             scoreValue: type.scoreValue * getDifficultyMultiplier(),
             type: type.id, typeLabel: type.label, typeEmoji: type.emoji,
@@ -492,14 +493,24 @@
             moveInterval: type.moveInterval, moveTimer: rand(0, 120),
             isMoving: true, alwaysMoving: true,
             // v9.24: BOSS 从词条池里随机带 2 个。
+            // v9.25: 只有 BOSS 能抽到 bossOnly 的那 8 个（'any' = 14 个全池）。
             // 排除 dash 与 swarm——BOSS 已经是 alwaysMoving，本体也已经有专属的爪牙
             // 召唤器，这两条对它属于「已经有的东西的弱化版」，白占 2 个槽位之一。
-            affixes: pickAffixes(2, ['dash', 'swarm']),
+            affixes: pickAffixes(2, { exclude: ['dash', 'swarm'], bossOnly: 'any' }),
             _affixTimer: 0, _dash: null, _swarmCount: 0, _affixZones: [],
         };
         G.monsters.push(boss);
         spawnParticles(x, y, '#ff2266', 35);
         setFeedback(`👑 BOSS登场！HP ${Math.floor(hp)} · 第${G.floor}波`, '#ff3366');
+        // v9.25: 战斗界面顶部横幅，把这一局抽到的词条直接念给玩家听。
+        // 词条只在怪身上画一圈色环，战斗中根本读不出来。
+        G.bossBanner = {
+            text: '👑 BOSS · ' + boss.affixes.map(id => {
+                const d = affixDef(id);
+                return d ? `${d.emoji}${d.label}` : id;
+            }).join(' · '),
+            life: 300, maxLife: 300,   // 5 秒
+        };
     }
 
     function spawnBossMinion(boss) {

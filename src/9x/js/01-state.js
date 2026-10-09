@@ -70,10 +70,28 @@
         sealedPassives: [],
         // 移动端：摇杆模拟量，模长 0..1。非 0 时优先于 G.keys 的四向输入。
         stick: { x: 0, y: 0 },
+        // v9.25: 动态摇杆的底座位置（**屏幕坐标**，clientX/clientY 口径）。
+        // null = 没按下，此时画的是左下角的闲置提示环。按下那一刻由
+        // 09-events.js 的 setStickFromTouch() 定下来，move 时不再挪动。
+        stickBase: null,
         stickActive: false,
         mobileMode: false,        // 设备识别结果，见 09-events.js 的 detectMobileMode()
         drawerOpen: false,        // 手机端左侧抽屉（密文版/被动）是否展开
         timeScale: 1,             // 抽屉展开时压到 0.5（子弹时间），见 08-main.js 的 gameLoop()
+
+        // ---------- v9.25 ----------
+        // 词条落地后的圈层（削减区/减速区/火焰区）。与怪解绑——怪死了圈还在，
+        // 圈到点自己消失。{ x, y, r, kind, life, maxLife, color, tick }
+        affixZones: [],
+        // BOSS 登场横幅：{ text, life, maxLife }。画在 canvas 顶部，
+        // 因为 setFeedback() 写的是右侧面板里的 DOM——手机端那个在抽屉里，
+        // 战斗时根本看不见。
+        bossBanner: null,
+        // 「消除」技能冷却（帧）。按 R 触发后置为 ELIMINATE_COOLDOWN，逐帧递减。
+        eliminateCooldown: 0,
+        // 手机端「死亡后重开」按钮的当前显示状态。只在值真的翻转时才动 DOM，
+        // 见 08-main.js 的 gameLoop()。
+        _gameOverUIShown: false,
     };
 
     // ---------- v9.10 自动模拟检测 ----------

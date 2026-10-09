@@ -654,7 +654,8 @@
 
         /* 这些元素只在手机端存在。桌面上不占位、不显示。 */
         .mobile-topbar, .mobile-icon-btn, .mobile-drawer-btn,
-        .mobile-actions, .drawer-close { display: none; }
+        .mobile-actions, .drawer-close,
+        .joy, .joy-hint, .gameover-restart, .fs-overlay { display: none; }
 
         body.mobile {
             display: block;
@@ -832,6 +833,89 @@
         body.mobile .mobile-act-btn.ult { border-color: #8a6a2a; background: rgba(40, 30, 12, 0.9); color: #ffdd44; }
         body.mobile .mobile-act-btn.ult span { color: #d8b45a; }
         body.mobile .mobile-act-btn.pressed { transform: scale(0.92); background: rgba(60, 90, 120, 0.95); }
+        body.mobile .mobile-act-btn.elim { border-color: #2a5a6a; background: rgba(12, 34, 40, 0.9); color: #7fe3ff; }
+        body.mobile .mobile-act-btn.elim span { color: #5ab8d0; }
+
+        /* ---------- 动态摇杆（v9.25）----------
+           位置与尺寸都由 09-events.js 写 inline style（屏幕坐标）。
+           这里只管外观：底座圆环 + 中心旋钮，都用 translate 移动，
+           不动 left/top，所以拖动时不会触发布局重排。
+           只动 transform 还有一个好处：底座可能落在 canvas 两侧的黑边上，
+           这一层是 DOM、铺在 .canvas-wrap 上，不会被 canvas 的边界裁掉。 */
+        body.mobile .joy-hint {
+            display: block;
+            position: absolute;
+            left: 26px;
+            bottom: 26px;
+            border-radius: 50%;
+            border: 2px dashed rgba(140, 180, 220, 0.18);
+            pointer-events: none;
+            transition: opacity .25s;
+        }
+        body.mobile .joy-hint.hidden { opacity: 0; }
+        body.mobile .joy {
+            display: block;
+            position: absolute;
+            left: 0; top: 0;
+            border-radius: 50%;
+            border: 2px solid rgba(160, 200, 240, 0.35);
+            background: radial-gradient(circle, rgba(60, 100, 150, 0.20), rgba(60, 100, 150, 0.04));
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity .12s;
+            will-change: transform;
+        }
+        body.mobile .joy.active { opacity: 1; }
+        body.mobile .joy-knob {
+            position: absolute;
+            left: 50%; top: 50%;
+            border-radius: 50%;
+            background: rgba(145, 195, 245, 0.45);
+            border: 2px solid rgba(195, 228, 255, 0.65);
+            will-change: transform;
+        }
+
+        /* ---------- 死亡后的重开入口（v9.25）----------
+           桌面端侧栏里那个「↺ 重开」在手机端是不可达的——.panel 是收起的抽屉。
+           这里在战斗界面正中央给一个够大的按钮，只在 G.gameOver 时亮起。 */
+        body.mobile .gameover-restart.active {
+            display: block;
+            position: absolute;
+            left: 50%;
+            top: 62%;
+            transform: translate(-50%, -50%);
+            z-index: 40;
+            padding: 14px 30px;
+            background: rgba(24, 40, 60, 0.94);
+            border: 2px solid #4a7aa0;
+            border-radius: 14px;
+            color: #cfe4ff;
+            font-family: inherit;
+            font-size: 16px;
+            cursor: pointer;
+            touch-action: none;
+            pointer-events: auto;
+        }
+        body.mobile .gameover-restart.active:active { background: #2a4a6a; }
+
+        /* ---------- 全屏引导（v9.25）----------
+           开局盖在职业选择之上（z-index 300 > .class-overlay 的 200），
+           点掉之后才露出职业选择，并且不会再来第二次。整层可点。 */
+        body.mobile .fs-overlay.active {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            position: fixed;
+            inset: 0;
+            z-index: 300;
+            background: rgba(5, 7, 13, 0.92);
+            text-align: center;
+            cursor: pointer;
+        }
+        body.mobile .fs-title { font-size: 22px; color: #cfe4ff; }
+        body.mobile .fs-sub { font-size: 13px; color: #7d9cba; }
 
         /* 键盘提示在手机上没有意义 */
         body.mobile .controls-hint { display: none; }

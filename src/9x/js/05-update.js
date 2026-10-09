@@ -8,6 +8,14 @@
     // 大环要三条。火焰是「持续压制」而不是「秒拆塔」。
     const FIRE_TURRET_DMG_PER_FRAME = 0.012;
 
+    // v9.25: 🔥「火焰区」火圈的伤害节拍。**不能**照抄上面火轨迹烧玩家的 0.8/帧——
+    // 那是一条 16px 长的细线，站上去 150 帧掉 120 血还算合理；火圈是半径 135px、
+    // 活 360 帧的大圆，0.8/帧 满吃就是 288 血，等于「进圈即死」。
+    // 改成每 6 帧结算 1 点（≈0.167/帧）：穿过（约 0.5 秒）掉 ~5 点，
+    // 从头站到尾 6 秒掉 60 点——够疼，逼你动，但走得出去。
+    const FIRE_ZONE_TICK = 6;
+    const FIRE_ZONE_DMG_PER_TICK = 1;
+
     // ---------- v9.22 障碍物绕行 ----------
     // 老做法是「下一步会撞上 → 朝障碍中心 ±1.2 弧度随机偏一下、速度砍到 0.6」，
     // 两个毛病：
@@ -79,32 +87,89 @@
     // 新词条的行为写在 00-data.js 的 AFFIXES 里（zone / fireZone / dash / vortex /
     // swarm …），钩子只读这些声明式字段——以后加词条不用再改这个文件。
 
-    // 取某只怪身上指定词条的 zone 定义；没有就返回 null。
-    function zoneOf(m, id) {
-        if (!m.affixes || m.affixes.indexOf(id) < 0) return null;
-        if (typeof affixDef !== 'function') return null;
-        const def = affixDef(id);
-        return (def && def.zone) ? def.zone : null;
-    }
-
-    // 玩家当前吃到的区域修正。两只怪覆盖同一片区域时取**最强**的那一个而不是连乘——
-    // 连乘的话三只怪叠在一起玩家等于被冻住，那已经超出「减速」的语义了。
-    function getPlayerAtkZoneMul() {
+    // v9.25: 圈层判定。v9.24 是「遍历怪、读怪身上那张词条表的 zone」，现在改成
+    // 遍历**落点**（G.affixZones）——圈已经和怪解绑了，怪死了圈还在，
+    // 圈到点自己消失。cfg 直接引用 AFFIXES 里那份配置对象，数值只有一个出处。
+    //
+    // 多个圈覆盖同一片区域时取**最强**的那一个而不是连乘——连乘的话两个削减圈
+    // 叠起来是 0.36，那已经不是「被削弱」而是「被缴械」了。
+    //
+    // v9.25: 第三个参数是被判定的实体，缺省是玩家。图谱（图腾）也要吃圈——
+    // 玩家只要把塔造在圈外就完全免疫，「圈」对塔阵流派就是一行看不见的数值，
+    // 而现在圈是 BOSS 扔的、看得见也躲得开，两边规则一致才讲得通。
+    function getAffixZoneMul(kind, field, e) {
+        const ent = e || G.player;
         let mul = 1;
-        for (const m of G.monsters) {
-            const z = zoneOf(m, 'weaken');
-            if (z && dist(m, G.player) <= z.r + G.player.r) mul = Math.min(mul, z.playerAtkMul);
+        for (const z of G.affixZones) {
+            if (z.kind !== kind || !z.cfg) continue;
+            const v = z.cfg[field];
+            if (typeof v !== 'number') continue;
+            if (dist(z, ent) <= z.r + ent.r) mul = Math.min(mul, v);
         }
         return mul;
     }
+    function getPlayerAtkZoneMul() { return getAffixZoneMul('weaken', 'playerAtkMul'); }
+    function getPlayerSpeedZoneMul() { return getAffixZoneMul('slowzone', 'playerSpeedMul'); }
+    // 图腾吃圈：削减圈削单发伤害，减速圈削攻速（塔不会移动，移速的等价物就是出手快慢）。
+    function getTurretAtkZoneMul(t) { return getAffixZoneMul('weaken', 'playerAtkMul', t); }
+    function getTurretRateZoneMul(t) { return getAffixZoneMul('slowzone', 'playerSpeedMul', t); }
 
-    function getPlayerSpeedZoneMul() {
-        let mul = 1;
-        for (const m of G.monsters) {
-            const z = zoneOf(m, 'slowzone');
-            if (z && dist(m, G.player) <= z.r + G.player.r) mul = Math.min(mul, z.playerSpeedMul);
+    // 落一个圈：以 m 为圆心、取随机角度和 [r*1.2, spawnRange] 的随机距离——
+    // 下界就是「不许落在自己脚下」，否则又变成 v9.24 那个「贴着 BOSS 走」的老样子。
+    // 落定之后这个圈与 m 再无关系。
+    function spawnAffixZone(m, kind) {
+        if (typeof affixDef !== 'function') return false;
+        const def = affixDef(kind);
+        const cfg = def && (def.zone || def.fireZone);
+        if (!cfg) return false;
+        let same = 0;
+        for (const z of G.affixZones) if (z.kind === kind) same++;
+        if (same >= AFFIX_ZONE_MAX_PER_KIND) return false;   // 同属性同屏上限
+        const r = cfg.r * AFFIX_ZONE_R_MUL;
+        const a = rand(0, Math.PI * 2);
+        const d = rand(r * 1.2, cfg.spawnRange);
+        G.affixZones.push({
+            x: clamp(m.x + Math.cos(a) * d, 20, 760),
+            y: clamp(m.y + Math.sin(a) * d, 20, 540),
+            r, kind, cfg,
+            color: def.color,
+            life: cfg.life, maxLife: cfg.life,
+            tick: 0,
+        });
+        spawnParticles(m.x + Math.cos(a) * d, m.y + Math.sin(a) * d, def.color, 10);
+        showFloatingText(m.x + Math.cos(a) * d, m.y + Math.sin(a) * d - 8,
+            `${def.emoji}${def.label}`, def.color);
+        return true;
+    }
+
+    // 圈层的逐帧推进：到期消失 + 火焰圈结算伤害。
+    function tickAffixZones() {
+        if (G.affixZones.length === 0) return;
+        for (let i = G.affixZones.length - 1; i >= 0; i--) {
+            const z = G.affixZones[i];
+            if (--z.life <= 0) {
+                spawnParticles(z.x, z.y, z.color, 8);
+                G.affixZones.splice(i, 1);
+                continue;
+            }
+            if (z.kind !== 'firezone') continue;
+            if (++z.tick < FIRE_ZONE_TICK) continue;
+            z.tick = 0;
+            if (dist(z, G.player) <= z.r + G.player.r) {
+                // 护盾优先，护盾破了才打核心——和怪物撞核心同一套结算
+                if (G.player.hp > 0) {
+                    G.player.hp = Math.max(0, G.player.hp - FIRE_ZONE_DMG_PER_TICK);
+                    spawnParticles(G.player.x, G.player.y, '#ff6622', 1);
+                    if (G.player.hp <= 0) setFeedback('🛡️ 护盾耗尽！核心暴露！', '#ff4444');
+                } else {
+                    G.core.hp = Math.max(0, G.core.hp - FIRE_ZONE_DMG_PER_TICK);
+                }
+            }
+            // v9.23 定的「火焰烧塔」不该因为火换了形状就失效——沿用同一个速率
+            for (const t of G.turrets) {
+                if (dist(t, z) <= z.r + t.r) t.hp -= FIRE_TURRET_DMG_PER_FRAME * FIRE_ZONE_TICK;
+            }
         }
-        return mul;
     }
 
     // 「牵引」：玩家自己走完这一帧之后再往怪那边拉一把。
@@ -146,16 +211,21 @@
             const def = affixDef(id);
             if (!def) continue;
 
-            // 区域类只把半径和颜色带出来给渲染；真正的判定在
-            // getPlayerAtkZoneMul / getPlayerSpeedZoneMul 里逐帧现算。
-            if (def.zone) m._affixZones.push({ r: def.zone.r, color: def.color });
+            // v9.25: 圈层类（zone / fireZone）**不再挂在自己身上**了——它们改成
+            // 定时在附近落一个独立圈层（见 spawnAffixZone）。这里只剩「牵引」，
+            // 它是贴身拉力，本来就没有落点可言。
             if (def.vortex) m._affixZones.push({ r: def.vortex.r, color: def.color });
 
-            // 冰冻/眩晕期间一切「主动」词条都停摆，只留下区域的光圈
+            // 冰冻/眩晕期间一切「主动」词条都停摆，只留下牵引的光圈
             if (busy) continue;
 
             if (def.fireZone && m._affixTimer % def.fireZone.every === 0) {
-                spawnAffixFire(m);
+                spawnAffixZone(m, 'firezone');
+            }
+            // 削减区 / 减速区：同一套节拍，落点与存活时间也共用（都写在
+            // AFFIXES 的 zone.every / zone.life 里），区别只在圈里的系数。
+            if (def.zone && m._affixTimer % def.zone.every === 0) {
+                spawnAffixZone(m, id);
             }
 
             if (def.dash) {
@@ -184,18 +254,9 @@
         }
     }
 
-    // 「火焰区」：直接沿用灼烧怪的火轨迹结构推进 G.fireTrails。
-    // v9.23 刚做的「火焰烧图腾」因此自动生效，这里不需要再写一遍。
-    function spawnAffixFire(m) {
-        const ang = rand(0, Math.PI * 2);
-        const tl = 8;
-        G.fireTrails.push({
-            x1: m.x - Math.cos(ang) * tl, y1: m.y - Math.sin(ang) * tl,
-            x2: m.x + Math.cos(ang) * tl, y2: m.y + Math.sin(ang) * tl,
-            life: 150,
-        });
-        if (G.fireTrails.length > 80) G.fireTrails.shift();
-    }
+    // v9.25: spawnAffixFire() 在这里删掉了。它原本只服务「火焰区」这一条词条，
+    // 而火焰区现在落的是圈（spawnAffixZone），不再往 G.fireTrails 里推线段。
+    // 灼烧怪自己的火轨迹走的是另一条路径（isScorcher 分支），不受影响。
 
     // 「群生」：分裂出残影。刻意不复用 splitMonster()——那个是「子体继承母体的
     // 一个固定比例」，这里是「按母体当前最大血的 20% 另起一只」，而且残影
@@ -262,7 +323,12 @@
     // 里更近的一个打一发即时伤害（不引入新弹道系统——那要配一套新的碰撞、
     // 渲染与上限，成本远大于这条词条的价值）。
     const ENEMY_TOTEM_LIFE = 720;
-    const ENEMY_TOTEM_RANGE = 200;
+    // v9.25: 射程 200 → 120。原来的 200 比**任何**一座玩家图腾都远
+    // （玩家图腾的射程是 120/140/160/180，还要再乘环级 0.6~1.5，
+    // 见 04-trail.js 的 T 表），于是敌图腾永远先手、玩家图腾永远够不着它——
+    // 「范围过大」说的就是这件事。120 对齐玩家图腾里最短的那一档，
+    // 规则变成「任何一座玩家图腾都能反制敌图腾」，counterplay 一眼可见。
+    const ENEMY_TOTEM_RANGE = 120;
     function onAffixDeath(m) {
         if (!m.affixes || m.affixes.indexOf('totem') < 0) return;
         G.enemyTotems.push({
@@ -775,12 +841,17 @@
                 if(t.loopKey)delete G.turretLoops[t.loopKey];
                 G.turrets.splice(i,1);continue;
             }
-            t.fireTimer++;if(t.fireTimer>=t.fireRate&&G.monsters.length>0){t.fireTimer=0;
+            // v9.25: 伤害在开火这一刻算，不存快照——图腾攻击力恒为玩家攻击力的 0.4 倍，
+            // 玩家买完属性成长之后塔跟着一起变强，不会再出现「越到后期塔越没用」。
+            // 同时套上圈层系数：站进削减圈里单发打折，站进减速圈里出手变慢。
+            const zRate = getTurretRateZoneMul(t);
+            t.fireTimer++;if(t.fireTimer>=t.fireRate/zRate&&G.monsters.length>0){t.fireTimer=0;
                 let n=null,nd=Infinity;for(const m of G.monsters){const d=dist(t,m);if(d<t.range&&d<nd){nd=d;n=m;}}
-                if(n){n.hp-=t.damage;t._lastFire=G.frame;t._lastTarget={x:n.x,y:n.y};showFloatingText(n.x,n.y-n.r-5,t.emoji+'-'+Math.floor(t.damage),t.color);spawnParticles(n.x,n.y,t.color,8);spawnParticles(t.x,t.y,'#ffffff',4);
-                    if(t.type==='lightning'){G.chainCooldown=15;let c=0;for(const m2 of G.monsters){if(m2===n||c>=3)break;if(dist(n,m2)<150){m2.hp-=t.damage*.6;c++;}}}
+                if(n){const dmg=getPlayerAttackPower()*TURRET_ATK_RATIO*getTurretAtkZoneMul(t);
+                    n.hp-=dmg;t._lastFire=G.frame;t._lastTarget={x:n.x,y:n.y};showFloatingText(n.x,n.y-n.r-5,t.emoji+'-'+Math.floor(dmg),t.color);spawnParticles(n.x,n.y,t.color,8);spawnParticles(t.x,t.y,'#ffffff',4);
+                    if(t.type==='lightning'){G.chainCooldown=15;let c=0;for(const m2 of G.monsters){if(m2===n||c>=3)break;if(dist(n,m2)<150){m2.hp-=dmg*.6;c++;}}}
                     if(t.type==='frost')n.frozen=Math.max(n.frozen||0,40);
-                    if(t.type==='trail'&&G.frame%10===0)for(const m of G.monsters)if(dist(t,m)<t.range)m.hp-=t.damage*.3;
+                    if(t.type==='trail'&&G.frame%10===0)for(const m of G.monsters)if(dist(t,m)<t.range)m.hp-=dmg*.3;
                     addScore(1);
                 }
             }
@@ -791,6 +862,13 @@
         // 放在玩家图腾循环之后——两者是同一类东西，读代码时挨着看更顺。
         updateEnemyTotems();
         updateSeals();
+        // v9.25: 圈层（削减/减速/火焰）的倒计时与火焰伤害
+        tickAffixZones();
+
+        // v9.25: 「消除」技能冷却 + BOSS 词条横幅的倒计时。
+        // 两者都是纯粹的 UI 节拍，挨着放。
+        if (G.eliminateCooldown > 0) G.eliminateCooldown--;
+        if (G.bossBanner && --G.bossBanner.life <= 0) G.bossBanner = null;
 
         // v9.7: 冲刺轨迹衰减
         for (let i = G.sprintTrails.length - 1; i >= 0; i--) {

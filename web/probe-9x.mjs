@@ -125,6 +125,29 @@ const factory = new Function(
   ' applyVortexPull: (typeof applyVortexPull !== "undefined") ? applyVortexPull : null,' +
   ' updateEnemyTotems: (typeof updateEnemyTotems !== "undefined") ? updateEnemyTotems : null,' +
   ' TUTORIAL_OUTRO: (typeof TUTORIAL_OUTRO !== "undefined") ? TUTORIAL_OUTRO : null,' +
+  // v9.25 BOSS 专属词条 + 圈层落点 + 手机端输入 + 消除技能化
+  ' AFFIX_ZONE_R_MUL: (typeof AFFIX_ZONE_R_MUL !== "undefined") ? AFFIX_ZONE_R_MUL : null,' +
+  ' AFFIX_ZONE_MAX_PER_KIND: (typeof AFFIX_ZONE_MAX_PER_KIND !== "undefined") ? AFFIX_ZONE_MAX_PER_KIND : null,' +
+  ' bossEarlyMul: (typeof bossEarlyMul !== "undefined") ? bossEarlyMul : null,' +
+  ' BOSS_EARLY_RAMP_END: (typeof BOSS_EARLY_RAMP_END !== "undefined") ? BOSS_EARLY_RAMP_END : null,' +
+  ' spawnAffixZone: (typeof spawnAffixZone !== "undefined") ? spawnAffixZone : null,' +
+  ' tickAffixZones: (typeof tickAffixZones !== "undefined") ? tickAffixZones : null,' +
+  ' getAffixZoneMul: (typeof getAffixZoneMul !== "undefined") ? getAffixZoneMul : null,' +
+  ' getTurretAtkZoneMul: (typeof getTurretAtkZoneMul !== "undefined") ? getTurretAtkZoneMul : null,' +
+  ' getTurretRateZoneMul: (typeof getTurretRateZoneMul !== "undefined") ? getTurretRateZoneMul : null,' +
+  ' FIRE_ZONE_TICK: (typeof FIRE_ZONE_TICK !== "undefined") ? FIRE_ZONE_TICK : null,' +
+  ' FIRE_ZONE_DMG_PER_TICK: (typeof FIRE_ZONE_DMG_PER_TICK !== "undefined") ? FIRE_ZONE_DMG_PER_TICK : null,' +
+  ' ELIMINATE_COOLDOWN: (typeof ELIMINATE_COOLDOWN !== "undefined") ? ELIMINATE_COOLDOWN : null,' +
+  ' tryEliminate: (typeof tryEliminate !== "undefined") ? tryEliminate : null,' +
+  ' activateEliminate: (typeof activateEliminate !== "undefined") ? activateEliminate : null,' +
+  ' TURRET_ATK_RATIO: (typeof TURRET_ATK_RATIO !== "undefined") ? TURRET_ATK_RATIO : null,' +
+  ' PLAYER_FIRE_RATE_MUL: (typeof PLAYER_FIRE_RATE_MUL !== "undefined") ? PLAYER_FIRE_RATE_MUL : null,' +
+  ' getPlayerAttackPower: (typeof getPlayerAttackPower !== "undefined") ? getPlayerAttackPower : null,' +
+  ' setStickFromTouch: (typeof setStickFromTouch !== "undefined") ? setStickFromTouch : null,' +
+  ' releaseStick: (typeof releaseStick !== "undefined") ? releaseStick : null,' +
+  ' joyRadiusPx: (typeof joyRadiusPx !== "undefined") ? joyRadiusPx : null,' +
+  ' syncGameOverUI: (typeof syncGameOverUI !== "undefined") ? syncGameOverUI : null,' +
+  ' selectClass: (typeof selectClass !== "undefined") ? selectClass : null,' +
   // 已删符号的存在性探针——拿 KILL_BURSTS/MAP_NODES 这类名字去断言「确实删干净了」
   ' deletedSymbols: { KILL_BURSTS: typeof KILL_BURSTS !== "undefined",' +
   '  MAP_NODES: typeof MAP_NODES !== "undefined",' +
@@ -139,14 +162,19 @@ const api = factory(
   { now: () => 0 }, { userAgent: 'node' }, { getItem: () => null, setItem: noop }, noop
 );
 
-const { G, resetGame, update, draw, checkTrailLoop, nearestTurret } = api;
+const { G, resetGame, update, draw, checkTrailLoop, nearestTurret, autoShoot } = api;
 const { getEssenceCap, addCombatEssence, getMerchantStock, getShopRefreshCost,
         refreshMerchantStock, STAT_CHOICES, advanceFloor } = api;
 const HAS_ECON = !!(getEssenceCap && addCombatEssence && getMerchantStock);
 const { EFFECTS, addPassive } = api;
 const HAS_FEEL = !!(EFFECTS && EFFECTS.some(e => e.id === 'E14'));
 const { TRIGGERS: TRIG_, randomTrigger, doCombine, triggerEliminate, TURRET_SLOT_CHOICE } = api;
-const HAS_CAP = !!(TRIG_ && TRIG_.some(t => t.id === 'T13') && randomTrigger && doCombine);
+// 14 节要测的是「图腾上限 + 扩容」这套（9.21 起）。v9.25 把 T13 从触发板里拿掉了，
+// 所以不能再拿 T13 当「这个版本有没有上限机制」的标志——改用扩容选项本身。
+const HAS_CAP = !!(TRIG_ && TURRET_SLOT_CHOICE && randomTrigger && doCombine);
+// T13 相关的断言（14d/14e/14f/14g/14h）只在还有 T13 的老版本上跑。
+// v9.25 的那条路径搬到了第 19 节（按 R / 手机端圆钮）。
+const HAS_T13 = !!(TRIG_ && TRIG_.some(t => t.id === 'T13'));
 const { randomEffect, effectAoeTargets, nearestMonsterTo, EFFECT_AOE_RADIUS,
         getFloorClearCards, getBossHp, bossSummonInterval, spawnBoss, FIRE_TURRET_DMG_PER_FRAME } = api;
 const HAS_V923 = !!(randomEffect && effectAoeTargets && getFloorClearCards && getBossHp && FIRE_TURRET_DMG_PER_FRAME);
@@ -158,6 +186,13 @@ const { AFFIXES, affixDef, pickAffixes, MONSTER_STAT_MUL, spawnMonster: spawnMon
         updateSeals, spawnAffixFire, applyVortexPull, updateEnemyTotems } = api;
 const HAS_V924 = !!(AFFIXES && AFFIXES.length === 14 && tickAffixes && getPlayerAtkZoneMul
                     && restartRunAfterTutorial && JOYSTICK && setDrawer);
+const { AFFIX_ZONE_R_MUL, AFFIX_ZONE_MAX_PER_KIND, bossEarlyMul, BOSS_EARLY_RAMP_END,
+        spawnAffixZone, tickAffixZones, getAffixZoneMul, getTurretAtkZoneMul, getTurretRateZoneMul,
+        FIRE_ZONE_TICK, FIRE_ZONE_DMG_PER_TICK, ELIMINATE_COOLDOWN, tryEliminate, activateEliminate,
+        TURRET_ATK_RATIO, PLAYER_FIRE_RATE_MUL, getPlayerAttackPower,
+        setStickFromTouch, releaseStick, joyRadiusPx, syncGameOverUI, selectClass } = api;
+const HAS_V925 = !!(bossEarlyMul && spawnAffixZone && tickAffixZones && tryEliminate
+                    && getPlayerAttackPower && setStickFromTouch);
 
 let pass = 0, fail = 0;
 const ok = (cond, label, extra = '') => {
@@ -595,8 +630,10 @@ if (!HAS_FEEL) {
   const mm = mkM(G.player.x + 30, G.player.y); G.monsters = [mm];
   G.player.shootCooldown = 0;
   api.autoShoot();
-  ok(Math.abs(G.player.shootCooldown - 47.68) < 1e-6,
-     '1 层冷却 = max(24, 48-1×0.32) = 47.68', `got ${G.player.shootCooldown}`);
+  // v9.25 起整体 ÷1.2（开火频率 +20%）：47.68 / 1.2 = 39.7333…
+  const fireMul = (typeof PLAYER_FIRE_RATE_MUL === 'number') ? PLAYER_FIRE_RATE_MUL : 1;
+  ok(Math.abs(G.player.shootCooldown - 47.68 / fireMul) < 1e-6,
+     `1 层冷却 = max(24, 48-1×0.32) ÷ ${fireMul}`, `got ${G.player.shootCooldown}`);
 
   // 13b 伤害 +15%
   fresh();
@@ -757,10 +794,16 @@ if (!HAS_CAP) {
   ok(G.maxTurrets === before + 1, '「图腾扩容」把上限 +1', `${before} → ${G.maxTurrets}`);
   ok(STAT_CHOICES.every(c => c.id !== 'turretSlot'), '扩容不在商店货架 STAT_CHOICES 里（只在每层奖励）');
 
-  // 14d T13 的存在与权重
-  const t13 = TRIG_.find(t => t.id === 'T13');
-  ok(!!t13, 'TRIGGERS 里有 T13「消除」');
-  ok(t13 && t13.weight === 0.5, 'T13 权重 = 0.5（普通板的一半）', t13 && `got ${t13.weight}`);
+  // 14d 触发板表：老版本查 T13 的存在与权重；v9.25 起 T13 已移出，改查它确实不在了
+  if (HAS_T13) {
+    const t13 = TRIG_.find(t => t.id === 'T13');
+    ok(!!t13, 'TRIGGERS 里有 T13「消除」');
+    ok(t13 && t13.weight === 0.5, 'T13 权重 = 0.5（普通板的一半）', t13 && `got ${t13.weight}`);
+  } else {
+    ok(!TRIG_.some(t => t.id === 'T13'),
+      'v9.25：TRIGGERS 里已经没有 T13（改成按 R 的技能）',
+      TRIG_.map(t => t.id).join(','));
+  }
   ok(TRIG_.filter(t => t.id === 'T12').length === 1, 'TRIGGERS 里 T12 不再重复',
     `got ${TRIG_.filter(t => t.id === 'T12').length} 条`);
 
@@ -769,8 +812,10 @@ if (!HAS_CAP) {
   const tally = {};
   for (let i = 0; i < 60000; i++) { const t = randomTrigger(); tally[t.id] = (tally[t.id] || 0) + 1; }
   const unit = tally[TRIG_.find(t => !t.weight).id];   // 权重 1 板的实测次数
-  const r13 = (tally.T13 || 0) / unit;
-  ok(r13 > 0.44 && r13 < 0.56, '实测 T13 抽中率 ≈ 权重 1 板的一半', `比值 ${r13.toFixed(3)}（期望 0.5）`);
+  if (HAS_T13) {
+    const r13 = (tally.T13 || 0) / unit;
+    ok(r13 > 0.44 && r13 < 0.56, '实测 T13 抽中率 ≈ 权重 1 板的一半', `比值 ${r13.toFixed(3)}（期望 0.5）`);
+  }
   if (HAS_V923) {
     const r08 = (tally.T08 || 0) / unit;
     ok(r08 > 0.64 && r08 < 0.76, '实测 T08 抽中率 ≈ 权重 1 板的 0.7（出率 -30%）',
@@ -778,6 +823,8 @@ if (!HAS_CAP) {
   }
 
   // 14f 宣读 T13：全场掉血 + 拆掉最早的一座，且不产生被动
+  // v9.25 起没有 T13 这张卡了，这一段只服务于老版本；9.25 的对应路径在第 19 节。
+  if (HAS_T13) {
   fresh();
   G.floor = 10; G.passives = {}; G.maxSlots = 4;
   const mkT = (n) => G.turrets.push({ x: 200 + n, y: 200, r: 14, type: 'basic', emoji: 'x',
@@ -828,6 +875,7 @@ if (!HAS_CAP) {
   try { doCombine({ id: 'T13' }, { id: 'E02' }); } catch (e) { threw = e; }
   ok(!threw, '场上无图腾时 T13 不抛异常', threw && threw.message);
   ok(G.turrets.length === 0, '也没有凭空造出塔');
+  }
 }
 
 // ---------- 15. v9.22 轨迹迟缓 + 障碍绕行 + 终极技定速 ----------
@@ -1193,10 +1241,15 @@ if (!HAS_V923) {
     `got ${JSON.stringify(G.turretLoops)}`);
 
   // 17c BOSS 血量 −10%
+  // v9.25 又叠了一层「前期减压」系数（1 层 ×0.5 → 20 层 ×1.0），所以这里比的是
+  // 除掉那个系数之后的值——-10% 这条 9.23 的规则本身没动。
   fresh();
+  const ramp = (typeof bossEarlyMul === 'function') ? bossEarlyMul : () => 1;
   const bossAt = (f) => { G.floor = f; return getBossHp(); };
-  ok(bossAt(10) === 90000, '第 10 层 BOSS 血量 10 万 → 9 万', `got ${bossAt(10)}`);
-  ok(bossAt(20) === 153000, '第 20 层 17 万 → 15.3 万', `got ${bossAt(20)}`);
+  // 第 10 / 20 层恰好落在「难度系数为 1」的区间上，所以基准值可以直接乘减压系数比。
+  ok(bossAt(10) === Math.floor(90000 * ramp()),
+    '第 10 层 BOSS 血量 10 万 → 9 万（再乘 v9.25 前期减压）', `got ${bossAt(10)}`);
+  ok(bossAt(20) === 153000, '第 20 层 17 万 → 15.3 万（20 层起减压系数为 1）', `got ${bossAt(20)}`);
   // Math.floor 会截掉浮点尾巴（0.9×2.89×10 万 = 260099.999…），差 1 属于正常
   ok(Math.abs(bossAt(30) - 260100) <= 1, '第 30 层 28.9 万 → ≈26.01 万', `got ${bossAt(30)}`);
 
@@ -1299,8 +1352,10 @@ if (!HAS_V924) {
   ok(missingNew.length === 0, '新增 8 个词条全部登记在册', missingNew.join(','));
 
   // 18b pickAffixes 的排除与数量（词条都有 minWave 门槛，先把楼层推到池子全开）
+  // v9.25 起签名换成对象（多了一个 bossOnly 维度），老版本仍是位置参数。
   G.floor = 30;
-  const picked = pickAffixes(2, ['dash', 'swarm']);
+  const picked = HAS_V925 ? pickAffixes(2, { exclude: ['dash', 'swarm'], bossOnly: 'any' })
+                          : pickAffixes(2, ['dash', 'swarm']);
   ok(picked.length === 2, 'pickAffixes(2) 恰好给 2 个', `got ${picked.length}`);
   ok(picked.indexOf('dash') < 0 && picked.indexOf('swarm') < 0,
     '排除列表里的词条不会被抽中', picked.join(','));
@@ -1340,37 +1395,89 @@ if (!HAS_V924) {
   ok(bossBad === 0, 'BOSS 不会抽到突进 / 群生，也不会有假词条', `异常 ${bossBad} 次`);
 
   // 18e 🟥削减区：站进圈里子弹伤害打折
+  // v9.25 之前：圈挂在怪身上，判定的主体是「怪在哪」。
+  // v9.25 起：圈落在场上（G.affixZones），与怪解绑，判定主体是「圈在哪」。
   fresh();
-  const zw = mkA(300, 300, ['weaken']);
-  G.monsters = [zw];
-  G.player.x = 340; G.player.y = 300;
-  ok(Math.abs(getPlayerAtkZoneMul() - 0.6) < 1e-9, '站在削减区里攻击 ×0.6',
-    `got ${getPlayerAtkZoneMul()}`);
-  G.player.x = 700; G.player.y = 520;
-  ok(getPlayerAtkZoneMul() === 1, '走出圈外攻击恢复 ×1', `got ${getPlayerAtkZoneMul()}`);
+  if (HAS_V925) {
+    const mkZone = (kind, x, y) => {
+      const def = affixDef(kind);
+      const cfg = def.zone || def.fireZone;
+      const r = cfg.r * AFFIX_ZONE_R_MUL;
+      G.affixZones.push({ x, y, r, kind, cfg, color: def.color,
+        life: cfg.life, maxLife: cfg.life, tick: 0 });
+      return G.affixZones[G.affixZones.length - 1];
+    };
+    G.affixZones.length = 0;
+    mkZone('weaken', 300, 300);
+    G.player.x = 340; G.player.y = 300;
+    ok(Math.abs(getPlayerAtkZoneMul() - 0.6) < 1e-9, '站在削减圈里攻击 ×0.6',
+      `got ${getPlayerAtkZoneMul()}`);
+    G.player.x = 300 + 100 * AFFIX_ZONE_R_MUL + 40; G.player.y = 300;
+    ok(getPlayerAtkZoneMul() === 1, '走出圈外攻击恢复 ×1', `got ${getPlayerAtkZoneMul()}`);
+  } else {
+    G.monsters = [mkA(300, 300, ['weaken'])];
+    G.player.x = 340; G.player.y = 300;
+    ok(Math.abs(getPlayerAtkZoneMul() - 0.6) < 1e-9, '站在削减区里攻击 ×0.6',
+      `got ${getPlayerAtkZoneMul()}`);
+    G.player.x = 700; G.player.y = 520;
+    ok(getPlayerAtkZoneMul() === 1, '走出圈外攻击恢复 ×1', `got ${getPlayerAtkZoneMul()}`);
+  }
 
-  // 18f 🟦减速区：两只重叠取最强，不连乘
+  // 18f 🟦减速区：两个圈重叠取最强，不连乘
   fresh();
-  G.monsters = [mkA(300, 300, ['slowzone']), mkA(320, 300, ['slowzone'])];
-  G.player.x = 330; G.player.y = 300;
-  ok(Math.abs(getPlayerSpeedZoneMul() - 0.65) < 1e-9,
-    '两只减速区重叠仍是 ×0.65（取最强而非连乘 0.4225）', `got ${getPlayerSpeedZoneMul()}`);
-  G.player.x = 720; G.player.y = 30;
-  ok(getPlayerSpeedZoneMul() === 1, '走出圈外移速恢复 ×1', `got ${getPlayerSpeedZoneMul()}`);
+  if (HAS_V925) {
+    const mkZone2 = (kind, x, y) => {
+      const def = affixDef(kind);
+      const cfg = def.zone || def.fireZone;
+      G.affixZones.push({ x, y, r: cfg.r * AFFIX_ZONE_R_MUL, kind, cfg, color: def.color,
+        life: cfg.life, maxLife: cfg.life, tick: 0 });
+    };
+    G.affixZones.length = 0;
+    mkZone2('slowzone', 300, 300); mkZone2('slowzone', 320, 300);
+    G.player.x = 330; G.player.y = 300;
+    ok(Math.abs(getPlayerSpeedZoneMul() - 0.65) < 1e-9,
+      '两个减速圈重叠仍是 ×0.65（取最强而非连乘 0.4225）', `got ${getPlayerSpeedZoneMul()}`);
+    G.player.x = 720; G.player.y = 30;
+    ok(getPlayerSpeedZoneMul() === 1, '走出圈外移速恢复 ×1', `got ${getPlayerSpeedZoneMul()}`);
+  } else {
+    G.monsters = [mkA(300, 300, ['slowzone']), mkA(320, 300, ['slowzone'])];
+    G.player.x = 330; G.player.y = 300;
+    ok(Math.abs(getPlayerSpeedZoneMul() - 0.65) < 1e-9,
+      '两只减速区重叠仍是 ×0.65（取最强而非连乘 0.4225）', `got ${getPlayerSpeedZoneMul()}`);
+    G.player.x = 720; G.player.y = 30;
+    ok(getPlayerSpeedZoneMul() === 1, '走出圈外移速恢复 ×1', `got ${getPlayerSpeedZoneMul()}`);
+  }
 
-  // 18g 🔥火焰区：每 240 帧在脚下留一条火
+  // 18g 🔥火焰区
   fresh();
-  const zf = mkA(300, 300, ['firezone']);
-  G.monsters = [zf];
-  G.fireTrails = [];
-  for (let i = 0; i < 239; i++) tickAffixes(zf);
-  ok(G.fireTrails.length === 0, '不到 240 帧不点火（节流生效）', `got ${G.fireTrails.length}`);
-  tickAffixes(zf);
-  ok(G.fireTrails.length === 1, '第 240 帧在脚下留下一条火焰', `got ${G.fireTrails.length}`);
-  const ft = G.fireTrails[0];
-  ok(ft && Math.abs(Math.hypot(ft.x2 - ft.x1, ft.y2 - ft.y1) - 16) < 1e-6,
-    '留下的火焰是一段有长度的轨迹（能被判环逻辑看见）',
-    `got ${ft && Math.hypot(ft.x2 - ft.x1, ft.y2 - ft.y1).toFixed(2)}`);
+  if (HAS_V925) {
+    // 不再是「脚下留一条 16px 火轨迹」，而是「在 BOSS 附近落一个 135px 的火圈」
+    const zfc = mkA(300, 300, ['firezone']);
+    G.monsters = [zfc];
+    G.fireTrails = [];
+    G.affixZones.length = 0;
+    for (let i = 0; i < 299; i++) tickAffixes(zfc);
+    ok(G.affixZones.length === 0, '不到 300 帧不落圈（节流生效）', `got ${G.affixZones.length}`);
+    tickAffixes(zfc);
+    ok(G.affixZones.length === 1, '第 300 帧落下一个火圈', `got ${G.affixZones.length}`);
+    const fz = G.affixZones[0];
+    ok(fz && fz.kind === 'firezone', '落的圈是火属性', `got ${fz && fz.kind}`);
+    ok(!!fz && Math.abs(fz.r - 90 * AFFIX_ZONE_R_MUL) < 1e-9,
+      `火圈半径 = 90 × ${AFFIX_ZONE_R_MUL} = 135`, `got ${fz && fz.r}`);
+    ok(G.fireTrails.length === 0, '不再往地上留火轨迹', `got ${G.fireTrails.length}`);
+  } else {
+    const zf = mkA(300, 300, ['firezone']);
+    G.monsters = [zf];
+    G.fireTrails = [];
+    for (let i = 0; i < 239; i++) tickAffixes(zf);
+    ok(G.fireTrails.length === 0, '不到 240 帧不点火（节流生效）', `got ${G.fireTrails.length}`);
+    tickAffixes(zf);
+    ok(G.fireTrails.length === 1, '第 240 帧在脚下留下一条火焰', `got ${G.fireTrails.length}`);
+    const ft = G.fireTrails[0];
+    ok(ft && Math.abs(Math.hypot(ft.x2 - ft.x1, ft.y2 - ft.y1) - 16) < 1e-6,
+      '留下的火焰是一段有长度的轨迹（能被判环逻辑看见）',
+      `got ${ft && Math.hypot(ft.x2 - ft.x1, ft.y2 - ft.y1).toFixed(2)}`);
+  }
 
   // 18h 🌀突进：每 180 帧朝玩家冲一段，冰冻时不发动
   fresh();
@@ -1446,7 +1553,9 @@ if (!HAS_V924) {
   ok(G.enemyTotems.length === 1, '带敌图腾的怪死后留下 1 座图腾', `got ${G.enemyTotems.length}`);
   ok(G.enemyTotems[0] && G.enemyTotems[0].life === ENEMY_TOTEM_LIFE,
     `图腾寿命 = ${ENEMY_TOTEM_LIFE} 帧（12 秒）`, `got ${G.enemyTotems[0] && G.enemyTotems[0].life}`);
-  ok(ENEMY_TOTEM_RANGE === 200, '索敌半径 200px', `got ${ENEMY_TOTEM_RANGE}`);
+  // v9.25: 200 → 120。要在玩家图腾最短射程（速射 120）之内，否则敌图腾永远站外线白打。
+  ok(ENEMY_TOTEM_RANGE === (HAS_V925 ? 120 : 200),
+    `索敌半径 ${HAS_V925 ? 120 : 200}px`, `got ${ENEMY_TOTEM_RANGE}`);
   G.player.x = 760; G.player.y = 20;   // 站远点，别被顺手打到
   for (let i = 0; i < ENEMY_TOTEM_LIFE; i++) updateEnemyTotems();
   ok(G.enemyTotems.length === 0, '寿命走完后图腾熄灭', `got ${G.enemyTotems.length}`);
@@ -1487,8 +1596,12 @@ if (!HAS_V924) {
   try { devVal = detectMobileMode(); } catch (e) { devOk = false; }
   ok(devOk, 'detectMobileMode() 在缺少 matchMedia 的环境里不抛异常');
   ok(devVal === false, '桌面（userAgent = node）识别为非手机', `got ${String(devVal)}`);
-  ok(JOYSTICK && JOYSTICK.r > 0 && JOYSTICK.x > 0 && JOYSTICK.y > 0,
-    '摇杆几何参数已定义', JSON.stringify(JOYSTICK));
+  // v9.25 摇杆改成动态底座：写死的 x/y 整个删掉，只剩半径（单位也从 canvas 像素
+  // 换成了 CSS 像素，因为摇杆改成 DOM 绘制）。老版本仍应带着 x/y。
+  ok(JOYSTICK && JOYSTICK.r > 0
+     && (HAS_V925 ? JOYSTICK.x === undefined && JOYSTICK.y === undefined
+                  : JOYSTICK.x > 0 && JOYSTICK.y > 0),
+    '摇杆几何参数已定义（v9.25 只留半径，底座改成按下即生成）', JSON.stringify(JOYSTICK));
 
   // 18q 抽屉开合驱动全局子弹时间
   fresh();
@@ -1499,6 +1612,316 @@ if (!HAS_V924) {
   setDrawer(false);
   ok(G.timeScale === 1, '抽屉收起 → 时间恢复 ×1', `got ${G.timeScale}`);
   ok(G.drawerOpen === false, 'drawerOpen 同步置假');
+}
+
+// ---------- 19. v9.25 BOSS 专属词条 · 圈层落点 · 消除技能化 · 手机端输入 ----------
+section('19. v9.25 BOSS 专属词条 · 圈层落点 · 消除技能化 · 手机端输入');
+if (!HAS_V925) {
+  console.log('  （跳过：这是 9.24 及更早的产物）');
+} else {
+  const OLD_IDS = ['regen', 'thorns', 'swift', 'giant', 'vampiric', 'explosive'];
+
+  // 19a 词条分两组：老 6 条给精英，新 8 条是 BOSS 专属
+  ok(AFFIXES.filter(a => a.bossOnly).length === 8, '恰好 8 条被标成 bossOnly',
+    `got ${AFFIXES.filter(a => a.bossOnly).length}`);
+  ok(OLD_IDS.every(id => { const d = affixDef(id); return d && !d.bossOnly; }),
+    '原来那 6 条一条都没被标成 bossOnly');
+
+  // 19b 精英只抽非 bossOnly —— 跑 500 次，8 个新 id 一次都不许出现
+  // 这是「新词条变 BOSS 专属」这条需求最直接的回归防线。
+  G.floor = 40;   // 门槛全开，排除「抽不到是因为层数不够」
+  let leaked = [];
+  for (let i = 0; i < 500; i++) {
+    const p = pickAffixes(3, { bossOnly: false });
+    for (const id of p) {
+      const d = affixDef(id);
+      if (!d || d.bossOnly) leaked.push(id);
+    }
+  }
+  ok(leaked.length === 0, '精英 500 次抽取里一条 bossOnly 都没漏出来',
+    leaked.slice(0, 5).join(','));
+  // 反向：只要 bossOnly 的那些
+  let bossOnlyOk = true;
+  for (let i = 0; i < 200; i++) {
+    for (const id of pickAffixes(2, { bossOnly: true })) {
+      const d = affixDef(id);
+      if (!d || !d.bossOnly) bossOnlyOk = false;
+    }
+  }
+  ok(bossOnlyOk, 'bossOnly: true 只从 8 条专属里抽');
+  // 默认（不传 bossOnly）：两边都能出
+  let sawBoth = { old: false, neu: false };
+  for (let i = 0; i < 200; i++) {
+    for (const id of pickAffixes(3, { bossOnly: 'any' })) {
+      const d = affixDef(id);
+      if (d && d.bossOnly) sawBoth.neu = true; else sawBoth.old = true;
+    }
+  }
+  ok(sawBoth.old && sawBoth.neu, 'bossOnly: "any" 两组都能抽到', JSON.stringify(sawBoth));
+
+  // 19c BOSS 前期数值：1 层 ×0.5 线性爬到 20 层 ×1.0，之后恒 ×1.0
+  fresh();
+  G.floor = 1;
+  ok(Math.abs(bossEarlyMul() - 0.5) < 1e-12, '第 1 层 ×0.5', `got ${bossEarlyMul()}`);
+  G.floor = 10;
+  ok(Math.abs(bossEarlyMul() - (0.5 + 0.5 * 9 / 19)) < 1e-9,
+    '第 10 层 ≈ ×0.7368（线性，不是断崖）', `got ${bossEarlyMul().toFixed(4)}`);
+  G.floor = 20;
+  ok(Math.abs(bossEarlyMul() - 1) < 1e-12, '第 20 层 ×1.0',
+    `got ${bossEarlyMul()}`);
+  G.floor = 30;
+  ok(Math.abs(bossEarlyMul() - 1) < 1e-12, '第 30 层仍是 ×1.0（20 层封顶）', `got ${bossEarlyMul()}`);
+  ok(BOSS_EARLY_RAMP_END === 20, '爬坡到第 20 层结束', `got ${BOSS_EARLY_RAMP_END}`);
+
+  // 19d 落地到 getBossHp()：第 10 层原本 9 万（v9.23 定的值），乘 0.7368 ≈ 6.6 万
+  G.floor = 10;
+  const hp10 = getBossHp();
+  ok(Math.abs(hp10 - 90000 * bossEarlyMul()) <= 1,
+    '第 10 层 BOSS 血量 = 9万 × 0.7368 ≈ 66300', `got ${Math.round(hp10)}`);
+  G.floor = 1;
+  const hp1 = getBossHp();
+  G.floor = 30;
+  const hp30 = getBossHp();
+  // 爬坡是乘在原有难度曲线上的，所以「越靠前越软」这个方向必须成立。
+  // （20 层那道 1.7 倍是 v9.15 起就有的「每 10 层 BOSS 跳一档」，不是本次改的，
+  //   本次只保证 1→20 层是自己乘自己的线性爬坡，见 19c。）
+  ok(hp1 < hp10 && hp10 < hp30, '血量随层数单调上升',
+    `${Math.round(hp1)} → ${Math.round(hp10)} → ${Math.round(hp30)}`);
+
+  // 19e BOSS 横幅：生成后带 5 秒倒计时，文案里念出了抽到的词条
+  fresh();
+  G.floor = 30;
+  G.monsters = [];
+  spawnBoss();
+  const boss = G.monsters.find(m => m.isBoss);
+  ok(!!G.bossBanner, 'spawnBoss() 之后 G.bossBanner 非空');
+  ok(G.bossBanner && G.bossBanner.life === 300 && G.bossBanner.maxLife === 300,
+    '横幅停留 300 帧（5 秒）', `got ${G.bossBanner && G.bossBanner.life}`);
+  ok(!!boss && G.bossBanner && boss.affixes.every(id => {
+      const d = affixDef(id);
+      return d && G.bossBanner.text.indexOf(d.label) >= 0;
+    }), '横幅文案包含这一局抽到的每个词条的 label',
+    G.bossBanner && G.bossBanner.text);
+  let frames = 0; while (G.bossBanner && frames < 1000) { if (--G.bossBanner.life <= 0) G.bossBanner = null; frames++; }
+  ok(G.bossBanner === null && frames === 300, '300 帧后横幅自动消失', `${frames} 帧`);
+
+  // 19f 圈层落点：与 BOSS 解绑，落在 [r*1.2, spawnRange] 的距离上
+  ok(Math.abs(AFFIX_ZONE_R_MUL - 1.5) < 1e-12, '半径放大倍数 = 1.5', `got ${AFFIX_ZONE_R_MUL}`);
+  ok(AFFIX_ZONE_MAX_PER_KIND === 3, '同属性同屏上限 3 个', `got ${AFFIX_ZONE_MAX_PER_KIND}`);
+  fresh();
+  const zb = mkM(400, 280);
+  zb.affixes = ['weaken'];
+  zb.maxHp = zb.hp = 1000;
+  zb._affixTimer = 0; zb._dash = null; zb._swarmCount = 0; zb._affixZones = [];
+  const zoneCfg = affixDef('weaken').zone;
+  ok(!!zoneCfg && zoneCfg.every === 300 && zoneCfg.spawnRange === 300 && zoneCfg.life === 360,
+    '削减圈参数：每 300 帧落一个、范围 300px、活 360 帧', JSON.stringify(zoneCfg));
+  G.affixZones.length = 0;
+  for (let i = 0; i < 299; i++) tickAffixes(zb);
+  ok(G.affixZones.length === 0, '不到 300 帧不落圈', `got ${G.affixZones.length}`);
+  tickAffixes(zb);
+  ok(G.affixZones.length === 1, '第 300 帧落下一个圈', `got ${G.affixZones.length}`);
+  const z0 = G.affixZones[0];
+  const dToBoss = Math.hypot(z0.x - zb.x, z0.y - zb.y);
+  ok(dToBoss >= zoneCfg.r * AFFIX_ZONE_R_MUL * 1.2 - 1e-6 && dToBoss <= zoneCfg.spawnRange + 1e-6,
+    '落点与 BOSS 的距离在 [r×1.2, 300] 内（不会落在脚下）', `got ${dToBoss.toFixed(1)}`);
+  ok(Math.abs(z0.r - 100 * AFFIX_ZONE_R_MUL) < 1e-9, '削减圈半径 = 100 × 1.5 = 150', `got ${z0.r}`);
+  ok(z0.x >= 20 && z0.x <= 760 && z0.y >= 20 && z0.y <= 540, '落点被夹在战场内',
+    `(${z0.x.toFixed(1)}, ${z0.y.toFixed(1)})`);
+
+  // 19g 圈活满 360 帧自己消失
+  const before2 = G.affixZones.length;
+  for (let i = 0; i < 360; i++) tickAffixZones();
+  ok(G.affixZones.length === 0, '360 帧后圈自动消失', `${before2} → ${G.affixZones.length}`);
+
+  // 19h 同属性同屏最多 3 个
+  fresh();
+  const zc = mkM(400, 280);
+  zc.affixes = ['weaken'];
+  zc.maxHp = zc.hp = 1e6;
+  zc._affixTimer = 0; zc._dash = null; zc._swarmCount = 0; zc._affixZones = [];
+  G.affixZones.length = 0;
+  for (let i = 0; i < 300 * 8; i++) tickAffixes(zc);
+  const sameKind = G.affixZones.filter(z => z.kind === 'weaken').length;
+  ok(sameKind <= AFFIX_ZONE_MAX_PER_KIND, `同屏削减圈不超过 ${AFFIX_ZONE_MAX_PER_KIND} 个`,
+    `got ${sameKind}`);
+
+  // 19i 火圈扣护盾：每 FIRE_ZONE_TICK 帧 1 点，走的是和「怪撞核心」同一套结算
+  fresh();
+  G.core.hp = G.core.maxHp = 100;
+  G.player.hp = 100; G.player.maxHp = 100;
+  G.affixZones.length = 0;
+  G.affixZones.push({ x: G.player.x, y: G.player.y, r: 135, kind: 'firezone',
+    cfg: affixDef('firezone').fireZone, color: '#ff6622', life: 9999, maxLife: 9999, tick: 0 });
+  const hpBefore = G.player.hp;
+  const N = 10;
+  for (let i = 0; i < FIRE_ZONE_TICK * N; i++) tickAffixZones();
+  const lost = hpBefore - G.player.hp;
+  ok(Math.abs(lost - N * FIRE_ZONE_DMG_PER_TICK) < 1e-9,
+    `站在火圈里 ${FIRE_ZONE_TICK * N} 帧掉 ${N * FIRE_ZONE_DMG_PER_TICK} 点护盾`,
+    `掉了 ${lost}`);
+  // 走远一点就不再掉血
+  const hpFar = G.player.hp;
+  G.player.x = G.affixZones[0].x + 1000;
+  for (let i = 0; i < FIRE_ZONE_TICK * N; i++) tickAffixZones();
+  ok(G.player.hp === hpFar, '走出火圈就不再掉血', `${hpFar} → ${G.player.hp}`);
+
+  // 19j 图腾吃圈：削减圈削单发伤害、减速圈削攻速
+  fresh();
+  const tw = { x: 300, y: 300, r: 14, type: 'basic', emoji: 'x', color: '#fff',
+    fireRate: 25, fireTimer: 0, range: 140, hp: 99, maxHp: 99, tier: '中环', loopKey: 'k', spawnAnim: 0 };
+  G.affixZones.length = 0;
+  ok(getTurretAtkZoneMul(tw) === 1 && getTurretRateZoneMul(tw) === 1, '没圈的时候图腾不受影响');
+  G.affixZones.push({ x: 300, y: 300, r: 150, kind: 'weaken',
+    cfg: affixDef('weaken').zone, color: '#ff4455', life: 9999, maxLife: 9999, tick: 0 });
+  G.affixZones.push({ x: 300, y: 300, r: 135, kind: 'slowzone',
+    cfg: affixDef('slowzone').zone, color: '#4488ff', life: 9999, maxLife: 9999, tick: 0 });
+  ok(Math.abs(getTurretAtkZoneMul(tw) - 0.6) < 1e-9, '图腾在削减圈里：单发伤害 ×0.6',
+    `got ${getTurretAtkZoneMul(tw)}`);
+  ok(Math.abs(getTurretRateZoneMul(tw) - 0.65) < 1e-9, '图腾在减速圈里：出手速度 ×0.65',
+    `got ${getTurretRateZoneMul(tw)}`);
+  tw.x = 760; tw.y = 540;
+  ok(getTurretAtkZoneMul(tw) === 1 && getTurretRateZoneMul(tw) === 1, '图腾挪出圈外就恢复正常');
+
+  // 19k 图腾攻击力 = 玩家的 0.4 倍（开火那一刻算，不是召唤时的快照）
+  ok(Math.abs(TURRET_ATK_RATIO - 0.4) < 1e-12, 'TURRET_ATK_RATIO = 0.4', `got ${TURRET_ATK_RATIO}`);
+  fresh();
+  api.simAutoSelectClass();
+  G.player.atk = 10; G.buffs.atkUp = 0; G.buffs.multUp = 0;
+  G.fateBuffs.atkMul = 1; G.fateBuffs.bulletDmgMul = 1;
+  const pAtk1 = getPlayerAttackPower();
+  G.player.atk = 50;
+  const pAtk2 = getPlayerAttackPower();
+  ok(Math.abs(pAtk2 / pAtk1 - 5) < 1e-9, '面板攻击涨 5 倍，基准威力跟着涨 5 倍',
+    `${pAtk1.toFixed(2)} → ${pAtk2.toFixed(2)}`);
+  // 真的走一遍图腾开火：造一座塔、放一只怪，跑够一个冷却周期看掉多少血
+  const T = { x: 400, y: 280, r: 14, type: 'basic', emoji: '🗼', color: '#88aacc',
+    fireRate: 25, fireTimer: 24, range: 140, hp: 99, maxHp: 99, tier: '中环', loopKey: 'k2', spawnAnim: 0 };
+  G.turrets = [T];
+  G.monsters = [mkM(430, 280)];
+  G.monsters[0].hp = G.monsters[0].maxHp = 1e6;
+  const mHpBefore = G.monsters[0].hp;
+  update();
+  const dealt = mHpBefore - G.monsters[0].hp;
+  ok(Math.abs(dealt - pAtk2 * TURRET_ATK_RATIO) < 1e-6,
+    '图腾单发伤害 = 玩家基准威力 × 0.4', `got ${dealt.toFixed(3)}，期望 ${(pAtk2 * 0.4).toFixed(3)}`);
+
+  // 19l 玩家开火频率 +20%
+  ok(Math.abs(PLAYER_FIRE_RATE_MUL - 1.2) < 1e-12, 'PLAYER_FIRE_RATE_MUL = 1.2',
+    `got ${PLAYER_FIRE_RATE_MUL}`);
+  fresh();
+  api.simAutoSelectClass();
+  G.floor = 1;
+  G.monsters = [mkM(200, 200)];
+  G.monsters[0].hp = G.monsters[0].maxHp = 1e6;
+  G.player.shootCooldown = 0;
+  autoShoot();
+  const cd1 = G.player.shootCooldown;
+  ok(Math.abs(cd1 - Math.max(24, 48 - G.floor * 0.32) / 1.2) < 1e-9,
+    '第 1 层射击冷却 = 基准 ÷ 1.2', `got ${cd1}`);
+  const cdBase = Math.max(24, 48 - G.floor * 0.32);
+  ok(cd1 < cdBase, '冷却确实变短了（频率提高 20%）', `${cdBase} → ${cd1}`);
+
+  // 19m 「消除」技能化：R / 手机圆钮 → tryEliminate，带 30 秒冷却
+  ok(ELIMINATE_COOLDOWN === 30 * 60, '冷却 30 秒（1800 帧）', `got ${ELIMINATE_COOLDOWN}`);
+  fresh();
+  api.simAutoSelectClass();
+  G.eliminateCooldown = 0;
+  G.monsters = [mkM(300, 300), mkM(320, 300)];
+  G.monsters.forEach(m => { m.hp = m.maxHp = 1e6; });
+  G.turrets = [{ x: 200, y: 200, r: 14, type: 'basic', emoji: 'x', color: '#fff', fireRate: 999,
+    fireTimer: 0, range: 1, hp: 9, maxHp: 9, tier: '中环', loopKey: 'lkA', spawnAnim: 0 },
+    { x: 220, y: 200, r: 14, type: 'basic', emoji: 'x', color: '#fff', fireRate: 999,
+    fireTimer: 0, range: 1, hp: 9, maxHp: 9, tier: '中环', loopKey: 'lkB', spawnAnim: 0 }];
+  G.turretLoops = { lkA: true, lkB: true };
+  const hpB = G.monsters.map(m => m.hp);
+  tryEliminate();
+  ok(G.eliminateCooldown === ELIMINATE_COOLDOWN, '触发后冷却立刻开始走', `got ${G.eliminateCooldown}`);
+  ok(G.turrets.length === 1, '拆掉最早的一座（2 → 1）', `got ${G.turrets.length}`);
+  ok(G.monsters.every((m, i) => m.hp < hpB[i]), '全场怪都吃到伤害');
+  // 冷却中再按：什么都不该发生
+  const hpMid = G.monsters.map(m => m.hp);
+  const turretsMid = G.turrets.length;
+  tryEliminate();
+  ok(G.monsters.every((m, i) => m.hp === hpMid[i]) && G.turrets.length === turretsMid,
+    '冷却中再按 R 是空操作（只给一句反馈）');
+  // 冷却走完后又能用
+  G.eliminateCooldown = 0;
+  const hpMid2 = G.monsters.map(m => m.hp);
+  tryEliminate();
+  ok(!G.monsters.every((m, i) => m.hp === hpMid2[i]), '冷却走完后可以再次触发');
+  // 冷却每帧减一
+  G.eliminateCooldown = 10;
+  for (let i = 0; i < 5; i++) { if (G.eliminateCooldown > 0) G.eliminateCooldown--; }
+  ok(G.eliminateCooldown === 5, '冷却逐帧递减', `got ${G.eliminateCooldown}`);
+  // 死亡 / 暂停时按下去不该生效
+  G.eliminateCooldown = 0;
+  G.gameOver = true;
+  tryEliminate();
+  ok(G.eliminateCooldown === 0, '死亡状态下 R 不生效', `got ${G.eliminateCooldown}`);
+  G.gameOver = false;
+
+  // 19n 换层 / 重开清场
+  fresh();
+  api.simAutoSelectClass();
+  G.affixZones.push({ x: 10, y: 10, r: 100, kind: 'weaken', cfg: affixDef('weaken').zone,
+    color: '#f00', life: 360, maxLife: 360, tick: 0 });
+  api.startFloor();
+  ok(G.affixZones.length === 0, '开始新一层时圈层被清空', `got ${G.affixZones.length}`);
+  G.affixZones.push({ x: 10, y: 10, r: 100, kind: 'weaken', cfg: affixDef('weaken').zone,
+    color: '#f00', life: 360, maxLife: 360, tick: 0 });
+  G.bossBanner = { text: 'x', life: 300, maxLife: 300 };
+  G.eliminateCooldown = 500;
+  G.stickBase = { x: 1, y: 2 };
+  G._stickTouchId = 7;
+  resetGame();
+  G.simMode = true;
+  ok(G.affixZones.length === 0, 'resetGame 清空圈层', `got ${G.affixZones.length}`);
+  ok(G.bossBanner === null, 'resetGame 清掉 BOSS 横幅', `got ${String(G.bossBanner)}`);
+  ok(G.eliminateCooldown === 0, 'resetGame 把消除冷却归零', `got ${G.eliminateCooldown}`);
+  ok(G.stickBase === null, 'resetGame 清掉动态摇杆底座', `got ${String(G.stickBase)}`);
+  ok(G._stickTouchId === null, 'resetGame 清掉摇杆的 touch id（v9.24 漏掉的那个）',
+    `got ${String(G._stickTouchId)}`);
+
+  // 19o 动态摇杆（bug「一进游戏就不动」的回归防线）
+  // 按下那一刻定底座，此时位移为 0；拖动之后才有方向，而且模长不超过 1。
+  fresh();
+  G.mobileMode = true;
+  G.stick = { x: 0, y: 0 }; G.stickActive = false; G.stickBase = null; G._stickTouchId = null;
+  setStickFromTouch({ clientX: 100, clientY: 400, identifier: 1 });
+  ok(G.stickBase && G.stickBase.x === 100 && G.stickBase.y === 400,
+    '按下的那一点就地成为底座', JSON.stringify(G.stickBase));
+  ok(G.stick.x === 0 && G.stick.y === 0, '刚按下时位移为 0（底座就是手指所在处）',
+    `${G.stick.x}, ${G.stick.y}`);
+  ok(G.stickActive === true, '按下即激活移动');
+  const R = joyRadiusPx();
+  setStickFromTouch({ clientX: 100, clientY: 400 - R, identifier: 1 });
+  ok(G.stick.y < -0.9 && Math.abs(G.stick.x) < 1e-9, '往上拖 R 像素 → 满推向上',
+    `${G.stick.x.toFixed(3)}, ${G.stick.y.toFixed(3)}`);
+  setStickFromTouch({ clientX: 100, clientY: 400 - R * 5, identifier: 1 });
+  ok(Math.hypot(G.stick.x, G.stick.y) <= 1 + 1e-9, '拖出圈外模长仍被夹在 1',
+    `got ${Math.hypot(G.stick.x, G.stick.y).toFixed(4)}`);
+  releaseStick();
+  ok(G.stickBase === null && G.stickActive === false && G.stick.x === 0 && G.stick.y === 0,
+    '松手后底座清空、位移归零',
+    `${String(G.stickBase)} / ${G.stickActive} / ${G.stick.x}`);
+  // 摇杆半径跟着画面缩放走，否则大小屏手感差一倍
+  ok(joyRadiusPx() > 0, 'joyRadiusPx() 由 canvas 高度算出来', `got ${joyRadiusPx()}`);
+
+  // 19p 选完职业之后既没暂停也没在选择中——「一进游戏就不动」的另一条疑似路径
+  fresh();
+  if (typeof selectClass === 'function') {
+    api.simAutoSelectClass();
+    ok(G.paused === false && G.selectingActive === false,
+      '选完职业后 paused / selectingActive 都归假（update 不会被卡住）',
+      `paused=${G.paused} selectingActive=${G.selectingActive}`);
+  }
+
+  // 19q 桌面端不该弹全屏引导
+  ok(detectMobileMode() === false, '探针环境识别为非手机', `got ${detectMobileMode()}`);
+  let fsThrew = null;
+  try { syncGameOverUI(); } catch (e) { fsThrew = e; }
+  ok(!fsThrew, 'syncGameOverUI() 在没有真实 DOM 的环境里不抛异常', fsThrew && fsThrew.message);
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);

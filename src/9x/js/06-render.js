@@ -299,6 +299,33 @@
             ctx.setLineDash([]);
         }
 
+        // v9.25: 词条圈层（削减区 / 减速区 / 火焰区）。地面层——画在核心与所有
+        // 实体之前，这样角色永远踩在圈的上面，不会出现「人在圈下」的错觉。
+        // 圈里再叠一圈随 life 收缩的实线，玩家扫一眼就知道这个圈还剩多久。
+        for (const z of G.affixZones) {
+            const left = Math.max(0, z.life / z.maxLife);
+            const fire = z.kind === 'firezone';
+            // 火焰圈跳动的橙光：叠在底色上，让它一眼区别于两个「冷色」圈
+            const pulse = fire ? 0.75 + 0.25 * Math.sin(G.frame * 0.12) : 1;
+            ctx.beginPath();
+            ctx.arc(z.x, z.y, z.r, 0, Math.PI * 2);
+            ctx.fillStyle = z.color + (fire ? '22' : '14');
+            ctx.globalAlpha = pulse;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = z.color + '66';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([6, 8]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            // 剩余时间环：从满圈收缩到 0
+            ctx.beginPath();
+            ctx.arc(z.x, z.y, z.r * left, 0, Math.PI * 2);
+            ctx.strokeStyle = z.color + 'aa';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+
         // 核心
         ctx.beginPath();
         ctx.arc(G.core.x, G.core.y, G.core.r, 0, Math.PI * 2);
@@ -492,8 +519,9 @@
                 }
                 ctx.setLineDash([]);
             }
-            // v9.24: 区域类词条的地面光圈（削减区/减速区/牵引），
-            // 直接读 tickAffixes() 每帧填好的 m._affixZones。
+            // v9.24: 贴身光圈。v9.25 之后这里**只剩「牵引」**——削减区 / 减速区 /
+            // 火焰区都改成独立落点了，画在下面的 G.affixZones 循环里。
+            // 牵引是持续的贴身拉力，本来就该跟着怪走。
             if (m._affixZones && m._affixZones.length > 0) {
                 for (const z of m._affixZones) {
                     ctx.fillStyle = z.color + '14';
@@ -687,25 +715,49 @@
             ctx.fillText(ratio >= 1 ? '⚡ 就绪 [Q]' : `⚡ ${ultLeft.toFixed(1)}s`, w / 2, gY - 4);
         }
 
-        // v9.24: 手机端虚拟摇杆。画在 canvas 上（而不是做一个 DOM 元素），
-        // 因为它跟着 canvas 一起缩放——抽屉展开时画面缩到右半屏，摇杆自动跟着缩。
-        // 底座固定在左下角，位置与触摸判定的区域一一对应（见 09-events.js）。
-        if (G.mobileMode) {
-            const jx = JOYSTICK.x, jy = h - JOYSTICK.y;
-            const baseR = JOYSTICK.r;
-            ctx.globalAlpha = G.stickActive ? 0.42 : 0.22;
-            ctx.fillStyle = '#88aacc';
-            ctx.beginPath(); ctx.arc(jx, jy, baseR, 0, Math.PI * 2); ctx.fill();
-            ctx.globalAlpha = G.stickActive ? 0.85 : 0.4;
-            ctx.strokeStyle = '#cfe4ff'; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.arc(jx, jy, baseR, 0, Math.PI * 2); ctx.stroke();
-            if (G.stickActive) {
-                const kx = jx + G.stick.x * baseR * 0.62;
-                const ky = jy + G.stick.y * baseR * 0.62;
-                ctx.fillStyle = '#cfe4ff';
-                ctx.beginPath(); ctx.arc(kx, ky, baseR * 0.34, 0, Math.PI * 2); ctx.fill();
-            }
-            ctx.globalAlpha = 1;
+        // v9.25: 「消除」冷却指示器，并排放在终极技充能条右边。
+        // v9.24 的手机摇杆绘制块**已删除**——摇杆现在是 DOM 元素
+        // （#joyBase / #joyKnob，见 body.html 与 09-events.js），
+        // 因为它要能落在 canvas 之外的黑边上，画在 canvas 里会被边界裁掉。
+        if (!G.gameOver) {
+            const rW = 86, rH = 7, rX = w / 2 + 70, rY = h - 16;
+            const ready = G.eliminateCooldown <= 0;
+            ctx.fillStyle = 'rgba(20,30,50,0.8)';
+            ctx.fillRect(rX, rY, rW, rH);
+            const rRatio = ready ? 1 : 1 - G.eliminateCooldown / ELIMINATE_COOLDOWN;
+            ctx.fillStyle = ready ? '#88ddff' : 'rgba(136,170,204,0.55)';
+            ctx.fillRect(rX, rY, rW * rRatio, rH);
+            ctx.strokeStyle = 'rgba(160,200,240,0.5)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(rX, rY, rW, rH);
+            ctx.fillStyle = ready ? 'rgba(210,235,255,0.85)' : 'rgba(180,200,220,0.6)';
+            ctx.font = '9px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(ready ? '🧹 就绪 [R]' : `🧹 ${(G.eliminateCooldown / 60).toFixed(1)}s`, rX, rY - 4);
+        }
+
+        // v9.25: BOSS 词条横幅。BOSS 带了什么词条，此前只能从它身上的色环猜，
+        // 战斗中根本读不出来——这里直接把这一局抽到的念一遍，5 秒后淡出。
+        // 画在 canvas 而不是做 DOM：桌面与手机同一套代码，跟着画面一起缩放，
+        // 手机端切抽屉时也会自动跟着右移，不需要任何位置同步。
+        if (G.bossBanner) {
+            const b = G.bossBanner;
+            const alpha = Math.min(1, b.life / 60);   // 最后 1 秒淡出
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.font = 'bold 17px "PingFang SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const tw = ctx.measureText(b.text).width;
+            const bw = tw + 36, bh = 34, bx = w / 2 - bw / 2, by = 34;
+            ctx.fillStyle = 'rgba(10,14,24,0.82)';
+            ctx.fillRect(bx, by, bw, bh);
+            ctx.strokeStyle = 'rgba(255,51,102,0.75)';
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(bx, by, bw, bh);
+            ctx.fillStyle = '#ffd7e0';
+            ctx.fillText(b.text, w / 2, by + bh / 2);
+            ctx.restore();
         }
 
         drawTutorial();

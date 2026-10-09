@@ -13,14 +13,15 @@
         { id: 'T08', label: '连环击杀', emoji: '🔥', weight: 0.7 },
         { id: 'T10', label: '残血触发', emoji: '❤️‍🔥' },
         { id: 'T12', label: '闭环触发', emoji: '⭕' },
-        // v9.21: T13「消除」是消耗品而不是被动——宣读即触发，之后整张牌销毁。
-        // weight 是抽取权重：普通板 1，它 0.5，于是抽中率只有普通触发板的一半。
-        // 拿它必须走 randomTrigger()，直接下标取会让它变成普通概率。
-        { id: 'T13', label: '消除', emoji: '🧹', weight: 0.5 },
+        // v9.25: T13「消除」**已从手牌里拿掉**——它变成玩家的一个技能：
+        // 30 秒冷却，按 R 触发一次（见 04-trail.js 的 activateEliminate()）。
+        // 原因：它作为卡牌时，抽到与否完全看运气，而它的效果是「清场 + 拆塔」，
+        // 这种量级的爆发挂在随机掉落上，等于把玩家的节奏交给抽卡。
+        // 现在的 weight 机制只剩 T08 在用（0.7，见上），所以 randomTrigger() 保留。
     ];
 
     // v9.21: 触发板的加权随机。原来是 pool[Math.floor(Math.random()*pool.length)]，
-    // 给 T13 加 weight 后那样写等于没加权，所以所有「随机发一张触发板」的地方
+    // 给触发板加 weight 后那样写等于没加权，所以所有「随机发一张触发板」的地方
     // 都必须走这里。（找牌、图鉴那种按 id 命中的查找不需要。）
     function randomTrigger() {
         let total = 0;
@@ -193,6 +194,15 @@
     };
 
     // ---------- 精英词缀 ----------
+    // v9.25: 圈层类词条落地时的半径放大倍数。表里存基数（100 / 90），
+    // 实际生成时乘这一项——「×1.5」只在这里出现一次，调平衡改一处就够。
+    // 削减圈 100→150、减速圈 90→135、火圈 90→135。
+    const AFFIX_ZONE_R_MUL = 1.5;
+    // 同属性同屏最多几个圈。BOSS 每 5 秒落一个、每个活 6 秒，本来就最多同时 2 个；
+    // 但一只 BOSS 带两个圈层类词条时（比如削减区 + 减速区）会各自独立计数，
+    // 有个硬上限才不会被「场上有 3 只带圈词条的怪」堆成一片没法走的地毯。
+    const AFFIX_ZONE_MAX_PER_KIND = 3;
+
     // v9.24: 前 6 个（再生/荆棘/迅捷/巨人/吸血/爆裂）都是「给怪物自己加数值」。
     // 后 8 个换了方向——不去加强怪物，而是去干扰**玩家的三个系统**：
     //   移动   → 突进 / 牵引
@@ -202,6 +212,10 @@
     // 行为一律写在下面这些声明式字段里（zone / fireZone / dash / vortex /
     // swarm / onCoreHit / onDeath），由 05-update.js 的 tickAffixes()、
     // onAffixCoreHit()、onAffixDeath() 三个统一入口去读——加词条只需要动这张表。
+    //
+    // v9.25: 这条分界线现在也是**归属线**。后 8 个带 bossOnly: true，
+    // 精英怪抽不到、只有 BOSS 会带——它们改的是「玩家的走法」，挂在随时刷新的
+    // 小怪身上只是零散骚扰，玩家记不住；变成 BOSS 的招牌才有分量。
     const AFFIXES = [
         { id: 'regen',     label: '再生', emoji: '💚', color: '#44ff88',
           desc: '每帧回复生命', minWave: 5 },
@@ -216,29 +230,32 @@
         { id: 'explosive', label: '爆裂', emoji: '💥', color: '#ff6622',
           desc: '死亡时范围爆炸', minWave: 5 },
 
-        // ---- v9.24 新增 ----
-        { id: 'weaken',    label: '削减区', emoji: '🟥', color: '#ff4455',
-          desc: '周围 100px 内玩家攻击 ×0.6', minWave: 5,
-          zone: { r: 100, playerAtkMul: 0.6 } },
-        { id: 'slowzone',  label: '减速区', emoji: '🟦', color: '#4499ff',
-          desc: '周围 90px 内玩家移速 ×0.65', minWave: 5,
-          zone: { r: 90, playerSpeedMul: 0.65 } },
-        { id: 'firezone',  label: '火焰区', emoji: '🔥', color: '#ff6622',
-          desc: '每 4 秒在脚下留下火焰', minWave: 5,
-          fireZone: { every: 240 } },
-        { id: 'dash',      label: '突进', emoji: '🌀', color: '#cc66ff',
+        // ---- v9.24 新增 · v9.25 起为 BOSS 专属 ----
+        // 三个圈层类（zone / fireZone）的半径存的是**基数**，真正落地时乘
+        // AFFIX_ZONE_R_MUL——这样「×1.5」这件事在代码里看得见，调平衡只用改一处。
+        // every / spawnRange / life 由 05-update.js 的 spawnAffixZone() 读。
+        { id: 'weaken',    label: '削减区', emoji: '🟥', color: '#ff4455', bossOnly: true,
+          desc: `每 5 秒在附近落一个 ${Math.round(100 * AFFIX_ZONE_R_MUL)}px 削减圈（攻击 ×0.6）`,
+          minWave: 5, zone: { r: 100, playerAtkMul: 0.6, every: 300, spawnRange: 300, life: 360 } },
+        { id: 'slowzone',  label: '减速区', emoji: '🟦', color: '#4499ff', bossOnly: true,
+          desc: `每 5 秒在附近落一个 ${Math.round(90 * AFFIX_ZONE_R_MUL)}px 减速圈（移速 ×0.65）`,
+          minWave: 5, zone: { r: 90, playerSpeedMul: 0.65, every: 300, spawnRange: 300, life: 360 } },
+        { id: 'firezone',  label: '火焰区', emoji: '🔥', color: '#ff6622', bossOnly: true,
+          desc: `每 5 秒在附近落一个 ${Math.round(90 * AFFIX_ZONE_R_MUL)}px 火圈，站在里面持续掉血`,
+          minWave: 5, fireZone: { r: 90, every: 300, spawnRange: 300, life: 360 } },
+        { id: 'dash',      label: '突进', emoji: '🌀', color: '#cc66ff', bossOnly: true,
           desc: '每 3 秒朝玩家猛冲一段', minWave: 5,
           dash: { every: 180, dist: 90 } },
-        { id: 'vortex',    label: '牵引', emoji: '🌪', color: '#88ddff',
+        { id: 'vortex',    label: '牵引', emoji: '🌪', color: '#88ddff', bossOnly: true,
           desc: '持续把周围玩家往自己拉', minWave: 5,
           vortex: { r: 160, pull: 0.15 } },
-        { id: 'seal',      label: '封印', emoji: '🔒', color: '#ddcc44',
+        { id: 'seal',      label: '封印', emoji: '🔒', color: '#ddcc44', bossOnly: true,
           desc: '撞核心时随机封印玩家一个被动 4 秒', minWave: 5,
           onCoreHit: 'seal' },
-        { id: 'swarm',     label: '群生', emoji: '👥', color: '#66dd88',
+        { id: 'swarm',     label: '群生', emoji: '👥', color: '#66dd88', bossOnly: true,
           desc: '每 6 秒分裂出 20% HP 的残影（上限 3）', minWave: 5,
           swarm: { every: 360, hpFrac: 0.20, max: 3 } },
-        { id: 'totem',     label: '敌图腾', emoji: '🗿', color: '#ff8844',
+        { id: 'totem',     label: '敌图腾', emoji: '🗿', color: '#ff8844', bossOnly: true,
           desc: '死亡后原地留下敌意图腾', minWave: 5,
           onDeath: 'enemyTotem' },
     ];
@@ -247,11 +264,21 @@
     function affixDef(id) {
         return AFFIXES.find(a => a.id === id) || null;
     }
-    // 从「当前楼层已解锁」的词条里随机抽 n 个（不重复）。BOSS 带 2 个就走这里。
-    // exclude 用来剔掉对它没意义的词条——见 spawnBoss()。
-    function pickAffixes(n, exclude) {
-        const skip = exclude || [];
-        const pool = AFFIXES.filter(a => G.floor >= a.minWave && skip.indexOf(a.id) < 0);
+    // 从「当前楼层已解锁」的词条里随机抽 n 个（不重复）。
+    // opts 用对象而不是位置参数：现在有两个可选项，再加一个布尔读起来就分不清谁是谁。
+    //   exclude  —— 想剔掉的 id 列表，用来排除对某个持有者没意义的词条（见 spawnBoss()）
+    //   bossOnly —— true 只抽 BOSS 专属的 8 个；false 只抽普通的 6 个（精英怪）；
+    //               'any' / 省略则不区分（调试生成与测试用）
+    function pickAffixes(n, opts) {
+        const o = opts || {};
+        const skip = o.exclude || [];
+        const wantBoss = o.bossOnly;
+        const pool = AFFIXES.filter(a =>
+            G.floor >= a.minWave
+            && skip.indexOf(a.id) < 0
+            && (wantBoss === true ? a.bossOnly === true
+                : wantBoss === false ? !a.bossOnly
+                : true));
         const shuffled = [...pool].sort(() => Math.random() - 0.5);
         return shuffled.slice(0, Math.min(n, shuffled.length)).map(a => a.id);
     }
@@ -275,6 +302,17 @@
 
     // v9.23: BOSS 血量整体 −10%（第 10 层 9 万、第 30 层 26 万）。
     const BOSS_HP_MUL = 0.9;
+
+    // v9.25: BOSS 前期减压——第 1 只 BOSS（第 10 层，原本 9 万血）对刚上手的玩家
+    // 几乎是必卡的。从 1 层 ×0.5 线性爬到 20 层 ×1.0，之后恒 ×1.0。
+    // 刻意**不做断崖**：硬切成「20 层之前 ×0.5、之后 ×1.0」会让第 19/20 层两只
+    // BOSS 的血量差一倍，玩家只会读到「突然变难」，而不是「我变强了」。
+    // 作用在 HP（getBossHp）与攻击（spawnBoss）两处——用户说的是「数值」。
+    const BOSS_EARLY_RAMP_END = 20;
+    function bossEarlyMul() {
+        const t = Math.min(1, Math.max(0, (G.floor - 1) / (BOSS_EARLY_RAMP_END - 1)));
+        return 0.5 + 0.5 * t;
+    }
     // v9.23: BOSS 召唤爪牙的速率 +5%。v9.24: 再加 5%，累计 1.1025。
     // 写成乘积而不是 1.1025，是为了让两次调整的出处都留在代码里。
     // 初始间隔（type.spawnInterval = 100）和后续的 max(50, 150-层数×2) 都除这一项。
@@ -289,11 +327,27 @@
     // 只作用于 spawnMonster() 与分裂子体；BOSS / 爪牙 / 调试生成都不吃这一项。
     const MONSTER_STAT_MUL = 0.8;
 
-    // ---------- v9.24 手机端虚拟摇杆 ----------
-    // 位置用「离左下角多少像素」表达（x 从左、y 从下），因为 canvas 的高度是
-    // 固定的 560，但底部还压着终极技充能条，用底距比用顶距好算。
-    // 触摸判定（09-events.js）与绘制（06-render.js）都读这一份，改一处两边同步。
-    const JOYSTICK = { x: 95, y: 105, r: 62 };
+    // ---------- v9.24 手机端虚拟摇杆 · v9.25 改为动态位置 ----------
+    // v9.25: 底座不再是固定坐标，而是「按在哪、圆心就在哪」（见 09-events.js 的
+    // setStickFromTouch）。所以这里只剩半径——而且半径的单位从 canvas 像素变成了
+    // **CSS 像素**，因为摇杆改成 DOM 元素绘制（可能落在 canvas 外的黑边上，
+    // 画在 canvas 里会被边界裁掉）。r 只作为拿不到元素尺寸时的兜底。
+    const JOYSTICK = { r: 62 };
+
+    // ---------- v9.25 「消除」技能 ----------
+    // 从触发板 T13 改成玩家技能：30 秒冷却，按 R（手机端右下角 🧹 圆钮）触发一次。
+    // 帧数口径，和游戏里其它计时保持一致。
+    const ELIMINATE_COOLDOWN = 30 * 60;
+
+    // ---------- v9.25 玩家 / 图腾的出手强度 ----------
+    // 图腾攻击力与玩家攻击力锁死 0.4 : 1。此前图腾伤害写死在类型表里、再乘层数难度，
+    // 玩家攻击涨上去之后图腾就相对变弱，两套数值各走各的——现在只有一个乘数。
+    // 伤害在**开火那一刻**算（见 05-update.js 的图腾循环），所以这条比例一直成立，
+    // 不是召唤时的快照。类型之间的差别靠射速与射程，不再靠单发伤害。
+    const TURRET_ATK_RATIO = 0.4;
+    // 玩家开火频率 +20%：冷却整体除以 1.2。上下限一起缩——只改上面那个 48 会让
+    // 后期被 Math.max(24, …) 的地板吃掉，看着改了实际没生效。
+    const PLAYER_FIRE_RATE_MUL = 1.2;
 
     // ---------- v9.23 每层清空奖励的卡牌数 ----------
     // 基础式仍是 2 + 层数/10（第 5 层 2 张、第 50 层 7 张、第 100 层 12 张），
@@ -311,10 +365,12 @@
         // v9.15: 和难度曲线同步加拐点，否则 BOSS 自己按 1.7^(层/10) 一路指数涨，
         // 118 层就是 2000 万血——玩家永远打不死，又是一个「假难度」。
         // v9.23: 整体再 −10%，第 10 / 20 / 30 层是 9 万 / 15.3 万 / 26 万。
+        // v9.25: 再乘前期减压系数——第 10 层 ×0.7368 ≈ 6.6 万，20 层起恢复满值。
         const g = Math.floor(G.floor / 10);
         return Math.floor(BOSS_HP_MUL * 100000
             * Math.pow(1.7, Math.min(g, 3) - 1)
-            * Math.pow(Math.max(1, G.floor / DIFF_KNEE), DIFF_TAIL));
+            * Math.pow(Math.max(1, G.floor / DIFF_KNEE), DIFF_TAIL)
+            * bossEarlyMul());
     }
 
     // ---------- v9.6 关卡类型（怪物分布多样化）----------
@@ -495,7 +551,7 @@
         const stock = [];
 
         // 密文版：各 1 张（原来各 2 张）
-        const pickedT = randomTrigger();   // v9.21: 走加权抽取，T13 只有一半概率
+        const pickedT = randomTrigger();   // v9.21: 走加权抽取；T08 权重 0.7，其余等权（T13 已于 v9.25 移出触发板）
         const shuffledE = [...EFFECTS].sort(() => Math.random() - 0.5);
         stock.push({ type: 'card', card: { ...pickedT, cardType: 'trigger' }, cost: 8, emoji: pickedT.emoji, label: pickedT.label, desc: '触发板' });
         stock.push({ type: 'card', card: { ...shuffledE[0], cardType: 'effect' }, cost: 10, emoji: shuffledE[0].emoji, label: shuffledE[0].label, desc: '效果板' });

@@ -39,6 +39,11 @@
         G.enemyTotems = []; G.sealedPassives = [];
         G.stick = { x: 0, y: 0 }; G.stickActive = false;
         G.drawerOpen = false; G.timeScale = 1;
+        // v9.25: 圈层、BOSS 横幅、消除冷却、动态摇杆底座。_stickTouchId 是 v9.24 漏掉的
+        // ——ID 是旧局留下的数字，不清掉的话新局第一根手指会被当成「不是摇杆那根」。
+        G.affixZones.length = 0; G.bossBanner = null; G.eliminateCooldown = 0;
+        G.stickBase = null; G._stickTouchId = null;
+        resetJoystickVisual();
         Tutorial.reset();
         document.getElementById('pauseOverlay').classList.remove('active');
         document.getElementById('pauseWorkshop').classList.remove('active');
@@ -92,6 +97,12 @@
         }
         draw();
         drawFps();
+        // v9.25: 死亡后战斗界面的重开按钮只在这一处同步——G.gameOver 的三个写入点
+        // 与 resetGame() 的复位都汇到这里，一帧一次布尔比较，不额外挂监听。
+        if (G._gameOverUIShown !== G.gameOver) {
+            G._gameOverUIShown = G.gameOver;
+            syncGameOverUI();
+        }
         requestAnimationFrame(gameLoop);
     }
 

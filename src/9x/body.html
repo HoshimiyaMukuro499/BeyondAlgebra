@@ -4,6 +4,16 @@
         <div class="canvas-wrap">
             <canvas id="gameCanvas" width="780" height="560"></canvas>
 
+            <!-- v9.25 动态摇杆。DOM 而不是画在 canvas 上：底座跟着手指落在任意位置，
+                 包括画面两侧的黑边——画在 canvas 里会被边界裁掉。屏幕坐标输入、
+                 屏幕坐标渲染，输入与视觉同一套坐标系。 -->
+            <div class="joy-hint" id="joyHint"></div>
+            <div class="joy" id="joyBase"><div class="joy-knob" id="joyKnob"></div></div>
+
+            <!-- v9.25 死亡后的重开入口。桌面端侧栏那个「↺ 重开」够用，但手机端
+                 .panel 是收起的抽屉，战斗界面上没有任何可点的重开按钮。 -->
+            <button class="gameover-restart" id="gameoverRestart">↺ 重新开始</button>
+
             <!-- v9.24 手机端覆盖层。全部只在 body.mobile 下显示（见 styles.css），
                  桌面端一行都不渲染——这样桌面布局与 9.23 完全一致。
                  放在 .canvas-wrap 内部而不是挂在 body 上：抽屉展开时这一块整体
@@ -14,6 +24,7 @@
             <button class="mobile-drawer-btn" id="drawerToggleBtn" title="密文版 / 被动">🔮 面板</button>
             <div class="mobile-actions">
                 <button class="mobile-act-btn" id="mobileDashBtn">💨<span>冲刺</span></button>
+                <button class="mobile-act-btn" id="mobileElimBtn">🧹<span>消除</span></button>
                 <button class="mobile-act-btn ult" id="mobileUltBtn">⚡<span>终极技</span></button>
             </div>
         </div>
@@ -84,6 +95,7 @@
                 <span><kbd>空格</kbd> 宣读</span>
                 <span><kbd>P</kbd> 暂停</span>
                 <span><kbd>Q</kbd> 终极技</span>
+                <span><kbd>R</kbd> 消除</span>
                 <span>轨迹阻挡 · 围剿伤害</span>
                 <button class="btn-reset" id="fullscreenBtn">⛶ 全屏</button>
                 <button class="btn-reset" id="logBtn" style="background:#2a4a3a;border-color:#4a8a5a;color:#aaddbb;">📋 导出记录</button>
@@ -108,6 +120,14 @@
     <p class="pw-hint">战场已冻结 · 自由组合密文版并宣读</p>
     <button class="pw-btn" id="pwCombineBtn">🔮 宣读组合 (空格)</button>
     <button class="pw-btn" id="pwResumeBtn">▶ 继续战斗</button>
+</div>
+
+<!-- v9.25 全屏引导（手机端，只弹一次）。放在 .canvas-wrap 之外、与 #classOverlay 同级：
+     它要盖住整屏，而不是只盖住画面那一块。z-index 高于 #classOverlay，所以开局先看到它，
+     点掉之后才露出职业选择。 -->
+<div class="fs-overlay" id="fsOverlay">
+    <div class="fs-title">⛶ 点击进入全屏模式</div>
+    <div class="fs-sub">横屏游玩体验最好 · 显示不全时请旋转设备</div>
 </div>
 
 <!-- v9.4 职业选择 -->

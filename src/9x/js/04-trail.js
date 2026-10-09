@@ -4,6 +4,7 @@
         // 产物，带到下一层会变成没来由的持续掉血 / 被动失灵。
         G.enemyTotems.length = 0;
         G.sealedPassives.length = 0;
+        G.affixZones.length = 0;   // v9.25: 圈层同理——上一层的削减圈不该跟着进门
         // 教程层：走脚本出怪，不走加权随机
         Tutorial.onFloorStart();
         if (Tutorial.tookOver) {
@@ -39,6 +40,15 @@
         }
     }
 
+    // v9.25: 玩家一发的基准威力（不含圈层削减、狂暴、暴击这些一次性修正）。
+    // 子弹伤害与图腾伤害都从这里派生——图腾攻击力锁死为它的 0.4 倍（TURRET_ATK_RATIO），
+    // 抽成一个函数是为了让那个比例只有一个来源，不会两边各写一份乘数然后慢慢走散。
+    function getPlayerAttackPower() {
+        const p = G.player;
+        return (p.atk + G.buffs.atkUp) * (1 + G.buffs.multUp)
+            * G.fateBuffs.atkMul * G.fateBuffs.bulletDmgMul * 1.15;
+    }
+
     function autoShoot() {
         if (G.gameOver) return;
         if (G.monsters.length === 0) return;
@@ -61,7 +71,7 @@
         const spread = 0.08;
         const speed = 7;
         // v9.19: 射速降到 1/4，单发伤害补 15%，免得整体输出腰斩
-        let atk = (p.atk + G.buffs.atkUp) * (1 + G.buffs.multUp) * G.fateBuffs.atkMul * G.fateBuffs.bulletDmgMul * 1.15;
+        let atk = getPlayerAttackPower();
         // v9.24: 「削减区」词条——玩家站在怪身边开火时子弹伤害打折。
         // 这里是子弹伤害唯一的出口，改这一处就覆盖主弹与额外弹丸（额外弹丸在下面按 atk 的 0.6 派生）。
         // 只压子弹，不压轨迹——轨迹是玩家的核心输出手段，一起压会让这条词条变成纯粹的数值墙。
@@ -88,7 +98,9 @@
             });
         }
         // v9.19: 闸门整体 ×4——只改 G.fireRate 不改这里的话，冷却会卡住射速，改动不生效
-        p.shootCooldown = Math.max(24, 48 - G.floor * 0.32);
+        // v9.25: 再整体 ÷1.2（开火频率 +20%）。地板和上限一起缩，否则后期会被
+        // Math.max(24, …) 的地板吃掉，看着改了其实没生效。
+        p.shootCooldown = Math.max(24, 48 - G.floor * 0.32) / PLAYER_FIRE_RATE_MUL;
     }
 
     function getTrailDamage() {
@@ -205,10 +217,12 @@
                 else if (pv.effectId === 'E06') turType = 'trail';
             }
         }
-        const T = { basic: { e: '🗼', c: '#88aacc', fr: 25, d: 30, rg: 140 }, rapid: { e: '🎯', c: '#ff8844', fr: 8, d: 18, rg: 120 }, lightning: { e: '⚡', c: '#ffdd44', fr: 40, d: 50, rg: 180 }, frost: { e: '❄️', c: '#88ccff', fr: 20, d: 10, rg: 120 }, trail: { e: '🐾', c: '#66dd88', fr: 15, d: 35, rg: 160 } };
+        // v9.25: 表里的单发伤害（d）删掉了——图腾攻击力现在恒为玩家攻击力的 0.4 倍，
+        // 在开火那一刻算（见 05-update.js）。类型之间的差别只剩射速、射程与特效。
+        const T = { basic: { e: '🗼', c: '#88aacc', fr: 25, rg: 140 }, rapid: { e: '🎯', c: '#ff8844', fr: 8, rg: 120 }, lightning: { e: '⚡', c: '#ffdd44', fr: 40, rg: 180 }, frost: { e: '❄️', c: '#88ccff', fr: 20, rg: 120 }, trail: { e: '🐾', c: '#66dd88', fr: 15, rg: 160 } };
         const d = T[turType];
         const maxHp = tier.hp + (G.turretHpBonus || 0);
-        G.turrets.push({ x: clamp(cx, 60, 720), y: clamp(cy, 60, 500), r: 14 * tier.m, type: turType, emoji: d.e, color: d.c, fireRate: Math.floor(d.fr / tier.m), fireTimer: 0, damage: Math.floor(d.d * tier.m * (1 + getDifficultyMultiplier() * .3)), range: d.rg * tier.m, hp: maxHp, maxHp: maxHp, tier: tier.t, loopKey: loopKey, spawnAnim: 20 });
+        G.turrets.push({ x: clamp(cx, 60, 720), y: clamp(cy, 60, 500), r: 14 * tier.m, type: turType, emoji: d.e, color: d.c, fireRate: Math.floor(d.fr / tier.m), fireTimer: 0, range: d.rg * tier.m, hp: maxHp, maxHp: maxHp, tier: tier.t, loopKey: loopKey, spawnAnim: 20 });
         G.turretLoops[loopKey] = true;
         _loopCD = 30;
         triggerPassive('T12'); addScore(Math.floor(area / 100));
@@ -298,12 +312,14 @@
         updateUI();
     }
 
-    // v9.21: T13「消除」——消耗品，不是被动。
-    // 宣读当场生效：全场怪物各吃 3 倍「怪物反噬」(E10) 的伤害，然后拆掉场上
-    // 最早生成的那座图腾。之后这张牌就没了。
-    // 因为它不产生被动，所以刻意**不**走 addPassive、**不**吃槽位上限，
-    // 配对的效果板也不会登记成被动——两张牌一起烧掉，这是它的代价。
-    function triggerEliminate(effectId) {
+    // v9.21: T13「消除」——v9.25 起不再是密文版，改成玩家的固定技能。
+    // 全场怪物各吃 3 倍「怪物反噬」(E10) 的伤害，然后拆掉场上最早生成的那座图腾。
+    // 不产生被动、不占槽位——代价换成了 **30 秒冷却**（按 R 触发，见 tryEliminate）。
+    //
+    // 为什么从卡牌里拿掉：它原本的代价只是「烧掉两张牌」，但抽到与否完全看运气，
+    // 而这个效果的量级（清场 + 拆塔）足以决定一波团战的胜负。挂在随机掉落上，
+    // 等于把玩家的节奏交给抽卡；变成带冷却的技能后，什么时候按是玩家的决策。
+    function activateEliminate() {
         const dmg = Math.floor(60 * (2 + getDifficultyMultiplier()) / 3) * 3;
         let hitCount = 0;
         for (const m of G.monsters) {
@@ -327,13 +343,20 @@
         logEvent('eliminate', { damage: dmg, monsters: hitCount, turretCleared: cleared });
     }
 
+    // v9.25: 「消除」的入口。按键（R / 手机端 🧹 圆钮）走这里，卡牌不再有这条路径。
+    // 冷却中按下去给一句反馈而不是静默忽略——不然玩家会以为按键没生效。
+    function tryEliminate() {
+        if (G.gameOver || G.paused || G.selectingActive) return;
+        if (G.eliminateCooldown > 0) {
+            setFeedback(`🧹 消除冷却中 · 还要 ${(G.eliminateCooldown / 60).toFixed(1)}s`, '#8ab3d0');
+            return;
+        }
+        G.eliminateCooldown = ELIMINATE_COOLDOWN;
+        activateEliminate();
+    }
+
     function doCombine(trigger, effect) {
         const triggerId = trigger.id, effectId = effect.id;
-        // T13 走消耗品分支，要在槽位检查**之前**——它不吃槽位上限
-        if (triggerId === 'T13') {
-            triggerEliminate(effectId);
-            return true;
-        }
         let usedSlots = 0;
         for (const tid of Object.keys(G.passives)) usedSlots += G.passives[tid].length;
         const isUpgrade = G.passives[triggerId] && G.passives[triggerId].some(p => p.effectId === effectId);

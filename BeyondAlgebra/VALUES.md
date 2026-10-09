@@ -1,6 +1,6 @@
 # 数值与公式总表 · 9.x（AI 拓展版）
 
-> 调试用速查。所有数值直接摘自 [`src/9x/js/`](../src/9x/js/)（v9.24 状态），每个条目都标了出处。
+> 调试用速查。所有数值直接摘自 [`src/9x/js/`](../src/9x/js/)（v9.25 状态），每个条目都标了出处。
 > 行号是**当时的锚点**，源码一改就会漂——对不上时按函数名/关键字在文件里搜，别按行号硬找。
 > 调数值请改 `src/9x/`，改完跑 `npm run build:game` 重新拼装根目录的单文件 HTML——
 > 根目录的 `密文轨迹demo9.XX.html` 是**产物**，直接编辑会被下次构建覆盖。
@@ -48,8 +48,15 @@
 | BOSS 血量乘子 | ×0.9 | `00-data.js:229` |
 | BOSS 召唤速率乘子 | ×1.1025（间隔 ÷1.1025） | `00-data.js:232` |
 | 封印时长 | 240 帧（4 秒） | `05-update.js:237` |
-| 敌图腾寿命 / 索敌半径 | 720 帧 / 200px | `05-update.js:264-265` |
-| 摇杆几何 | 圆心 (95, 105)、半径 62（距左下角） | `00-data.js` v9.24 块 |
+| 敌图腾寿命 / 索敌半径 | 720 帧 / 120px | `05-update.js` `ENEMY_TOTEM_RANGE` |
+| 摇杆几何 | 半径 62（**底座动态**，按下的那一点就是圆心；v9.24 的写死圆心已删） | `00-data.js` `JOYSTICK` |
+| 圈层半径放大 | ×1.5（削减区 100→150、减速区/火焰区 90→135） | `00-data.js` `AFFIX_ZONE_R_MUL` |
+| 圈层同屏上限 | 同属性 3 个 | `00-data.js` `AFFIX_ZONE_MAX_PER_KIND` |
+| 火焰圈结算 | 每 6 帧 1 点（≈0.167/帧） | `05-update.js` `FIRE_ZONE_TICK` / `FIRE_ZONE_DMG_PER_TICK` |
+| BOSS 前期减压 | 1 层 ×0.5 → 20 层 ×1.0（HP 与攻击同乘） | `00-data.js` `bossEarlyMul()` |
+| 图腾攻击力比例 | 玩家攻击力 × 0.4（开火时现算） | `00-data.js` `TURRET_ATK_RATIO` |
+| 玩家开火频率乘子 | ×1.2 | `00-data.js` `PLAYER_FIRE_RATE_MUL` |
+| 消除冷却 | 1800 帧（30 秒） | `00-data.js` `ELIMINATE_COOLDOWN` |
 | 轨迹段上限 | 120（普通）/ 60（冲刺） | `04-trail.js:97`、`05-update.js:115` |
 | 火焰轨迹上限 | 80 | `05-update.js:222` |
 | 手牌上限 | 20（满了替换最老一张） | `07-ui.js:138,409` |
@@ -118,8 +125,8 @@ getSpawnInterval() = max(6, 25 / 1.06^(f - 1))      // fastRush 关卡 ×0.4
 | 15 ≤ f < 25 | 1 个；30% 变 2 个 |
 | f ≥ 25 | 2 个；20% 变 3 个 |
 
-BOSS 不按上表——`spawnBoss()` 固定 `pickAffixes(2, ['dash', 'swarm'])`，
-即**恰好 2 个**，且排除突进与群生。
+BOSS 不按上表——`spawnBoss()` 固定 `pickAffixes(2, { exclude: ['dash','swarm'], bossOnly: 'any' })`，
+即**恰好 2 个**，排除突进与群生，但**可以**抽到 8 个 BOSS 专属词条（精英怪抽不到的那些）。
 
 ### 关卡类型权重
 
@@ -187,6 +194,8 @@ speed = player.speed × playerSpeedMult
 | 怪物撞击 | `atk × 0.35 × damageTakenMul` | `05-update.js:295` |
 | 火焰轨迹（玩家） | 0.8 / 帧 | `05-update.js:439` |
 | 火焰轨迹（图腾） | 0.012 / 帧 | `05-update.js:452` |
+| 🔥火焰圈（玩家） | 1 / 6 帧（≈0.167） | `05-update.js` `tickAffixZones` |
+| 🔥火焰圈（图腾） | `FIRE_TURRET_DMG_PER_FRAME × 6` / 6 帧 | 同上 |
 | 危险区 | 1.2 / 帧 | `05-update.js:521` |
 | 荆棘词缀反弹（子弹） | `bulletDmg × (0.08 + f × 0.002)` | `05-update.js:166` |
 | 荆棘词缀反弹（轨迹） | `td × (0.08 + f × 0.002)` | `05-update.js:262` |
@@ -202,8 +211,12 @@ speed = player.speed × playerSpeedMult
 
 ```
 G.fireRate        = 40   （几帧打一发）          01-state.js:14
-p.shootCooldown   = max(24, 48 - f × 0.32)      04-trail.js:83
+p.shootCooldown   = max(24, 48 - f × 0.32) / 1.2   04-trail.js autoShoot()
 ```
+
+**v9.25：整条冷却 ÷ `PLAYER_FIRE_RATE_MUL`（×1.2 射速）。** `Math.max(24, …)` 的地板
+也跟着被除——不跟就会在高层出现「地板反而比公式值大」的倒挂。第 1 层冷却
+`47.68 / 1.2 ≈ 39.73`。
 
 实际间隔不是两者之和，而是**「≥ 冷却的 fireRate 最小整数倍」**：射速闸每满 `fireRate` 帧才问一次冷却，冷却没走完就白问一次（`fireCounter` 已经归零）。
 
@@ -212,7 +225,10 @@ p.shootCooldown   = max(24, 48 - f × 0.32)      04-trail.js:83
 fireRate < 冷却 ≤ 2×fr → 间隔 = 2 × fireRate
 ```
 
-第 1 层冷却 47.68 > 40 → **80 帧一发**；第 25 层冷却降到 40 → **40 帧一发**。所以手感在第 25 层会突然快一倍——这是 v9.19 把两处同时 ×4 保留下来的既有结构，不是新 bug。
+**v9.25 后这条「隔层突然快一倍」的结构消失了**：冷却上限是 `48 / 1.2 = 40`，正好等于基础
+`fireRate`，所以 `冷却 ≤ fireRate` 恒成立 → 基础职业**全程稳定 40 帧一发**（v9.24 是第 1 层
+80 帧、第 25 层才降到 40）。只有职业把 `fireRate` 改小/改大时冷却才重新起约束：
+弹幕风暴 `fireRate ×0.6 = 24`，第 1 层冷却 39.73 → 间隔 48（`2 × 24`）。
 
 职业修正：弹幕风暴 `fireRate ×0.6`，堡垒守卫 ×1.25。连锁风暴「-8」（`fireRate = max(12, fireRate - 8)`）也会把间隔从 40 压到 32。
 
@@ -407,12 +423,16 @@ spd = m.speed × (1 - slowAll) × (slowTimer > 0 ? 0.8 : 1) × 1.33
 `00-data.js:249-257`、`02-combat.js:424-481`
 
 ```
-getBossHp() = floor(0.9 × 100000 × 1.7^(min(floor(f/10), 3) - 1) × max(1, f/30)^1.6)
+getBossHp() = floor(0.9 × 100000 × 1.7^(min(floor(f/10), 3) - 1) × max(1, f/30)^1.6 × bossEarlyMul())
 上限 1e8
+bossEarlyMul() = 0.5 + 0.5 × clamp((f - 1) / 19, 0, 1)     // 1 层 ×0.5 → 20 层 ×1.0，之后恒 1.0
 ```
 
-- v9.23 起整体 ×0.9（`BOSS_HP_MUL`）：10 层 9 万 / 20 层 15.3 万 / 30 层 26 万
-- `atk = 45 × min(D^0.35, 12)`
+- v9.23 起整体 ×0.9（`BOSS_HP_MUL`）
+- **v9.25 起再乘 `bossEarlyMul()`（`BOSS_EARLY_RAMP_END = 20`）**：第 1 层 ×0.5、
+  第 10 层 ×0.7368 → 血 66300、第 20 层起恢复 ×1.0 → 血 153000。线性爬坡而非断崖，
+  否则第 19/20 层两只 BOSS 血量差一倍
+- `atk = 45 × min(D^0.35, 12) × bossEarlyMul()`（用户说的「数值」涵盖 HP 与攻击）
 - 爪牙：间隔 `round(max(50, 150 - f × 2) / 1.1025)` 帧（v9.24 累计 +10.25%），首次 91 帧；数量 `1 + floor(f / 15)`，只出 basic/fast/tank
 - 爪牙数值：r ×0.8，hp 50%，speed ×1.2，atk ×0.5，分值 ×0.3
 - 每 10 层出现（`f % 10 === 0`）；节点地图上 BOSS 节点只在 `f % 10 === 9` 可选
@@ -438,10 +458,19 @@ getBossHp() = floor(0.9 × 100000 × 1.7^(min(floor(f/10), 3) - 1) × max(1, f/3
 
 ## 6. 精英词缀
 
-`00-data.js:181-194`，**14 个，全部 `minWave = 5`**。抽池走
-`pickAffixes(n, exclude)`（`00-data.js`），普通怪 / BOSS / 残影三处共用。
+`00-data.js`，**14 个，全部 `minWave = 5`**，分成两组。抽池走
+`pickAffixes(n, opts)`（`00-data.js`）——`opts = { exclude: string[], bossOnly: boolean|'any' }`：
 
-**前 6 个——强化怪物自身**（老词条，内联写法）：
+| 调用点 | 传参 | 抽到的池子 |
+|:--|:--|:--|
+| `spawnMonster()`（精英怪） | `{ bossOnly: false }` | **只有老 6 个** |
+| `spawnBoss()` | `{ exclude: ['dash','swarm'], bossOnly: 'any' }` | 14 个里排除突进/群生 = **12 个** |
+| `spawnDebugMonster()`（调试） | `{ bossOnly: 'any' }` | 全部 14 个 |
+
+> **v9.25：后 8 个标了 `bossOnly: true`，精英怪永远抽不到。** 它们改的是"玩家的走法"，
+> 挂在随时刷新的小怪身上只是零散骚扰；只有 BOSS 这种"打一场记一场"的对手才配得上。
+
+**精英词条（6 个）——强化怪物自身**（老词条，内联写法）：
 
 | id | 名称 | 效果 | 精确数值 | 出处 |
 |:--|:--|:--|:--|:--|
@@ -452,20 +481,50 @@ getBossHp() = floor(0.9 × 100000 × 1.7^(min(floor(f/10), 3) - 1) × max(1, f/3
 | `vampiric` | 吸血 🩸 | 攻击时回血（仅当玩家护盾已空） | `dmg × (0.15 + f × 0.01)` | `05-update.js:309-313` |
 | `explosive` | 爆裂 💥 | 死亡时范围爆炸 | `(20 + f × 4) × D`，半径 80 | `05-update.js:367-381` |
 
-**后 8 个——干扰玩家**（v9.24 新增，声明式行为字段 + `05-update.js` 的统一钩子）：
+**BOSS 专属词条（8 个）——干扰玩家**（v9.24 新增，声明式行为字段 + `05-update.js` 的统一钩子）：
 
 | id | 名称 | 效果 | 精确数值 | 钩子 |
 |:--|:--|:--|:--|:--|
-| `weaken` | 削减区 🟥 | 玩家攻击打折 | `playerAtkMul = 0.6`，`r = 100` | `getPlayerAtkZoneMul()`（`04-trail.js` 的 `atk` 末尾） |
-| `slowzone` | 减速区 🟦 | 玩家移速打折 | `playerSpeedMul = 0.65`，`r = 90` | `getPlayerSpeedZoneMul()` |
-| `firezone` | 火焰区 🔥 | 脚下留火 | 每 240 帧一条，长 16px，寿命 150 | `tickAffixes` → `spawnAffixFire` |
+| `weaken` | 削减区 🟥 | 圈内玩家/图腾攻击打折 | `playerAtkMul = 0.6`；`r = 100 × 1.5 = 150` | `getAffixZoneMul()` |
+| `slowzone` | 减速区 🟦 | 圈内玩家移速 / 图腾出手打折 | `playerSpeedMul = 0.65`；`r = 90 × 1.5 = 135` | `getAffixZoneMul()` |
+| `firezone` | 火焰区 🔥 | 圈内持续掉血 + 烧塔 | `r = 90 × 1.5 = 135`；每 6 帧 1 点 | `tickAffixZones()` |
 | `dash` | 突进 🌀 | 朝玩家猛冲 | 每 180 帧冲 90px，12 帧插值（0.28 逼近），**无视地形** | `tickAffixes` |
-| `vortex` | 牵引 🌪 | 把玩家往自己拽 | `r = 160`，`pull = 0.15 × (1 - d/r)` | `applyVortexPull()` |
+| `vortex` | 牵引 🌪 | 把玩家往自己拽（**仍是贴身拉力，不做圈**） | `r = 160`，`pull = 0.15 × (1 - d/r)` | `applyVortexPull()` |
 | `seal` | 封印 🔒 | 撞核心封一个被动 | `SEAL_FRAMES = 240`（4 秒） | `onAffixCoreHit` |
 | `swarm` | 群生 👥 | 分裂残影 | 每 360 帧一只，`hpFrac = 0.20`，上限 3 只 | `tickAffixes` → `spawnSwarmClone` |
-| `totem` | 敌图腾 🗿 | 死后留图腾 | 寿命 720 帧，索敌 200px，每 60 帧一发 `3 + f × 0.2` | `onAffixDeath` |
+| `totem` | 敌图腾 🗿 | 死后留图腾 | 寿命 720 帧，索敌 **120px**，每 60 帧一发 `3 + f × 0.2` | `onAffixDeath` |
 
-> **区域重叠取最强（`Math.min`）而非连乘**——三只怪叠在一起若连乘，玩家等于被冻住，
+### v9.25：三个圈层词条从「贴身」改成「落点」
+
+旧版削弱/减速/火焰圈都挂在 BOSS 自己脚下——而 BOSS 是 `alwaysMoving` 追着玩家跑的，
+等于「靠近 BOSS 就被永久削弱」，既不可躲也不好看。现在改成**在场地里落一个静态圈**：
+
+```
+每 300 帧（5 秒）落一个：
+  距离 = rand(r × 1.2, spawnRange = 300)   // 下界保证不落在自己脚下
+  半径 = 基数 × AFFIX_ZONE_R_MUL(1.5)      // 100→150 / 90→135 / 90→135
+  存活 = 360 帧（6 秒）
+  同属性同屏上限 = AFFIX_ZONE_MAX_PER_KIND(3)
+  落定后与 BOSS 位置再无关系，BOSS 走了圈还在
+```
+
+存在 `G.affixZones`（**不再挂怪身上**，`_affixZones` 里只剩牵引那一个环），
+`startFloor()` / `resetGame()` 清空。渲染：实心圆 + 虚线描边 + 一圈随
+`life / maxLife` 收缩的剩余时间提示；火焰圈另叠一层 `sin(G.frame)` 的橙色抖动。
+
+**圈层也作用于玩家图腾**（v9.25）——判定 `dist(zone, 塔) <= z.r + 塔.r`：
+
+| 圈 | 对玩家 | 对图腾 |
+|:--|:--|:--|
+| 🟥 削减区 | 单发伤害 ×0.6 | 单发伤害 ×0.6 |
+| 🟦 减速区 | 移速 ×0.65 | **出手速度 ×0.65**（塔不移动，同位置的动作频率就是它的"速度"） |
+| 🔥 火焰区 | 每帧掉血 | 每帧掉血（沿用 v9.23 的火焰烧塔速率） |
+
+`FIRE_ZONE_TICK = 6`、`FIRE_ZONE_DMG_PER_TICK = 1`（≈0.167/帧）——不能照抄火焰轨迹的
+`0.8/帧`：那是一条细线，站满 150 帧掉 120；换成 135px 大圈活 360 帧，满吃 288 直接秒杀。
+现在穿过去（约半秒）掉 ~5 点、从头站到尾掉 60 点，能动就躲得开。
+
+> **区域重叠取最强（`Math.min`）而非连乘**——三只怪/三个圈叠在一起若连乘，玩家等于被冻住，
 > 那就超出「减速」的语义了。
 > **封印**只在玩家真有被动时才有意义（没有可封的组合时这条词条是空的）；
 > 被封印的组合**不删除**，只是这 4 秒 `triggerPassive` 整条跳过。
@@ -502,25 +561,39 @@ _loopCD        = 30    // 成功出塔后设的冷却
 
 ### 图腾类型 `T` 表
 
-`04-trail.js:200`。由 T12 绑定的效果板决定。
+`04-trail.js`。由 T12 绑定的效果板决定。
 
-| 类型 | emoji | 基础射速 `fr` | 基础伤害 `d` | 基础射程 `rg` |
-|:--|:--|--:|--:|--:|
-| basic | 🗼 | 25 | 30 | 140 |
-| rapid ⚔️E01 | 🎯 | 8 | 18 | 120 |
-| lightning ⚡E12 | ⚡ | 40 | 50 | 180 |
-| frost ❄️E13 | ❄️ | 20 | 10 | 120 |
-| trail 🐾E06 | 🐾 | 15 | 35 | 160 |
+| 类型 | emoji | 基础射速 `fr` | 基础射程 `rg` |
+|:--|:--|--:|--:|
+| basic | 🗼 | 25 | 140 |
+| rapid ⚔️E01 | 🎯 | 8 | 120 |
+| lightning ⚡E12 | ⚡ | 40 | 180 |
+| frost ❄️E13 | ❄️ | 20 | 120 |
+| trail 🐾E06 | 🐾 | 15 | 160 |
 
-实例化（`04-trail.js:203`）：
+> **v9.25 删掉了 `d`（基础伤害）列**——类型之间现在只靠射速 / 射程 / 特殊效果区分。
+
+实例化（`04-trail.js`）：
 
 ```
 fireRate = floor(d.fr / m)
-damage   = floor(d.d × m × (1 + D × 0.3))
 range    = d.rg × m
 r        = 14 × m
 位置     = clamp(cx, 60, 720), clamp(cy, 60, 500)
 ```
+
+**开火伤害（v9.25，开火时现算，不再是生成时的快照）：**
+
+```
+dmg = getPlayerAttackPower() × TURRET_ATK_RATIO(0.4) × getTurretAtkZoneMul(t)
+```
+
+即**所有图腾单发伤害恒等于玩家攻击力的 0.4 倍**（再把射程内玩家的攻击增益算进去）。
+现算而非快照，意味着玩家捡到攻击加成后场上的塔会立刻跟着变强。
+
+> ⚠️ 这是一次大刀阔斧的削弱：旧公式 `d × m × (1 + D × 0.3)` 在 D 很高时能把
+> basic 推到几百；现在第 1 层玩家攻击 ~11.5 → 塔单发 ~4.6。塔的定位从
+> "主要 DPS" 变成 "稳定的辅助输出 + 效果载体"（冰冻 / 连锁 / 足迹）。
 
 ### 特殊开火
 
@@ -653,12 +726,13 @@ KILL_STREAK_WINDOW = 180 帧（3 秒）
 | T08 | 连环击杀 🔥 | 连杀 ≥ 2 时（**高频**） | **0.7** |
 | T10 | 残血触发 ❤️‍🔥 | 护盾 < 30%（每 30 帧检查一次），或宣读时已在残血 | 1 |
 | T12 | 闭环触发 ⭕ | 闭环召唤图腾时 | 1 |
-| T13 | 消除 🧹 | **消耗品**，见下 | **0.5** |
 
+> **v9.25 移除了 T13「消除」**——它从手牌里拿掉，改成玩家的固定技能（见下）。
+> 触发板重新变成等权抽取，`randomTrigger()` 里那条「T13 权重 0.5」的分支已经删掉。
+>
 > 「高频」= `isHighFreq`，用于 E01/E03 的数值分档。
-> 抽取必须走 `randomTrigger()`（`00-data.js:24-30`）；直接下标取会让 T13 变成普通概率。
-> T08 的 0.7 是 v9.23 加的「出率 -30%」——权重是相对值，压低 T08 之后其他板的
-> 相对占比会跟着涨一点点，这是加权抽取的固有行为。
+> 抽取必须走 `randomTrigger()`；T08 的 0.7 是 v9.23 加的「出率 -30%」——权重是相对值，
+> 压低 T08 之后其他板的相对占比会跟着涨一点点，这是加权抽取的固有行为。
 
 ### 效果板 `EFFECTS`
 
@@ -704,19 +778,29 @@ KILL_STREAK_WINDOW = 180 帧（3 秒）
 是带目标的（`05-update.js:170,171,263,264,346,398`）。改之前 E13 是「全场 65% 概率
 逐只掷骰」、E14 是「全场」，两者都不看命中目标。
 
-### T13「消除」的特殊分支
+### 🧹 消除（v9.25 起是技能，不是卡牌）
 
-`04-trail.js:286-316`。在槽位检查**之前**拦截：
+`04-trail.js` 的 `activateEliminate()` / `tryEliminate()`。**按 `R`（手机端 🧹 圆钮）触发**：
 
 ```
-dmg = floor(60 × (2 + D) / 3) × 3        // 3 倍反噬
-全场怪物各吃 dmg
-拆掉 G.turrets[0]（最早生成的那座），删除其 loopKey（环重新武装）
+tryEliminate():
+  G.gameOver / G.paused / G.selectingActive → 直接 return
+  G.eliminateCooldown > 0  → 提示「🧹 消除冷却中 · 还要 N.Ns」，不生效
+  否则：设 G.eliminateCooldown = ELIMINATE_COOLDOWN(1800 帧)，执行 activateEliminate()
+
+activateEliminate():
+  dmg = floor(60 × (2 + D) / 3) × 3        // 3 倍反噬
+  全场怪物各吃 dmg
+  拆掉 G.turrets[0]（最早生成的那座），删除其 loopKey（环重新武装）
 ```
 
-- **不产生被动、不占槽位、不吃槽位上限**
-- 配对的效果板也不登记成被动——两张牌一起烧掉
+- `G.eliminateCooldown` 在 `update()` 里每帧递减，`resetGame()` 归零
 - 场上无塔时照样造成伤害，只是不拆塔
+- 战斗界面右下角有一条 `🧹` 就绪 / 倒计时指示；桌面端提示条里也标了 `R`
+
+> **为什么从卡牌里拿掉**：它原本的代价只是"烧掉两张牌"，但抽到与否纯看运气，
+> 而效果量级（清场 + 拆塔）足以决定一波团战。挂在随机掉落上等于把节奏交给抽卡；
+> 变成带冷却的技能后，什么时候按成了玩家的决策。
 
 ### 被动槽位
 
@@ -998,6 +1082,16 @@ r = 55，life = 600 帧（10 秒）
 |:--|:--|:--|
 | E04「移速减慢」 | `00-data.js` / `02-combat.js` / `07-ui.js` / `10-sim.js` | 整块删除：`EFFECTS` 表项、`applyPassiveEffect` 的 `case 'E04'`、`removePassive` 的回退分支、模拟器的 `T07+E04` 优先级配对。和 E14「延缓」、轨迹迟缓三套减速重叠 |
 
+### v9.25 已清掉的（这一批删的）
+
+| 项 | 原位置 | 删的理由 |
+|:--|:--|:--|
+| `spawnAffixFire()` | `05-update.js` | 火焰区从「脚下留火轨迹」改成「落一个火圈」，它只服务这一条词条 |
+| `canvasPointFromTouch()` | `09-events.js` | 摇杆输入面从 `#gameCanvas` 换成 `.canvas-wrap`，改读 `clientX/clientY`，不再需要 canvas 坐标换算 |
+| `JOYSTICK.x` / `JOYSTICK.y` | `00-data.js` | 底座改成动态（按下的那一点），写死的圆心 (95, 105) 再没人读；`JOYSTICK.r` 保留作兜底 |
+| T13「消除」 | `00-data.js` `TRIGGERS` / `07-ui.js` / `10-sim.js` | 从手牌改成玩家技能（`R` / 手机端 🧹），见 §10 |
+| 图腾类型表的 `d`（伤害）列 + 塔实例的 `damage` 字段 | `04-trail.js` | 伤害改为开火时现算 `getPlayerAttackPower() × 0.4`，快照不再需要，见 §7 |
+
 ### 仍然存在的
 
 | 项 | 位置 | 状态 |
@@ -1014,7 +1108,7 @@ r = 55，life = 600 帧（10 秒）
 
 | 改什么 | 必须连带改 |
 |:--|:--|
-| `G.fireRate`（射速） | `p.shootCooldown`（`04-trail.js:83`）——两道独立闸门，只改一处不动 |
+| `G.fireRate`（射速） | `p.shootCooldown`（`04-trail.js` `autoShoot()`）——两道独立闸门，只改一处不动 |
 | 怪物基础血量 | 图腾血量（`04-trail.js:172`）与「图腾加固」的 +1（`00-data.js:394`）——塔血 ≈ 能挨几下，靠的是 `max(1, atk×0.05)` 的下限 1 |
 | `trailWidth` / 轨迹宽度类数值 | 踩踏判定（`05-update.js:235`）、围剿采样（`05-update.js:640`）两处都读同一个 `getTrailWidth()` |
 | `DIFF_KNEE` | `getEssenceCap()`（`01-state.js:174`）也用它当「后期」的分界，两者会一起变 |
@@ -1025,6 +1119,14 @@ r = 55，life = 600 帧（10 秒）
 | BOSS 血量乘子 | `BOSS_HP_MUL`（`00-data.js:229`）——改它只动血量，`天罚/终结技` 的手感要靠实测补 |
 | 清层卡数修正 | `CARD_EARLY_MUL` / `CARD_LATE_MUL` 与拐点（`00-data.js:241-247`）——拐点跟 `DIFF_KNEE` 共用，改难度拐点会一起动 |
 | 怪物移速手感 | 调 `05-update.js:202` 的 `× 1.33`，**不要**调 `baseSpeed`（生成时另有一次计算） |
+| `TURRET_ATK_RATIO`（0.4） | 与玩家攻击力 `getPlayerAttackPower()` 是一对——改它等于重定塔的输出档位；图腾类型表已**没有** `d` 列，改比例不会与类型表打架 |
+| `PLAYER_FIRE_RATE_MUL`（1.2） | `p.shootCooldown` 的**整条**表达式（含 `Math.max(24, …)` 地板）都要除以它，只除一半会出现地板倒挂 |
+| `AFFIX_ZONE_R_MUL` / `AFFIX_ZONE_MAX_PER_KIND` | `AFFIXES` 里三条 zone 的 `r` 是**基数**，实际半径靠乘子放大；改基数要连带看 `spawnRange`（落点下界用 `r × 1.2`） |
+| `FIRE_ZONE_TICK` / `FIRE_ZONE_DMG_PER_TICK` | 与玩家护盾上限（100）、火圈半径是一组——换算要按「穿过半秒 vs 站满 6 秒」两档实测算账 |
+| `bossEarlyMul()` / `BOSS_EARLY_RAMP_END` | 与 `BOSS_HP_MUL` **叠乘**；同时作用于 `getBossHp()` 与 `spawnBoss()` 的 `atk`，改一处不要漏另一处 |
+| `ENEMY_TOTEM_RANGE`（120） | 图腾索敌半径（`05-update.js`）——它决定敌人的塔能不能隔着半个屏幕压着玩家图腾打 |
+| 词缀分组（`bossOnly`） | 本表 §6 的两张表 + 图鉴 `CODEX_PAGES`（`07-ui.js`）+ 教程第 5 层字幕（`03-tutorial.js`）——三处文案要一起改 |
+| `ELIMINATE_COOLDOWN` | HUD 倒计时（`06-render.js`）、手机端 🧹 圆钮、桌面端 `<kbd>R</kbd>` 提示（`body.html`） |
 | 任何 9.x 数值 | 改 `src/9x/`，然后 `npm run build:game`——根目录 HTML 是产物 |
 
 ---

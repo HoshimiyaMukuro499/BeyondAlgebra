@@ -2,7 +2,7 @@
     // 键位归一化：优先读 e.code（物理键位）。
     // 中文输入法激活时浏览器把 e.key 报成 'Process'，只认 e.key 会让 WASD 整个失效。
     const KEY_CODE_MAP = {
-        KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd', KeyH: 'h', KeyP: 'p', KeyQ: 'q',
+        KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd', KeyH: 'h', KeyP: 'p', KeyQ: 'q', KeyR: 'r',
         Space: ' ', Enter: 'enter', Backquote: '`', Escape: 'escape', ShiftLeft: 'shift',
         ShiftRight: 'shift', ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down',
         Digit1: '1', Digit2: '2', Digit3: '3', Digit4: '4', Digit5: '5',
@@ -53,6 +53,9 @@
             } }
         if (k === 'q' && G.ultimateGauge >= G.ultimateMax && !G.ultimateActive && !G.gameOver && !G.paused) { e.preventDefault();
             activateUltimate(); }
+        // v9.25: R = 「消除」。不带就绪判断——tryEliminate() 里已经有冷却与局面的守卫，
+        // 而且冷却中按下去要给出「还要几秒」的反馈，那是它自己的事。
+        if (k === 'r') { e.preventDefault(); tryEliminate(); }
         if (k === ' ' || k === 'enter') { e.preventDefault();
             if (G.paused && G.triggerSlot && G.effectSlot) { queueBatchCombine(); }
             else if (!G.selectingActive && !G.paused) combineCards(); }
@@ -213,47 +216,95 @@
         Tutorial.codexPage = 0;
     }
 
-    // ---- 摇杆 ----
-    // 底座位置读的是 00-data.js 的 JOYSTICK，和 06-render.js 画出来的那一个同源。
-    function canvasPointFromTouch(t) {
-        const rect = canvas.getBoundingClientRect();
-        const sx = canvas.width / rect.width;
-        const sy = canvas.height / rect.height;
-        return {
-            x: clamp((t.clientX - rect.left) * sx, 0, 780),
-            y: clamp((t.clientY - rect.top) * sy, 0, 560),
-        };
+    // ---- 动态摇杆（v9.25 重做，同时修掉「一进游戏就不动」）----
+    // v9.24 把 touchstart 挂在 #gameCanvas 上。但横屏时 canvas 是 780:560 等比缩放、
+    // max-height:100%，手机屏比 780:560 宽得多，所以 canvas 只占屏幕中间一块，
+    // 左右各留一条黑边；铺满全屏的 .canvas-wrap 反倒没有任何监听。拇指的自然落点
+    // （屏幕左下角、黑边）根本收不到事件——游戏在跑，就是不走。底座还被写死在画面内
+    // 的 (95,455)，即使按在画面里也得先对准那个固定点。
+    // 现在：监听挂 .canvas-wrap（100vw × 100%），判定改成屏幕坐标的左半屏，
+    // 底座在按下那一刻就地生成，视觉走 DOM（要能画在 canvas 之外的黑边上）。
+    function joyRadiusPx() {
+        const h = canvas.getBoundingClientRect().height;
+        // 屏幕上的摇杆半径要跟着画面缩放走，否则同一只手在大小屏上手感差一倍。
+        return Math.max(38, JOYSTICK.r * (h / 560 || 1));
     }
+
+    // 尺寸只跟画面缩放有关，按下那一刻量一次就够——不必每帧写 style 触发布局。
+    function sizeJoyVisual(R) {
+        const d = R * 2 + 'px';
+        const base = document.getElementById('joyBase');
+        const hint = document.getElementById('joyHint');
+        const knob = document.getElementById('joyKnob');
+        // 用负 margin 把圆心对到 left/top 那个点上，之后 translate 就能直接用屏幕坐标。
+        if (base) { base.style.width = d; base.style.height = d; base.style.margin = `${-R}px 0 0 ${-R}px`; }
+        if (hint) { hint.style.width = d; hint.style.height = d; }
+        if (knob) {
+            const k = Math.max(22, R * 0.46);
+            knob.style.width = k + 'px';
+            knob.style.height = k + 'px';
+            knob.style.margin = `${-k / 2}px 0 0 ${-k / 2}px`;
+        }
+    }
+
     function setStickFromTouch(t) {
-        const p = canvasPointFromTouch(t);
-        const jx = JOYSTICK.x, jy = (G.canvasHeight || 560) - JOYSTICK.y;
-        let dx = p.x - jx, dy = p.y - jy;
+        // 按下的那一点就地成为底座；拖动时底座不动、只动旋钮。主流手游都这么做——
+        // 手指不用回头找圆心，方向来自相对位移，拇指落在哪都能立刻开始走。
+        if (!G.stickBase) {
+            G.stickBase = { x: t.clientX, y: t.clientY };
+            sizeJoyVisual(joyRadiusPx());
+            const base = document.getElementById('joyBase');
+            const hint = document.getElementById('joyHint');
+            if (base) {
+                base.classList.add('active');
+                base.style.transform = `translate(${G.stickBase.x}px, ${G.stickBase.y}px)`;
+            }
+            if (hint) hint.classList.add('hidden');
+        }
+        const R = joyRadiusPx();
+        let dx = t.clientX - G.stickBase.x, dy = t.clientY - G.stickBase.y;
         const d = Math.hypot(dx, dy);
-        if (d > JOYSTICK.r && d > 0) { dx = dx / d * JOYSTICK.r; dy = dy / d * JOYSTICK.r; }
-        G.stick.x = dx / JOYSTICK.r;
-        G.stick.y = dy / JOYSTICK.r;
+        if (d > R && d > 0) { dx = dx / d * R; dy = dy / d * R; }
+        G.stick.x = dx / R;   // 归一化 -1..1，保留模拟量：轻推慢走、满推快跑
+        G.stick.y = dy / R;
         G.stickActive = true;
+        const knob = document.getElementById('joyKnob');
+        if (knob) knob.style.transform = `translate(${dx}px, ${dy}px)`;
     }
+
+    // 收起摇杆视觉。resetGame() 也会调它——重开一局却还留着上一局按住的圆环很出戏。
+    function resetJoystickVisual() {
+        const base = document.getElementById('joyBase');
+        const hint = document.getElementById('joyHint');
+        if (base) base.classList.remove('active');
+        if (hint) hint.classList.remove('hidden');
+    }
+
     function releaseStick() {
         G.stick.x = 0; G.stick.y = 0;
         G.stickActive = false;
+        G.stickBase = null;
         G._stickTouchId = null;
+        resetJoystickVisual();
     }
 
-    canvas.addEventListener('touchstart', e => {
-        if (!G.mobileMode) return;
+    const canvasWrap = document.querySelector('.canvas-wrap');
+
+    if (canvasWrap) canvasWrap.addEventListener('touchstart', e => {
+        if (!G.mobileMode || G.drawerOpen) return;
         const t = e.changedTouches && e.changedTouches[0];
         if (!t) return;
-        // 只接管落在摇杆那一侧的触摸。右半屏没有射击需求（自动开火），
-        // 留给屏幕按钮，免得拇指按大招时把角色一起带跑。
-        const p = canvasPointFromTouch(t);
-        if (p.x > 400) return;
+        // 只接管左半屏。右半屏没有射击需求（自动开火），留给屏幕按钮，
+        // 免得拇指按大招时把角色一起带跑。
+        // 判定留在监听器里、用屏幕坐标：探针的假 window 没有 innerWidth，
+        // 放进 setStickFromTouch 会让测试崩在无关的地方。
+        if (t.clientX > window.innerWidth * 0.5) return;
         e.preventDefault();
         G._stickTouchId = t.identifier;
         setStickFromTouch(t);
     }, { passive: false });
 
-    canvas.addEventListener('touchmove', e => {
+    if (canvasWrap) canvasWrap.addEventListener('touchmove', e => {
         if (!G.mobileMode || !G.stickActive) return;
         const list = e.changedTouches;
         if (!list) return;
@@ -266,7 +317,7 @@
         }
     }, { passive: false });
 
-    canvas.addEventListener('touchend', e => {
+    if (canvasWrap) canvasWrap.addEventListener('touchend', e => {
         if (!G.mobileMode) return;
         // 只有「按着摇杆的那根手指」抬起才松手，别的指头抬起来不影响移动
         const list = e.changedTouches;
@@ -275,7 +326,7 @@
             if (list[i].identifier === G._stickTouchId) { releaseStick(); return; }
         }
     });
-    canvas.addEventListener('touchcancel', () => { if (G.mobileMode) releaseStick(); });
+    if (canvasWrap) canvasWrap.addEventListener('touchcancel', () => { if (G.mobileMode) releaseStick(); });
 
     // ---- 屏幕按钮 ----
     // 全部复用现有入口（G.keys / activateUltimate / Tutorial.codexOpen），
@@ -303,6 +354,10 @@
             activateUltimate();
         }
     });
+    // 🧹 消除：桌面端按 R 走的同一个入口。
+    bindMobileButton('mobileElimBtn', () => tryEliminate());
+    // 死亡后战斗界面上的重开按钮（只在 body.mobile 下显示，见 styles.css）
+    bindMobileButton('gameoverRestart', () => resetGame());
     bindMobileButton('mobileFullscreenBtn', toggleFullscreen);
     bindMobileButton('mobileCodexBtn', toggleCodex);
     bindMobileButton('drawerToggleBtn', () => setDrawer(!G.drawerOpen));
@@ -322,4 +377,30 @@
     G.mobileMode = detectMobileMode();
     applyMobileLayout();
     syncFullscreenBtns();
+
+    // ---- 全屏引导（v9.25）----
+    // requestFullscreen() 必须由用户手势触发，所以只能做「点一下再进」。此前只在顶栏
+    // 放了个 ⛶ 小按钮，玩家注意不到，进去也只是个带地址栏的窄条。
+    // 盖在 #classOverlay 之上（z-index 更高，见 styles.css），点掉之后才露出职业选择。
+    // active 只在这里加这一次、resetGame() 全程不碰——「只弹一次」是结构自带的，
+    // 不需要再存一个 flag。
+    const fsOverlay = document.getElementById('fsOverlay');
+    if (G.mobileMode && fsOverlay) {
+        if (!document.fullscreenElement) fsOverlay.classList.add('active');
+        const enterFullscreenOnce = () => {
+            // 无论成功与否都摘掉这一层：iOS Safari 不支持 documentElement 全屏，
+            // 不能让玩家卡在引导页上进不去。
+            fsOverlay.classList.remove('active');
+            toggleFullscreen();
+        };
+        fsOverlay.addEventListener('touchend', e => { e.preventDefault(); enterFullscreenOnce(); }, { passive: false });
+        fsOverlay.addEventListener('mousedown', e => { e.preventDefault(); enterFullscreenOnce(); });
+    }
+
+    // 闲置提示环的尺寸要在第一次按下之前就量准，所以开局先算一次。
+    // 转屏 / 地址栏收放都会改画面高度，摇杆半径跟着变——没在按的时候补量一次。
+    if (G.mobileMode) sizeJoyVisual(joyRadiusPx());
+    window.addEventListener('resize', () => {
+        if (G.mobileMode && !G.stickActive) sizeJoyVisual(joyRadiusPx());
+    });
 

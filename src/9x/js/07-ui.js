@@ -150,6 +150,15 @@
         el.innerHTML = `<span class="tag" style="background:${color}33;color:${color};">✦</span> ${msg}`;
     }
 
+    // v9.25: 手机端死亡后的重开入口。桌面端侧栏里那个「↺ 重开」够用，
+    // 但手机端 .panel 是收起的抽屉，战斗界面上没有任何可点的重开按钮——
+    // 所以在 canvas 上层再放一个，只在 G.gameOver 时亮起（CSS 里限 body.mobile）。
+    function syncGameOverUI() {
+        const el = document.getElementById('gameoverRestart');
+        if (!el) return;
+        el.classList.toggle('active', !!G.gameOver);
+    }
+
     // ---------- 平衡掉落 ----------
     function dropBalancedCard() {
         const trigCount = G.hand.filter(c => c.type === 'trigger').length;
@@ -158,7 +167,7 @@
         if (trigCount < effCount) dropType = 'trigger';
         else if (effCount < trigCount) dropType = 'effect';
         else dropType = Math.random() < 0.5 ? 'trigger' : 'effect';
-        // v9.21: 触发板走加权抽取（T13 只有一半概率）
+        // v9.21: 触发板走加权抽取（T08 权重 0.7；T13 已于 v9.25 移出触发板）
         // v9.23: 效果板也开始加权（E02/E11 出率 -30%）
         const card = dropType === 'trigger' ? randomTrigger() : randomEffect();
         if (G.hand.length >= 20) {
