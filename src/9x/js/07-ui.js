@@ -351,8 +351,8 @@
     // ---------- v9.7 可视化蜿蜒地图 ----------
     function showNodeMap() {
         G.selectingActive = true; G.mapMode = true;
-        canvas.style.pointerEvents = 'auto';
-        canvas.parentElement.style.pointerEvents = 'auto'; // 两层都要解禁
+        // v9.26: 走统一入口——手机端不碰 .canvas-wrap（摇杆的输入面），见 setCanvasPointer 的注释
+        setCanvasPointer(true);
         const pool = [...NODE_POOL];
         const available = pool.filter(n => {
             if (n.id === 'boss') return (G.floor % 10 === 9);
@@ -376,8 +376,9 @@
         // v9.7: 记录路径历史（用于蜿蜒地图）
         G.pathHistory.push({ dir: dir || 'center', nodeId: node.id, floor: G.floor });
         G.mapMode = false; G.selectingActive = false;
-        canvas.style.pointerEvents = 'none';
-        canvas.parentElement.style.pointerEvents = 'none';
+        // v9.26: 同上去统一入口。**这里就是摇杆失灵的现场**——以前这两行把
+        // .canvas-wrap 也设回 none，手机端选完第一层路就再也走不动了。
+        setCanvasPointer(false);
         if (node.isMerchant || node.isRest) { handleNonCombatNode(node.id); return; }
         G.stageType = node.stageType || 'mixed';
         advanceFloor();

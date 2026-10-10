@@ -1,156 +1,176 @@
+    // ============================================================
+    //  v9.26 五块石板：移动方式 → 图腾生成 → 密文版 → 敌人 → 核心
+    // ============================================================
+    // 顺序是用户定的。两点值得记下来：
+    //   1. **闭环图腾排在密文版前面**。判环只看轨迹本身（04-trail.js 的 checkTrailLoop），
+    //      没填任何牌时 turType 默认 'basic'——所以「画个圈就出一座塔」不需要先学密文版。
+    //      第 3 块石板再回头讲「T12 绑什么效果板，塔就是什么类型」，两边正好接上。
+    //   2. **「敌人」与「核心」拆成两块石板**，而不是挤在同一块里。这不只是篇幅问题：
+    //      属性三选一与节点地图都挂在 `G.floor % 5 === 0` 上（05-update.js 的波次清空分支），
+    //      收尾字幕又必须等玩家在节点地图上选完路才播（Tutorial.outroPending）。
+    //      也就是说教程至少要走到第 5 层，收尾才会有入口——把核心放在第 5 块正好顺水推舟。
+    //
+    // ---------- 字幕节奏：两条提示之间 3 秒 ± 1 秒 ----------
+    // 一条字幕的显示时长是它自己的 `hold`（帧），下一条的出场还要再等它的 `d`（帧）。
+    // 所以相邻两条**由计时器驱动**的字幕（on: 'enter' / 'after' / 'map'）之间的间隔
+    // 就是 `上一条.hold + 下一条.d`。用户要求 3s ± 1s ⇒ 这个和必须落在 120 ~ 240 帧
+    // （3 秒 = 180 帧，±1 秒 = ±60 帧），长句取上限、短句取下限，
+    // 相邻几条之间的差值本身就是那 ±1 秒的手感。改任何一条 hold/d 都要重新对这个账，
+    // 探针第 16 节末尾会逐层逐条核对。
+    // 等玩家动手的步骤（gate / move / kill / slots / essence / event / clear）间隔由玩家决定，
+    // 不在这个约束里；但它们的 `hold` 照样压在 150~180，别让字幕赖在屏幕上不走。
     const TUTORIAL_FLOORS = {
         1: {
-            title: '你的轨迹就是武器',
+            title: '移动方式',
             hpMul: 0.6,
             spawnInterval: 90,
             spawn: [{ type: 'basic', n: 4 }],
             steps: [
                 { kind: 'banner', on: 'enter', hold: 120 },
-                { on: 'enter', d: 20, gate: true, point: 'player', hold: 360,
-                  text: '按 W A S D 移动，脚下会拖出一条蓝色轨迹。怪物踩上去会持续掉血。',
+                { on: 'enter', d: 60, gate: true, point: 'player', hold: 150,
+                  text: '按 W A S D 移动，脚下会拖出一条蓝色轨迹。怪物踩上去会持续掉血——轨迹就是你的武器。',
                   fallback: '用键盘的 W A S D 四个键移动角色。' },
-                { on: 'move', n: 300, hold: 360,
+                { on: 'move', n: 300, hold: 150,
                   text: '怪物会一直朝核心逼近，路上会自己绕开石头——它们不会停。',
                   fallback: '先随便走一走，比如绕一个方形。' },
-                { on: 'sprint', gate: true, point: 'player', hold: 400,
+                { on: 'sprint', gate: true, point: 'player', hold: 180,
                   text: '按住 Shift 冲刺：轨迹更宽、更亮，伤害 ×2.5。这是你最快的输出手段。',
                   fallback: '按住键盘左下角的 Shift 键，同时按 W A S D 移动。' },
-                { on: 'kill', n: 1, hold: 380,
-                  text: '轨迹不再挡路：怪物踩上去会迟缓 3 秒。贴着怪画，把它们拖在你身后。',
+                { on: 'kill', n: 1, hold: 150,
+                  text: '轨迹不挡路：怪物踩上去会迟缓 3 秒。贴着怪画，把它们拖在你身后。',
                   fallback: '靠近怪物，让自动射击打死一只。' },
-                { on: 'after', d: 180, hold: 360,
+                { on: 'after', d: 40, hold: 150,
                   text: '本作是楼层制——每层清空后，你自己选下一层走哪条路。' },
-                { on: 'clear', hold: 360,
-                  text: '清空一层。接下来是属性三选一，选完打开节点地图。' },
+                { on: 'clear', hold: 150,
+                  text: '清空一层。' },
             ],
         },
         2: {
-            title: '子弹、护盾与精华',
+            title: '图腾生成',
             spawnInterval: 60,
             spawn: [{ type: 'basic', n: 4 }],
             drops: [{ on: 'kill', n: 2, card: 'T07' }, { on: 'kill', n: 4, card: 'E01' }],
             steps: [
                 { kind: 'banner', on: 'enter', hold: 120 },
-                { on: 'enter', d: 60, hold: 380,
-                  text: '子弹自动瞄准，优先级：治疗 💚 → 精英 ⭐ → BOSS 👑 → 最近的怪。' },
-                { on: 'event', name: 'hit', needsMob: true, point: 'core', hold: 420,
-                  text: '怪物撞核心时，先扣 🛡️ 护盾；护盾归零后才会伤到核心 HP。',
-                  fallback: '让怪物靠近中央的核心，看它撞上去会怎样。' },
-                { on: 'event', name: 'pickup', needsMob: true, point: 'hand', hold: 380,
-                  text: '击杀掉卡。手牌上限 20 张，满了自动替换最老的一张。',
-                  fallback: '再打死几只怪，等它掉一张牌。' },
-                { on: 'after', d: 120, spawn: [{ type: 'fast', n: 2 }],
-                  point: 'monsters', pointType: 'fast', pointLabel: '💨 疾速怪', hold: 420,
-                  text: '💨 疾速怪登场：跑得快但很脆，优先清掉它们。' },
-                { on: 'essence', n: 1, hold: 420,
-                  text: '💎 精华是货币，击杀获得。攒够了去 🧙 商人 那里买牌、买遗物。' },
-                { on: 'after', d: 240, hold: 400,
-                  text: '楼层难度 = 1.16^(楼层-1)：每层强 16%。30 层后增速放缓，但永远不会停。' },
-                { on: 'clear', hold: 360,
+                { on: 'enter', d: 60, hold: 160,
+                  text: '用轨迹在地上画一个圈，首尾接上——就能召唤 🗼 图腾。' },
+                { on: 'event', name: 'loop', gate: true, point: 'turret', hold: 180,
+                  text: '⭕ 闭环成立！图腾会自动攻击范围内最近的怪物。它现在有血量，被打光才会碎。',
+                  fallback: '绕一个大圈回到起点，把轨迹首尾接上。' },
+                { on: 'after', d: 40, hold: 180,
+                  text: '闭环越大，图腾越强也越结实：🥉小环 ×0.6 · 2血 / 🥈中环 ×1.0 · 4血 / 🥇大环 ×1.5 · 6血。全场最多 10 座。' },
+                { on: 'after', d: 40, hold: 160,
+                  text: '注意：图腾泡在火焰里会被烧掉血——包括灼烧怪留下的火。别把塔画在火里。' },
+                { on: 'after', d: 40, hold: 150,
+                  text: '怪物会去打「图腾与核心」里离自己更近的那一个——把塔摆在它们必经的路上。' },
+                { on: 'clear', hold: 150,
                   text: '清空一层。' },
             ],
         },
         3: {
-            title: '密文板 · 本作的核心',
+            title: '密文版',
             spawnInterval: 70,
             hand: ['T06', 'E10'],
             spawn: [{ type: 'basic', n: 3 }],
-            drops: [{ on: 'killType', type: 'healer', card: 'T07' },
-                    { on: 'killType', type: 'healer', card: 'E12' }],
+            drops: [{ on: 'kill', n: 3, card: 'T07' }, { on: 'kill', n: 6, card: 'E12' }],
             steps: [
                 { kind: 'banner', on: 'enter', hold: 120 },
-                { on: 'enter', d: 60, gate: true, point: 'hand', hold: 440,
-                  text: '左边蓝色是触发板，右边红色是效果板。点手牌，把它填进对应的槽位。',
+                { on: 'enter', d: 60, gate: true, point: 'hand', hold: 180,
+                  text: '密文版是本作的核心。左边蓝色是触发板，右边红色是效果板——点手牌，把它填进对应的槽位。',
                   fallback: '用鼠标点手牌区里的 🐾怪触轨 和 🔄怪物反噬，各点一下。' },
-                { on: 'slots', gate: true, point: 'combine', hold: 440,
+                { on: 'slots', gate: true, point: 'combine', hold: 150,
                   text: '两个槽位都填好了。现在按 空格 宣读组合。',
                   fallback: '按下键盘的空格键。' },
-                { on: 'event', name: 'combine', hold: 420,
+                { on: 'event', name: 'combine', hold: 180,
                   text: '两张牌消耗了，变成永久被动：怪物踩到轨迹时，全场怪物互相伤害。' },
-                { on: 'event', name: 'chair', point: 'player', hold: 420,
+                { on: 'event', name: 'chair', point: 'player', hold: 150,
                   text: '🦽 轮椅组合「轨迹反噬」！看你的轨迹——它变成红色火焰了。' },
-                { on: 'after', d: 240, hold: 460,
+                { on: 'after', d: 40, hold: 180,
                   text: '6 组特定搭配会激活轮椅组合：额外数值加成 + 轨迹外观改变。它们是设计者明说的「通关答案」。' },
-                { on: 'enter', d: 30, gate: true, point: 'hand', hold: 440,
+                { on: 'after', d: 40, gate: true, point: 'hand', hold: 180,
                   autofill: ['T07', 'E12'],
                   text: '手牌里现在有 🎯射击命中 和 ⚡闪电链——再填一次槽位，按 空格 宣读。',
                   fallback: '点手牌里的 🎯射击命中 和 ⚡闪电链，然后按空格。' },
-                { on: 'event', name: 'combine2', hold: 420,
+                { on: 'event', name: 'combine2', hold: 160,
                   text: '⚡ 轮椅组合「连锁风暴」！轨迹变金色，射速 +2，子弹变成闪电链。' },
-                { on: 'after', d: 120, spawn: [{ type: 'healer', n: 2 }],
-                  point: 'monsters', pointType: 'healer', pointLabel: '💚 治疗怪', hold: 420,
-                  text: '💚 治疗怪登场：它会给周围同伴回血，优先集火。' },
-                { on: 'after', d: 240, hold: 460,
-                  text: '轨迹一共 4 种外观：基础蓝 / 火焰红 / 冰霜白 / 雷电金，由你激活的轮椅组合自动决定。' },
-                { on: 'after', d: 240, spawn: [{ type: 'tank', n: 2 }],
-                  point: 'monsters', pointType: 'tank', pointLabel: '🛡️ 重装怪', hold: 420,
-                  text: '🛡️ 重装怪登场：血厚但慢，交给轨迹磨。' },
-                { on: 'after', d: 240, hold: 460,
+                { on: 'after', d: 40, hold: 180,
+                  text: '回头看你第 2 层的塔：T12 绑的效果板决定图腾类型，E01→速射 / E12→雷电 / E13→冰霜 / E06→轨迹。' },
+                { on: 'after', d: 40, hold: 160,
                   text: '按 P 可以批量宣读：战场冻结，把组合排进队列，一次全部生效。' },
-                { on: 'clear', hold: 400,
+                { on: 'after', d: 40, hold: 150,
+                  text: '手牌上限 20 张，满了自动替换最老的一张。' },
+                { on: 'clear', hold: 150,
                   text: '清空一层。' },
             ],
         },
         4: {
-            title: '画一个闭环',
+            title: '敌人',
             spawnInterval: 70,
             spawn: [{ type: 'basic', n: 4 }],
-            drops: [{ on: 'kill', n: 1, card: 'T12' }, { on: 'kill', n: 2, card: 'E12' }],
+            drops: [{ on: 'killElite', card: 'T10' }, { on: 'killElite', card: 'E03' }],
             steps: [
                 { kind: 'banner', on: 'enter', hold: 120 },
-                { on: 'enter', d: 60, hold: 420,
-                  text: '用轨迹在地上画一个圈，首尾接上——就能召唤 🗼 图腾。' },
-                { on: 'event', name: 'pickup2', gate: true, point: 'hand', hold: 460,
-                  autofill: ['T12', 'E12'],
-                  text: '先把 ⭕闭环触发 和 ⚡闪电链 填进槽位宣读——这样闭环召唤的就是雷电图腾。',
-                  fallback: '点手牌里的 ⭕闭环触发 和 ⚡闪电链，然后按空格。' },
-                { on: 'event', name: 'loop', gate: true, hold: 460,
-                  text: '⭕ 闭环成立！图腾会自动攻击范围内最近的怪物。它现在有血量，被打光才会碎。',
-                  fallback: '绕一个大圈回到起点，把轨迹首尾接上。' },
-                { on: 'after', d: 180, hold: 460,
-                  text: '闭环越大，图腾越强也越结实：🥉小环 ×0.6 · 2血 / 🥈中环 ×1.0 · 4血 / 🥇大环 ×1.5 · 6血。全场最多 10 座。' },
-                { on: 'after', d: 240, hold: 460,
-                  text: '注意：图腾泡在火焰里会被烧掉血——包括灼烧怪留下的火。别把塔画在火里。' },
-                { on: 'after', d: 240, hold: 480,
-                  text: '图腾类型由 T12 绑定的效果板决定：E01→速射 / E12→雷电 / E13→冰霜 / E06→轨迹。' },
-                { on: 'after', d: 240, hold: 480,
-                  text: '💧 冰冻 E13 和 🐢 延缓 E14 现在是范围技：命中目标周围 225px 内的怪一起吃，不再只打一只。' },
-                { on: 'after', d: 240, hold: 480,
-                  text: '🔒 围剿：怪物周围 8 个方向被轨迹封住 6 个以上，就会触发包围伤害 + 眩晕。' },
-                { on: 'event', name: 'enclosure', needsMob: true, hold: 420,
-                  text: '包围成功！锁死它们的走位——这一招在后期很关键。',
-                  fallback: '用轨迹把一只怪围起来，八个方向堵住六个以上。' },
-                { on: 'after', d: 120, spawn: [{ type: 'scorcher', n: 2 }],
-                  point: 'monsters', pointType: 'scorcher', pointLabel: '🔥 灼烧怪', hold: 420,
-                  text: '🔥 灼烧怪登场：它走过的地方会留下火焰轨迹。' },
-                { on: 'event', name: 'scorcher', needsMob: true, hold: 420,
-                  text: '火焰会烧到你——把它引到远离核心的地方，别站在火里。' },
-                { on: 'clear', hold: 420,
-                  text: '第 8 层起灼烧怪会正式登场，第 12 层起是 👻 虚灵怪。' },
+                { on: 'enter', d: 60, hold: 150,
+                  text: '子弹自动瞄准，优先级：治疗 💚 → 精英 ⭐ → BOSS 👑 → 最近的怪。' },
+                { on: 'after', d: 40, spawn: [{ type: 'fast', n: 2 }],
+                  point: 'monsters', pointType: 'fast', pointLabel: '💨 疾速怪', hold: 160,
+                  text: '💨 疾速怪：跑得快但很脆，优先清掉它们。' },
+                { on: 'after', d: 40, spawn: [{ type: 'healer', n: 2 }],
+                  point: 'monsters', pointType: 'healer', pointLabel: '💚 治疗怪', hold: 160,
+                  text: '💚 治疗怪：会给周围同伴回血，优先集火。' },
+                { on: 'after', d: 40, spawn: [{ type: 'tank', n: 2 }],
+                  point: 'monsters', pointType: 'tank', pointLabel: '🛡️ 重装怪', hold: 160,
+                  text: '🛡️ 重装怪：血厚但慢，交给轨迹磨。' },
+                { on: 'after', d: 40, spawn: [{ type: 'scorcher', n: 2 }],
+                  point: 'monsters', pointType: 'scorcher', pointLabel: '🔥 灼烧怪', hold: 160,
+                  text: '🔥 灼烧怪：走过的地方会留下火焰轨迹。第 8 层起正式登场。' },
+                { on: 'event', name: 'scorcher', needsMob: true, hold: 150,
+                  text: '火焰也会烧到你——把它引到远离核心的地方，别站在火里。',
+                  fallback: '等灼烧怪走过，看它留下的火焰轨迹。' },
+                { on: 'after', d: 40, spawn: [{ type: 'wraith', n: 1 }],
+                  point: 'wraith', hold: 160,
+                  text: '👻 虚灵怪：免疫轨迹伤害，只能用子弹打。第 12 层起正式登场。' },
+                { on: 'after', d: 40, spawn: [{ type: 'basic', n: 1, elite: true }],
+                  point: 'elite', hold: 180,
+                  text: '⭐ 精英怪登场，带词缀。精英只从 6 个老词缀里抽：💚再生 🌿荆棘 💨迅捷 🦍巨人 🩸吸血 💥爆裂。',
+                  fallback: '场上那只更大、带 ⭐ 的怪就是精英。' },
+                { on: 'after', d: 40, hold: 180,
+                  text: '另外 8 个干扰类（🟥削减区 🟦减速区 🔥火焰区 🌀突进 🌪牵引 🔒封印 👥群生 🗿敌图腾）是 👑 BOSS 专属，精英永远不会带。' },
+                { on: 'after', d: 40, hold: 150,
+                  text: '🧬 分裂怪死后会裂成 4 只子体，越拖越难清——先手打掉它。' },
+                { on: 'clear', hold: 150,
+                  text: '清空一层。' },
             ],
         },
         5: {
-            title: '精英、虚灵与终极技',
+            title: '核心',
             spawnInterval: 60,
             ultFull: true,
             spawn: [{ type: 'basic', n: 4 }, { type: 'fast', n: 2 }],
-            drops: [{ on: 'killElite', card: 'T10' }, { on: 'killElite', card: 'E03' }],
+            drops: [{ on: 'kill', n: 2, card: 'T02' }, { on: 'kill', n: 4, card: 'E07' }],
             next: 'NODEMAP',
             steps: [
                 { kind: 'banner', on: 'enter', hold: 120 },
-                { on: 'enter', d: 60, spawn: [{ type: 'basic', n: 1, elite: true }],
-                  point: 'elite', hold: 480,
-                  text: '⭐ 精英怪登场，带词缀。精英只从 6 个老词缀里抽：💚再生 🌿荆棘 💨迅捷 🦍巨人 🩸吸血 💥爆裂。另外 8 个干扰类（🟥削减区 🟦减速区 🔥火焰区 🌀突进 🌪牵引 🔒封印 👥群生 🗿敌图腾）是 👑 BOSS 专属，精英永远不会带。',
-                  fallback: '场上那只更大、带 ⭐ 的怪就是精英。' },
-                { on: 'enter', d: 360, spawn: [{ type: 'wraith', n: 1 }],
-                  point: 'wraith', hold: 440,
-                  text: '👻 虚灵怪登场：它免疫轨迹伤害，只能用子弹打。第 12 层起正式登场。' },
-                { on: 'enter', d: 660, gate: true, hold: 440,
+                { on: 'enter', d: 60, hold: 160,
+                  text: '画面正中是你要守住的 💠 核心：核心 HP 归零，这一局就结束了。' },
+                { on: 'event', name: 'hit', needsMob: true, point: 'core', hold: 180,
+                  text: '怪物撞核心时，先扣 🛡️ 护盾；护盾归零后才会伤到核心 HP。',
+                  fallback: '让怪物靠近中央的核心，看它撞上去会怎样。' },
+                { on: 'essence', n: 1, hold: 150,
+                  text: '💎 精华是货币，击杀获得。攒够了去 🧙 商人 那里买牌、买遗物。' },
+                { on: 'after', d: 40, gate: true, hold: 160,
                   text: '⚡ 你的终极技已充满。按 Q 释放「轨迹风暴」——引爆全场轨迹，全体眩晕 2 秒。',
                   fallback: '按键盘的 Q 键。' },
-                { on: 'event', name: 'ultimate', hold: 420,
+                { on: 'event', name: 'ultimate', hold: 160,
                   text: '充能不看伤害，按固定速度回：回满要 25 秒 ÷ (1 + 楼层/50)。第 40 层起再快 ×1.5。' },
-                { on: 'clear', hold: 480,
+                { on: 'after', d: 40, hold: 160,
+                  text: '🔒 围剿：怪物周围 8 个方向被轨迹封住 6 个以上，就会触发包围伤害 + 眩晕。' },
+                { on: 'event', name: 'enclosure', needsMob: true, hold: 150,
+                  text: '包围成功！锁死它们的走位——这一招在后期很关键。',
+                  fallback: '用轨迹把一只怪围起来，八个方向堵住六个以上。' },
+                { on: 'after', d: 40, hold: 150,
+                  text: '楼层难度 = 1.16^(楼层-1)：每层强 16%。30 层后增速放缓，但永远不会停。' },
+                { on: 'clear', hold: 180,
                   text: '每 5 层一次属性三选一，永久成长：攻击 +3 / 回血 30% / 移速 +5% / 轨迹伤害 +1。' },
             ],
         },
@@ -161,9 +181,11 @@
         title: '你自己选路',
         wait: true,
         steps: [
-            { kind: 'banner', on: 'map', hold: 140, text: '古老的石板-5 · 你自己选路' },
-            { on: 'map', d: 40, hold: 520,
-              text: '9 种节点：⚔️战斗 💨疾驰 🛡️攻城 🔥烈火 👻幽灵 ⭐精英 🧙商人 🏕️休整 👑BOSS。每层自己选。' },
+            // 不写 text：show() 会用「古老的石板-<当前层> · <cfg.title>」自动拼，
+            // 层号跟着教程实际停在哪一层走，不会因为石板数量变了就对不上（v9.26 去掉硬编码的「-5」）。
+            { kind: 'banner', on: 'map', hold: 140 },
+            { on: 'map', d: 40, hold: 150,
+              text: '9 种节点：⚔️战斗 💨疾驰 🛡️攻城 🔥烈火 👻幽灵 ⭐精英 🧙商人 🏕️休整 👑BOSS。选完就进下一层。' },
         ],
     };
 
@@ -172,12 +194,12 @@
     const TUTORIAL_OUTRO = {
         title: '从这里开始是你的冒险',
         steps: [
-            { kind: 'banner', on: 'enter', hold: 150, text: '教程结束 · 从这里开始是你的冒险' },
-            { on: 'after', d: 180, hold: 520,
+            { kind: 'banner', on: 'enter', hold: 150 },
+            { on: 'after', d: 40, hold: 150,
               text: '还没讲到的，正式开局后会自己撞上：🎁 遗物、🧙 商人、🔮 命运抉择（每 10 层）、👑 BOSS（每 10 层）。' },
-            { on: 'after', d: 360, hold: 520,
+            { on: 'after', d: 40, hold: 150,
               text: '随时按 H 打开机制图鉴，全部机制都在里面。' },
-            { on: 'after', d: 360, hold: 620,
+            { on: 'after', d: 40, hold: 180,
               text: '🎓 教程到此为止。接下来会清空教程里获得的密文版 / 被动 / 精华 / 得分，让你重选一次职业，从第 1 层正式开始。' },
         ],
     };
@@ -731,11 +753,27 @@
         });
     }
 
+    // v9.26: canvas 与 .canvas-wrap 的 pointer-events **只从这一个入口改**。
+    // 桌面端两层都要一起开，鼠标事件才落得到 canvas 上（styles.css 里两层默认都是 none）。
+    // 手机端**绝不能碰 .canvas-wrap**：摇杆的 touchstart/touchmove 就挂在它身上
+    // （见 09-events.js），而 styles.css 写着 `body.mobile .canvas-wrap { pointer-events: auto }`
+    // ——inline 的 'none' 会把它盖掉，整块战斗界面当场收不到任何触摸。
+    // 这正是「选择层数之后手机端摇杆不动」的成因：showNodeMap() 打开时把两层设成 auto，
+    // selectNode() 选完关掉时又把两层设回 none，于是玩家第一次选完路之后摇杆就永久失灵
+    // （9.24 挂在 canvas 上时也是同一条路径，两次都没修到根上）。
+    // 手机端关掉 canvas 自身就够了：触摸会穿透到父层 .canvas-wrap，摇杆照样能收到。
+    function setCanvasPointer(want) {
+        canvas.style.pointerEvents = want ? 'auto' : 'none';
+        if (!G.mobileMode && canvas.parentElement) {
+            canvas.parentElement.style.pointerEvents = want ? 'auto' : 'none';
+        }
+    }
+
     // 教程角标 / 图鉴要能点击，所以教程期间强制放开 canvas 的鼠标事件
     function tutorialSyncPointer() {
         if (G.simMode) return;
         const want = G.mapMode || Tutorial.active || Tutorial.codexOpen || !Tutorial.seen;
-        canvas.style.pointerEvents = want ? 'auto' : 'none';
+        setCanvasPointer(want);
     }
 
     // ---------- 教程渲染 ----------

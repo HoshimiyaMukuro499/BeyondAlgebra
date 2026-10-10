@@ -291,7 +291,10 @@
     const canvasWrap = document.querySelector('.canvas-wrap');
 
     if (canvasWrap) canvasWrap.addEventListener('touchstart', e => {
-        if (!G.mobileMode || G.drawerOpen) return;
+        // v9.26: 选路 / 选属性 / 商店期间不接管触摸。这些浮层开着的时候移动没有意义，
+        // 而这里的 e.preventDefault() 会连带掐掉浏览器合成的那一次 mousedown——
+        // 节点地图是画在 canvas 上、靠 mousedown 选点的，左半屏那一下会被我们吃掉。
+        if (!G.mobileMode || G.drawerOpen || G.selectingActive) return;
         const t = e.changedTouches && e.changedTouches[0];
         if (!t) return;
         // 只接管左半屏。右半屏没有射击需求（自动开火），留给屏幕按钮，

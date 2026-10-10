@@ -1,6 +1,6 @@
 # 数值与公式总表 · 9.x（AI 拓展版）
 
-> 调试用速查。所有数值直接摘自 [`src/9x/js/`](../src/9x/js/)（v9.25 状态），每个条目都标了出处。
+> 调试用速查。所有数值直接摘自 [`src/9x/js/`](../src/9x/js/)（v9.26 状态），每个条目都标了出处。
 > 行号是**当时的锚点**，源码一改就会漂——对不上时按函数名/关键字在文件里搜，别按行号硬找。
 > 调数值请改 `src/9x/`，改完跑 `npm run build:game` 重新拼装根目录的单文件 HTML——
 > 根目录的 `密文轨迹demo9.XX.html` 是**产物**，直接编辑会被下次构建覆盖。
@@ -50,6 +50,9 @@
 | 封印时长 | 240 帧（4 秒） | `05-update.js:237` |
 | 敌图腾寿命 / 索敌半径 | 720 帧 / 120px | `05-update.js` `ENEMY_TOTEM_RANGE` |
 | 摇杆几何 | 半径 62（**底座动态**，按下的那一点就是圆心；v9.24 的写死圆心已删） | `00-data.js` `JOYSTICK` |
+| 摇杆接管条件 | 手机端 + 抽屉收起 + **不在选路/选属性/商店**（`G.selectingActive`） | `09-events.js` `touchstart` |
+| `pointer-events` 入口 | **只此一处**改 canvas 与 `.canvas-wrap`；**手机端永不写 `.canvas-wrap`**（摇杆的输入面） | `03-tutorial.js` `setCanvasPointer()` |
+| 教程字幕间隔 | 上一条 `hold` + 下一条 `d` ∈ **[120, 240] 帧**（3 秒 ±1 秒）；实测 29 条均值 197.2 帧 | `03-tutorial.js` `TUTORIAL_FLOORS` |
 | 圈层半径放大 | ×1.5（削减区 100→150、减速区/火焰区 90→135） | `00-data.js` `AFFIX_ZONE_R_MUL` |
 | 圈层同屏上限 | 同属性 3 个 | `00-data.js` `AFFIX_ZONE_MAX_PER_KIND` |
 | 火焰圈结算 | 每 6 帧 1 点（≈0.167/帧） | `05-update.js` `FIRE_ZONE_TICK` / `FIRE_ZONE_DMG_PER_TICK` |
@@ -1091,18 +1094,44 @@ r = 55，life = 600 帧（10 秒）
 > `restartRunAfterTutorial()`，清空密文版 / 被动 / 精华 / 得分，
 > 回到第 1 层并重选职业。
 
-逐层脚本（`03-tutorial.js:1-153`）：
+逐层脚本（`03-tutorial.js` 的 `TUTORIAL_FLOORS`）。**v9.26 重排过**——五块石板的
+主题顺序见下表，不再是 v9.25 的「移动 → 子弹护盾精华 → 密文板 → 闭环图腾 → 精英虚灵终极技」：
 
-| 层 | 标题 | `hpMul` | 出怪间隔 | 出怪 | 脚本掉落 |
+| 层 | 标题（石板） | `hpMul` | 出怪间隔 | 出怪 | 脚本掉落 |
 |:--|:--|--:|--:|:--|:--|
-| 1 | 你的轨迹就是武器 | 0.6 | 90 | basic ×4 | — |
-| 2 | 子弹、护盾与精华 | — | 60 | basic ×4 | 2 杀→T07，4 杀→E01 |
-| 3 | 密文板 · 本作的核心 | — | 70 | basic ×3 + healer ×2 + tank ×2 | 杀治疗怪→T07、E12 |
-| 4 | 画一个闭环 | — | 70 | basic ×4 + scorcher ×2 | 1 杀→T12，2 杀→E12 |
-| 5 | 精英、虚灵与终极技 | — | 60 | basic ×4 + fast ×2 + 精英 basic ×1 + wraith ×1 | 杀精英→T10、E03 |
+| 1 | 移动方式 | 0.6 | 90 | basic ×4 | — |
+| 2 | 图腾生成 | — | 60 | basic ×4 | 2 杀→T07，4 杀→E01 |
+| 3 | 密文版 | — | 70 | basic ×3 | 3 杀→T07，6 杀→E12 |
+| 4 | 敌人 | — | 70 | basic ×4 + 脚本召唤 fast ×2 / healer ×2 / tank ×2 / scorcher ×2 / wraith ×1 / 精英 basic ×1 | 杀精英→T10、E03 |
+| 5 | 核心 | — | 60 | basic ×4 + fast ×2 | 2 杀→T02，4 杀→E07 |
 
 第 3 层预设手牌 `[T06, E10]`；第 5 层 `ultFull = true`（终极技直接充满）。
 第 5 层结束 → 节点地图 → `TUTORIAL_OUTRO` 收尾（4 步）→ 清空重开。
+
+> **为什么闭环图腾（第 2 块）排在密文版（第 3 块）前面**：判环只看轨迹本身
+> （`04-trail.js` 的 `checkTrailLoop`），一张牌都没填时 `turType` 默认 `'basic'`
+> ——「画个圈就出一座塔」不需要先学密文版。
+>
+> **为什么「敌人」与「核心」要拆成两块**：属性三选一与节点地图都挂在
+> `G.floor % 5 === 0` 上（`05-update.js:1005`），而收尾字幕必须等玩家在节点地图上
+> 选完路才播（`selectNode()` 里置的 `Tutorial.outroPending`）——教程至少要走到第 5 层，
+> 收尾才有入口。
+
+### 字幕节奏（v9.26）
+
+两条提示的间隔 = **上一条 `hold` + 下一条 `d`**——`advance()` 把 `pendTimer` 清零，
+`triggered()` 再拿它和 `s.d` 比。所以想让节奏落在 3 秒 ±1 秒，就是让这两个数配对：
+
+```
+3 秒 = 180 帧，±1 秒 = ±60 帧   →   hold + d ∈ [120, 240]
+长句取上限（hold 180 + d 40 = 220），短句取下限（hold 150 + d 0 = 150）
+```
+
+全部 29 个可预估的间隔（`on` 取 `enter` / `after` / `map` 的步骤）都在带子里，
+均值 197.2 帧（3.29 秒）；没有一条 `hold > 180`。
+**改任何一句 `hold` 或 `d` 都要重新核对配对**——单看一个数看不出节奏。
+`on: 'move' | 'kill' | 'sprint' | 'clear' …` 这些是事件门控，玩家不动就不往下走，
+它们的实际间隔不受 `d` 支配（`d` 只在门开之后再加一层延迟）。
 
 > **手机端联动（v9.24）**：教程步骤指向 `hand` / `combine` / `slot` 时自动展开左侧抽屉，
 > 该步骤播完自动收起——`Tutorial.drawerAutoOpened` 记住是「自己开的」才会去关。
@@ -1149,6 +1178,7 @@ r = 55，life = 600 帧（10 秒）
 | `G.forceEliteWave` | `02-combat.js:180` | 只读不写（原 `MAP_NODES.getMods()` 里的 `forceElite` 从未被消费） |
 | `stageType: 'treasure'` | `00-data.js:345` | 关卡类型存在，但 `NODE_POOL` 里没有 → 不可达（§5 的「treasure ×3」精华加成因此拿不到） |
 | `timeDilator` 的文案 | `00-data.js:318` | 说「移速 -20%」，实际是 `slowAll +0.2`（数值对，用词不同） |
+| `Tutorial.gateClosed()` | `03-tutorial.js:374` | 9.x 里**只定义、无调用点**（`gateLeft` 另有 `advance()` 在读，是活的）。2.x 经典版还在用它拦刷怪，所以没删 |
 
 ---
 
@@ -1180,6 +1210,9 @@ r = 55，life = 600 帧（10 秒）
 | `ENEMY_TOTEM_RANGE`（120） | 图腾索敌半径（`05-update.js`）——它决定敌人的塔能不能隔着半个屏幕压着玩家图腾打 |
 | 词缀分组（`bossOnly`） | 本表 §6 的两张表 + 图鉴 `CODEX_PAGES`（`07-ui.js`）+ 教程第 5 层字幕（`03-tutorial.js`）——三处文案要一起改 |
 | `ELIMINATE_COOLDOWN` | HUD 倒计时（`06-render.js`）、手机端 🧹 圆钮、桌面端 `<kbd>R</kbd>` 提示（`body.html`） |
+| `pointer-events`（canvas / `.canvas-wrap`） | **只能经 `setCanvasPointer()`**（`03-tutorial.js`）改。绕过它直接写 `style.pointerEvents`，就会重演「手机端选完路摇杆失灵」：`.canvas-wrap` 是摇杆的输入面，inline 的 `none` 会盖掉 `styles.css` 里的 `body.mobile .canvas-wrap { pointer-events: auto }` |
+| 教程某一步的 `hold` / `d` | 节奏 = **上一条 `hold` + 下一条 `d`**，必须落在 [120, 240] 帧；单独改一个数看不出问题，改完要重新配对（探针第 16d 节逐条核对） |
+| 教程石板顺序 / 主题 | 层号写死在 `TUTORIAL_FLOORS` 的 key 上，且**第 5 层不能提前结束**——属性三选一、节点地图、收尾字幕（`outroPending`）三者都挂在第 5 层 |
 | 任何 9.x 数值 | 改 `src/9x/`，然后 `npm run build:game`——根目录 HTML 是产物 |
 
 ---

@@ -3,7 +3,113 @@
 ## 版本规则
 - **新版本不更改旧版本文件**。每次修改创建新的独立版本文件。
 - 版本号格式：`试玩版demo_无限模式X.X.html`
-- 当前开发版本：**v9.25**
+- 当前开发版本：**v9.26**
+
+---
+
+## v9.26 — 摇杆失灵的真正成因 + 教程重排与字幕节奏
+
+**文件**：`密文轨迹demo9.26.html`（构建产物，源码在 `src/9x/`）
+**基于**：v9.25
+
+只动了两块：手机端输入、新手教程。但第一块是**第三次**修同一个报障，前两次都没修到根上。
+
+### 1. 「选完层数之后摇杆不动」的真正成因
+
+v9.24 把摇杆的 `touchstart` 从 `#gameCanvas` 挪到 `.canvas-wrap`（铺满全屏那层），
+v9.25 又把左半屏判定从 canvas 坐标改成屏幕坐标——**两次改的都是「按在哪」，可报障
+说的是「选完路之后」**，这两件事根本无关，所以两次都是白改。
+
+成因在 `pointer-events` 的优先级上：
+
+```
+styles.css:37   .canvas-wrap                  { pointer-events: none }
+styles.css:49   #gameCanvas                   { pointer-events: none }
+styles.css:724  body.mobile .canvas-wrap      { pointer-events: auto }   ← 手机端靠这条活着
+```
+
+节点地图是画在 canvas 上、靠鼠标事件选点的，所以 `showNodeMap()` 打开时会把 canvas
+**和它的父层 `.canvas-wrap` 一起**设成 `auto`；`selectNode()` 选完关掉时又一起设回
+`none`。**inline style 盖过 styles.css**——手机端那条 `body.mobile .canvas-wrap
+{ pointer-events: auto }` 从此失效，而摇杆的监听恰好就挂在 `.canvas-wrap` 上。
+
+于是：**玩家第一次选完路，整块战斗界面就永久收不到触摸**，只在下次打开节点地图时
+「活」一下。问题从来不是监听挂在哪个元素上，是那个元素被设成了 `pointer-events: none`。
+
+修法是把两层收敛到**唯一入口** `setCanvasPointer(want)`（`03-tutorial.js`），
+**手机端永不写 `.canvas-wrap`**：
+
+```js
+function setCanvasPointer(want) {
+    canvas.style.pointerEvents = want ? 'auto' : 'none';
+    if (!G.mobileMode && canvas.parentElement) {     // ← 桌面端才动父层
+        canvas.parentElement.style.pointerEvents = want ? 'auto' : 'none';
+    }
+}
+```
+
+手机端关掉 canvas 自身就够了——触摸会穿透到父层 `.canvas-wrap`，摇杆照样收到；
+桌面端两层要一起开，鼠标事件才落得到 canvas 上。全项目现在只有这一处写
+`.canvas-wrap` 的 `pointer-events`。
+
+**顺带修掉半屏被吃**：摇杆 `touchstart` 里的 `e.preventDefault()` 会连带掐掉浏览器
+合成的那一次 `mousedown`，而节点地图正是靠 `mousedown` 选点的——左半屏那一下被摇杆
+吃掉了。现在选路 / 选属性 / 商店期间摇杆根本不接管触摸：
+
+```js
+if (!G.mobileMode || G.drawerOpen || G.selectingActive) return;
+```
+
+### 2. 教程重排：五块石板 + 3 秒节奏
+
+顺序改成 **移动方式 → 图腾生成 → 密文版 → 敌人 → 核心**（v9.25 是 移动 → 子弹
+护盾精华 → 密文板 → 闭环图腾 → 精英虚灵终极技）。两处非平凡的决定：
+
+- **闭环图腾提到密文版前面**。判环只看轨迹本身（`checkTrailLoop`），没填任何牌时
+  `turType` 默认 `'basic'`——「画个圈就出一座塔」本来就不需要先学密文版。塔先落地，
+  第 3 座石板再讲「填什么效果板就出什么类型的塔」，因果顺序反而比原来顺。
+- **「敌人」与「核心」拆成两块**。属性三选一与节点地图都挂在 `G.floor % 5 === 0` 上，
+  而收尾字幕必须等玩家在节点地图上选完路才播（`selectNode()` 里置的 `outroPending`）
+  ——**教程至少要走到第 5 层，收尾才有入口**。所以第 4 块讲怪、第 5 块讲核心，
+  正好接在第 5 层那次选路上。
+
+| 石板 | 层 | 步数 | 讲什么 |
+|:--|--:|--:|:--|
+| 移动方式 | 1 | 7 | WASD、轨迹掉血、Shift 冲刺、轨迹减速、清层 |
+| 图腾生成 | 2 | 7 | 画圈出塔、大中小环、火里会烧、怪先打更近的那个 |
+| 密文版 | 3 | 12 | 触发板/效果板、填槽、宣读、轮椅组合、P 批量宣读 |
+| 敌人 | 4 | 12 | 子弹优先级、快/奶/盾/灼烧/虚灵/精英、分裂、BOSS 专属词条 |
+| 核心 | 5 | 10 | 核心 HP、护盾、精华、终极技、围剿、难度公式、每 5 层三选一 |
+
+**字幕节奏压到 3 秒 ±1 秒。** 调度器里两条提示的间隔 = `上一条.hold + 下一条.d`
+（`advance()` 重置 `pendTimer`，`triggered()` 比较 `pendTimer >= s.d`），所以只要把
+这两个数配对：
+
+```
+3 秒 = 180 帧，±1 秒 = ±60 帧   →   hold + d 必须落在 [120, 240]
+长句取上限（hold 180 + d 40 = 220），短句取下限（hold 150 + d 0 = 150）
+```
+
+29 个间隔全部落在这条带子里，均值 197.2 帧（3.29 秒）。探针逐层逐条核对，不是抽查。
+另外没有一条 `hold > 180`——字幕最长停 3 秒，不会压住下一步。
+
+### 测试
+
+`web/probe-9x.mjs` 新增第 16d 节（五块石板的标题与顺序、图腾生成排在密文版之前、
+每层首步都是 banner、**逐条核对 29 个 `hold + d` 都落在 [120,240]、均值落在 [150,210]、
+没有一条 hold > 180**、节点地图的 banner 不再硬编码「-5」）与第 19t 节（手机端
+`setCanvasPointer` 不碰 `.canvas-wrap`、桌面端两层一起动、端到端「选完节点后父层仍是
+`auto`」、全项目只有一处写 `.canvas-wrap` 的 `pointer-events`、摇杆监听里的三态守卫）。
+第 19t 节按 `HAS_V926` 分支只在 9.26 上跑——9.25 及更早还没有这个统一入口。
+
+**357 项全绿**（9.25 交叉验证 339 项仍全绿、9.24 247 项全绿、9.23 维持原有的 10 项预期失败）。
+
+那个手机端报障本机复现不出来，所以这次在 headless Chrome 里手搭了一遍真实路径：
+`body.mobile` → 选完职业 → 打开节点地图 → `selectNode()`。结果是 `.canvas-wrap` 的
+inline 为空、computed 为 `auto`，`elementFromPoint()` 在 canvas 区域上命中的正是
+`.canvas-wrap`（canvas 自己是 `none`，触摸穿透过去）；真派一根 `TouchEvent` 下去，
+`stickActive` 变 `true`、底座落在触点上、拖动后 `stick = {x: 0, y: -1}`。再把父层改回
+`none`（复现旧写法），同一点立刻落到 `.canvas-wrap` **外面**——报障与修复各拿到一次现场。
 
 ---
 

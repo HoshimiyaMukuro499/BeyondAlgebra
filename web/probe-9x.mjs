@@ -164,6 +164,11 @@ const factory = new Function(
   ' dropBalancedCard: (typeof dropBalancedCard !== "undefined") ? dropBalancedCard : null,' +
   ' registerKill: (typeof registerKill !== "undefined") ? registerKill : null,' +
   ' tickBossCardMilestones: (typeof tickBossCardMilestones !== "undefined") ? tickBossCardMilestones : null,' +
+  // v9.26 手机端输入 + 教程重排 + 字幕节奏
+  ' setCanvasPointer: (typeof setCanvasPointer !== "undefined") ? setCanvasPointer : null,' +
+  ' canvas: (typeof canvas !== "undefined") ? canvas : null,' +
+  ' showNodeMap: (typeof showNodeMap !== "undefined") ? showNodeMap : null,' +
+  ' TUTORIAL_NODEMAP: (typeof TUTORIAL_NODEMAP !== "undefined") ? TUTORIAL_NODEMAP : null,' +
   // 已删符号的存在性探针——拿 KILL_BURSTS/MAP_NODES 这类名字去断言「确实删干净了」
   ' deletedSymbols: { KILL_BURSTS: typeof KILL_BURSTS !== "undefined",' +
   '  MAP_NODES: typeof MAP_NODES !== "undefined",' +
@@ -210,9 +215,13 @@ const { AFFIX_ZONE_R_MUL, AFFIX_ZONE_MAX_PER_KIND, bossEarlyMul, BOSS_EARLY_RAMP
         setStickFromTouch, releaseStick, joyRadiusPx, syncGameOverUI, selectClass,
         START_CARDS, KILL_CARD_EVERY, KILL_CARD_CHANCE, BOSS_CARD_STEP,
         rollBossCardCount, grantCards, dropBalancedCard, registerKill,
-        tickBossCardMilestones } = api;
+        tickBossCardMilestones,
+        setCanvasPointer, showNodeMap, TUTORIAL_NODEMAP } = api;
 const HAS_V925 = !!(bossEarlyMul && spawnAffixZone && tickAffixZones && tryEliminate
                     && getPlayerAttackPower && setStickFromTouch);
+// v9.26：pointer-events 收敛到 setCanvasPointer() 这一个入口。
+// 探针也要能跑在 9.25 及更早的产物上做对照，所以新断言全部挂在这个开关下。
+const HAS_V926 = !!(setCanvasPointer && api.canvas);
 
 let pass = 0, fail = 0;
 const ok = (cond, label, extra = '') => {
@@ -1210,6 +1219,71 @@ if (HAS_TUT) {
   if (stepText.includes('无法穿越轨迹')) stale2.push('无法穿越轨迹');
   if (stepText.includes('充能靠造成伤害')) stale2.push('充能靠造成伤害');
   ok(stale2.length === 0, '逐层教程字幕里也没有过期描述', stale2.join(', '));
+
+  // ------------------------------------------------------------------
+  // 16d v9.26：五块石板的选题与顺序 + 字幕节奏 3s ± 1s
+  // ------------------------------------------------------------------
+  if (!HAS_V926) {
+    console.log('  （16d 跳过：这是 9.25 及更早的产物，教程顺序与节奏是 v9.26 才定的）');
+  } else {
+    // 选题与顺序：移动方式 → 图腾生成 → 密文版 → 敌人 → 核心
+    const wantTitles = ['移动方式', '图腾生成', '密文版', '敌人', '核心'];
+    const gotTitles = Object.keys(TUTORIAL_FLOORS)
+      .sort((a, b) => a - b).map(f => TUTORIAL_FLOORS[f].title);
+    ok(gotTitles.join(' → ') === wantTitles.join(' → '),
+      '五块石板依次是 移动方式 → 图腾生成 → 密文版 → 敌人 → 核心', gotTitles.join(' → '));
+    // 图腾排在密文版之前：这条顺序是有代价的（画圈出塔不能依赖任何卡牌），锁住它。
+    const idxOf = (t) => gotTitles.indexOf(t);
+    ok(idxOf('图腾生成') === 1 && idxOf('密文版') === 2,
+      '图腾生成排在密文版之前（闭环召唤不依赖填牌，turType 默认 basic）');
+    // 每块石板恰好 1 个开场横幅，否则第 16 节的「banner 不计入播报」就不成立了
+    const badBanner = Object.keys(TUTORIAL_FLOORS).filter(f => TUTORIAL_FLOORS[f].steps[0].kind !== 'banner');
+    ok(badBanner.length === 0, '每块石板的第一步都是章节横幅', badBanner.join(','));
+
+    // 节奏：对每一条**由计时器驱动**的字幕（on: enter / after / map），
+    // 它距离上一条的出现时刻 = 上一条.hold + 它自己的 d。
+    // 用户要求 3s ± 1s ⇒ 必须落在 120 ~ 240 帧。
+    const timed = new Set(['enter', 'after', 'map']);
+    const badGap = [];
+    const gaps = [];
+    const scan = (name, cfg) => {
+      const steps = (cfg && cfg.steps) || [];
+      steps.forEach((s, i) => {
+        if (i === 0 || !timed.has(s.on)) return;
+        const prev = steps[i - 1];
+        const gap = (prev.hold || 0) + (s.d || 0);
+        gaps.push(gap);
+        if (gap < 120 || gap > 240) badGap.push(`${name}#${i}=${gap}`);
+      });
+    };
+    scan('层1', TUTORIAL_FLOORS[1]); scan('层2', TUTORIAL_FLOORS[2]);
+    scan('层3', TUTORIAL_FLOORS[3]); scan('层4', TUTORIAL_FLOORS[4]);
+    scan('层5', TUTORIAL_FLOORS[5]);
+    scan('选路', TUTORIAL_NODEMAP); scan('收尾', TUTORIAL_OUTRO);
+    ok(badGap.length === 0,
+      `每条计时字幕距上一条 2~4 秒（3s ± 1s，共 ${gaps.length} 条）`, badGap.join(', '));
+    const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    ok(mean >= 150 && mean <= 210,
+      `节奏均值 ≈ 3 秒（实测 ${(mean / 60).toFixed(2)}s，容差 ±0.5s）`, `mean=${mean.toFixed(1)} 帧`);
+    ok(gaps.every(g => Number.isFinite(g) && g > 0), '每条字幕都有明确的 hold（没有落到 320 帧的默认值）');
+    // 字幕自身的停留时间也不该超过 3 秒，否则「间隔 3 秒」自相矛盾
+    const longHold = [];
+    const scanHold = (name, cfg) => {
+      ((cfg && cfg.steps) || []).forEach((s, i) => {
+        if ((s.hold || 0) > 180) longHold.push(`${name}#${i}=${s.hold}`);
+      });
+    };
+    scanHold('层1', TUTORIAL_FLOORS[1]); scanHold('层2', TUTORIAL_FLOORS[2]);
+    scanHold('层3', TUTORIAL_FLOORS[3]); scanHold('层4', TUTORIAL_FLOORS[4]);
+    scanHold('层5', TUTORIAL_FLOORS[5]);
+    scanHold('选路', TUTORIAL_NODEMAP); scanHold('收尾', TUTORIAL_OUTRO);
+    ok(longHold.length === 0, '没有一条字幕在屏幕上赖超过 3 秒', longHold.join(', '));
+    // 节点地图的横幅不再写死层号——石板数量变了也不会对不上
+    const nmBanner = (TUTORIAL_NODEMAP.steps || []).find(s => s.kind === 'banner');
+    ok(nmBanner && !nmBanner.text,
+      '选路横幅不写死「石板-5」（由 show() 按当前层自动拼）',
+      nmBanner && nmBanner.text);
+  }
 }
 
 // ---------- 17. v9.23 火焰烧塔 / BOSS 调整 / 范围效果 / 出率 ----------
@@ -2134,6 +2208,73 @@ if (!HAS_V925) {
   // 主脚本必须是 </body> 前最后一个 <script>——探针靠这条定位源码
   ok(html.lastIndexOf('<script>') > html.lastIndexOf('</head>'),
     '主脚本在 </head> 之后（<head> 里那段自检不会顶替它）');
+
+  // ------------------------------------------------------------------
+  // 19t v9.26：pointer-events 只有一个入口 —— 手机端摇杆的输入面
+  // 「选择层数之后摇杆无法移动」的成因：showNodeMap() 打开时把 canvas 与
+  // .canvas-wrap 都设成 auto，selectNode() 选完关掉时又把两层设回 none。
+  // 手机端摇杆的 touchstart 就挂在 .canvas-wrap 上，而 inline 的 none 会盖过
+  // styles.css 里的 `body.mobile .canvas-wrap { pointer-events: auto }`——
+  // 于是玩家第一次选完路之后，整块战斗界面再也收不到触摸（9.24 挂在 canvas 上
+  // 时走的也是同一条路径，两次都没修到根上）。
+  // 修法是收敛到 setCanvasPointer()：手机端永不改 .canvas-wrap。
+  // ------------------------------------------------------------------
+  if (!HAS_V926) {
+    console.log('  （19t 跳过：这是 9.25 及更早的产物，pointer-events 还没有统一入口）');
+  } else {
+    const cvs = api.canvas;
+    // 手机端的正确行为是「不动 .canvas-wrap」。先给它写一个哨兵值，
+    // 再断言调用之后它还在——直接断言「不等于 none」会被前面章节遗留的
+    // 桌面端状态干扰（那些用例把两层都设成了 none）。
+    cvs.parentElement.style.pointerEvents = 'auto';
+    G.mobileMode = true;
+    setCanvasPointer(false);
+    ok(cvs.style.pointerEvents === 'none',
+      '手机端：canvas 自身照常关掉（触摸会穿透到 .canvas-wrap）',
+      String(cvs.style.pointerEvents));
+    ok(cvs.parentElement.style.pointerEvents === 'auto',
+      '手机端：关的时候不碰 .canvas-wrap（那是摇杆的输入面）',
+      String(cvs.parentElement.style.pointerEvents));
+    setCanvasPointer(true);
+    ok(cvs.style.pointerEvents === 'auto' && cvs.parentElement.style.pointerEvents === 'auto',
+      '手机端：放开的时候同样不碰 .canvas-wrap');
+    G.mobileMode = false;
+    setCanvasPointer(false);
+    ok(cvs.style.pointerEvents === 'none' && cvs.parentElement.style.pointerEvents === 'none',
+      '桌面端：两层一起关（与 9.25 及以前完全一致）');
+    setCanvasPointer(true);
+    ok(cvs.style.pointerEvents === 'auto' && cvs.parentElement.style.pointerEvents === 'auto',
+      '桌面端：两层一起放开');
+
+    // 真的走一遍「选一层路」：选完之后 .canvas-wrap 必须还是收得到触摸的那一层
+    fresh();
+    Tutorial.seen = true; Tutorial.finished = false;
+    G.mobileMode = true;
+    G.floor = 3;
+    api.simAutoSelectClass();
+    api.canvas.parentElement.style.pointerEvents = 'auto';   // 哨兵：选路前是能收触摸的
+    G.mapChoices = [{ id: 'battle', label: '⚔️ 战斗', stageType: 'mixed' }];
+    api.selectNode(0, 'center');
+    ok(api.canvas.parentElement.style.pointerEvents === 'auto',
+      '手机端选完一层路之后 .canvas-wrap 仍然收得到触摸（摇杆不会当场失灵）',
+      String(api.canvas.parentElement.style.pointerEvents));
+    ok(G.selectingActive === false && G.mapMode === false,
+      '选完路：selectingActive / mapMode 都归假（update 不会被卡住）',
+      `${G.selectingActive} / ${G.mapMode}`);
+    G.mobileMode = false;
+
+    // 结构上的防线：全项目只剩 setCanvasPointer() 里那一处写 .canvas-wrap。
+    // 多出第二处就说明有人绕开了统一入口——那正是这次 bug 的复发方式。
+    const rawParent = (html.match(/canvas\.parentElement\.style\.pointerEvents/g) || []).length;
+    ok(rawParent === 1,
+      '全项目只有 setCanvasPointer() 一处写 .canvas-wrap 的 pointer-events',
+      `got ${rawParent}`);
+    ok(/function setCanvasPointer\(/.test(html), 'setCanvasPointer 是 pointer-events 的唯一入口');
+    // 选路 / 选属性期间不接管左半屏触摸：不然这里的 preventDefault 会掐掉
+    // 浏览器合成的那一次 mousedown，把画在 canvas 上的节点地图点不动。
+    ok(/G\.drawerOpen \|\| G\.selectingActive\) return;/.test(html),
+      '摇杆的 touchstart 在 selectingActive 期间直接 return（不抢浮层的点击）');
+  }
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);
