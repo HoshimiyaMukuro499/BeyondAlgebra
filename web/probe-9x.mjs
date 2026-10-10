@@ -3009,6 +3009,61 @@ if (!HAS_V928) {
   ok(G.turrets.length === 0, '全程没有炮台（对照条件成立）');
 }
 
+// ============================================================
+//  22. v9.29 主循环计时拆解（纯诊断，必须不改控制流）
+// ============================================================
+const HAS_V929 = html.includes('sampleLoopCost') && html.includes('FRAME_BUDGET_MS');
+if (!HAS_V929) {
+  section('22. v9.29 计时拆解（跳过：这是 9.28 及更早的产物）');
+} else {
+  section('22. v9.29 主循环计时拆解 · 控制流不变');
+
+  ok((html.match(/function sampleLoopCost\(/g) || []).length === 1,
+    'sampleLoopCost() 只定义一次',
+    `got ${(html.match(/function sampleLoopCost\(/g) || []).length}`);
+  ok(html.includes('const FRAME_BUDGET_MS = 1000 / 60;'),
+    'FRAME_BUDGET_MS 是 60Hz 的一帧预算（1000/60）');
+
+  // 计时钩子必须包在 update()/draw() 外面，且**一次都不能改变调用次数**——
+  // 这一版是纯诊断，任何「顺手改成隔帧调用」都算回归。
+  const gl = html.match(/function gameLoop\(\)[\s\S]*?requestAnimationFrame\(gameLoop\);/);
+  ok(!!gl, '能定位到 gameLoop() 的函数体');
+  if (gl) {
+    const body = gl[0];
+    ok((body.match(/update\(\);/g) || []).length === 1,
+      '每帧仍然恰好调用 update() 一次',
+      `got ${(body.match(/update\(\);/g) || []).length}`);
+    ok((body.match(/\bdraw\(\);/g) || []).length === 1,
+      '每帧仍然恰好调用 draw() 一次',
+      `got ${(body.match(/\bdraw\(\);/g) || []).length}`);
+    ok((body.match(/drawFps\(\);/g) || []).length === 1, '叠层每帧画一次');
+    ok((body.match(/sampleLoopCost\(/g) || []).length === 1,
+      '计时只在 update/draw 之后采样一次');
+    ok((body.match(/performance\.now\(\)/g) || []).length === 3,
+      '只有两个计时点（t0→t1 量 update，t1→t2 量 draw）',
+      `got ${(body.match(/performance\.now\(\)/g) || []).length}`);
+    ok(body.indexOf('update();') < body.indexOf('sampleLoopCost(')
+       && body.indexOf('draw();') < body.indexOf('sampleLoopCost('),
+      '采样发生在 update 与 draw 之后（不然量到的是 0）');
+  }
+
+  // 叠层文案必须真的把三项拆出来，否则这次改动等于没做
+  const fpsFn = html.match(/function drawFps\(\)[\s\S]*?\n    \}/);
+  ok(!!fpsFn, '能定位到 drawFps()');
+  if (fpsFn) {
+    ok(fpsFn[0].includes('其他'), '叠层里拆出了「其他」（1000/FPS − U − D）那一项');
+    ok(fpsFn[0].includes('U ${') && fpsFn[0].includes('D ${'),
+      '叠层里 U / D 都以「均值/峰值」两个数给出');
+    ok(fpsFn[0].includes('已超'), 'U+D 超预算时会在第二行标红提示');
+  }
+
+  // 纯诊断：玩法数值一个都不能被这版碰过
+  ok(typeof ENEMY_SHOOTER_RANGE !== 'undefined' && ENEMY_SHOOTER_RANGE === 119,
+    '哨兵：v9.28 的射击怪射程没被这版动过');
+  ok(typeof RARE_E15_CAP !== 'undefined' && RARE_E15_CAP === 30,
+    '哨兵：v9.28 的稀有效果板上限没被这版动过');
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);
 
 process.exit(fail === 0 ? 0 : 1);

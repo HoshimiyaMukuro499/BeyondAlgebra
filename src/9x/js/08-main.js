@@ -62,24 +62,58 @@
     }
 
     // ---------- 主循环 ----------
+    // v9.29: FPS 叠层加「时间去哪了」的拆解，用来定位掉帧到底卡在 JS 还是渲染。
+    //   U / D —— performance.now() 包在 update() / draw() 外面的 **CPU 派发耗时**，
+    //            500ms 窗口内取「均值/峰值」。
+    //   其他  —— 1000 / FPS − U − D，这一帧剩下的墙钟时间。canvas 的绘制是**异步排队**的，
+    //            ctx.fill() 立刻返回、GPU 稍后才做，所以光栅化与浏览器合成的时间都落在
+    //            这一项里，不会被 U/D 捕到。
+    // 判读：
+    //   U+D 逼近 16.6ms            → 瓶颈在我们的 JS，去查 update() / draw() 里的算法。
+    //   U+D 很小但「其他」很大       → 瓶颈在绘制与合成，去减 shadowBlur 与绘制次数。
+    //   U/D/其他 三项都很小但帧率仍低 → 浏览器在限流（掉到 30 就是每两个 vsync 才回调一次）。
+    const FRAME_BUDGET_MS = 1000 / 60;   // 16.67ms：60Hz 下的一帧预算，只作参考线
     let _fps = 60, _fpsFrames = 0, _fpsMark = 0;
+    let _uSum = 0, _dSum = 0, _uPeak = 0, _dPeak = 0;   // 本轮窗口的累加器
+    let _uAvg = 0, _dAvg = 0, _uMax = 0, _dMax = 0;     // 上一轮窗口的结果（显示用）
+
+    function sampleLoopCost(upMs, drawMs) {
+        _uSum += upMs; _dSum += drawMs;
+        if (upMs > _uPeak) _uPeak = upMs;
+        if (drawMs > _dPeak) _dPeak = drawMs;
+    }
+
     function drawFps() {
         if (!_fpsMark) _fpsMark = performance.now();
         _fpsFrames++;
         const now = performance.now();
         if (now - _fpsMark >= 500) {
             _fps = Math.round(_fpsFrames * 1000 / (now - _fpsMark));
+            const n = Math.max(1, _fpsFrames);
+            _uAvg = _uSum / n; _dAvg = _dSum / n;
+            _uMax = _uPeak;    _dMax = _dPeak;
+            _uSum = _dSum = _uPeak = _dPeak = 0;
             _fpsFrames = 0;
             _fpsMark = now;
         }
         // 低于 50 帧标黄，低于 30 帧标红——用来判断卡顿出在哪
         const color = _fps >= 50 ? 'rgba(120,150,180,0.55)' : (_fps >= 30 ? '#f5c542' : '#ff5544');
+        // 「其他」兜底到 0：窗口刚翻篇时 FPS 还没刷新，1000/FPS 可能小于 U+D
+        const other = Math.max(0, 1000 / Math.max(1, _fps) - _uAvg - _dAvg);
         ctx.save();
         ctx.font = '11px monospace';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
         ctx.fillStyle = color;
-        ctx.fillText(`${_fps} FPS`, 8, 8);
+        ctx.fillText(
+            `${_fps} FPS · U ${_uAvg.toFixed(1)}/${_uMax.toFixed(1)} · D ${_dAvg.toFixed(1)}/${_dMax.toFixed(1)} · 其他 ${other.toFixed(1)}ms`,
+            8, 8);
+        if (_uAvg + _dAvg >= FRAME_BUDGET_MS) {
+            ctx.fillStyle = '#ff5544';
+            ctx.fillText(
+                `⚠ U+D ${(_uAvg + _dAvg).toFixed(1)}ms 已超 ${FRAME_BUDGET_MS.toFixed(1)}ms 预算 —— 瓶颈在 JS`,
+                8, 23);
+        }
         ctx.restore();
     }
 
@@ -92,12 +126,16 @@
             simLoop();
             return;
         }
+        const _t0 = performance.now();
         _timeAcc += G.timeScale;
         if (_timeAcc >= 1) {
             _timeAcc -= 1;
             update();
         }
+        const _t1 = performance.now();
         draw();
+        const _t2 = performance.now();
+        sampleLoopCost(_t1 - _t0, _t2 - _t1);
         drawFps();
         // v9.25: 死亡后战斗界面的重开按钮只在这一处同步——G.gameOver 的三个写入点
         // 与 resetGame() 的复位都汇到这里，一帧一次布尔比较，不额外挂监听。
