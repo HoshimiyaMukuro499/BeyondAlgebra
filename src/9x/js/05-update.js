@@ -475,6 +475,12 @@
         if (!G.simMode && (G.paused || G.selectingActive)) return;
         G.frame++;
 
+        // v9.31: 被动槽满了之后自动消化手牌里能升级的组合（见 04-trail.js 的
+        // findAutoUpgrade / tryAutoUpgrade）。放在这里、每帧一次，是为了用**一个**
+        // 呼点覆盖全部拿牌路径（击杀掉落 / 商店买卡 / grantCards 批量发放），
+        // 也顺带覆盖「槽位刚刚变满」那一刻；每帧只宣读一组，不会连锁清空手牌。
+        tryAutoUpgrade();
+
         // v9.15: 连杀计时——太久没击杀就断连
         tickKillStreak();
 
@@ -807,13 +813,16 @@
                     const bossGot = addCombatEssence(10 + G.floor);
                     if (bossGot > 0) showFloatingText(m.x, m.y - m.r - 10, '💎+' + bossGot, '#c0a0ff');
                     // v9.22: dropRateMul 真的接上了（丰收 ×2 / 贪婪圣杯 ×3）
-                    if (Math.random() < 0.3 * (G.fateBuffs.dropRateMul || 1) && G.relics.length < 8) dropRelic();
+                    // v9.31: 撤掉 `G.relics.length < 8`。遗物**没有上限**了——真正的
+                    // 天花板是 RELICS 的表长，dropRelic() 自己那道「同名只能拿一次」
+                    // 的去重仍然留着。
+                    if (Math.random() < 0.3 * (G.fateBuffs.dropRateMul || 1)) dropRelic();
                     if (G.fateBuffs.vampHeal > 0) {
                         G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.fateBuffs.vampHeal * 3);
                     }
                     // v9.28: 唤魔者 BOSS 额外掉一把「唤魔之钥」。它是真 BOSS——上面那套
                     // 普通掉落（精华 / 遗物 / 卡牌 / T08 / 连杀分）照常吃，只是多掉一个。
-                    // 钥匙**不占**遗物上限 8，所以不走 dropRelic() 的那道闸门。
+                    // 钥匙**不走** dropRelic()——它是独立来源，不该混进随机池。
                     if (m.isEvokerBoss) gainEvokerKey();
                     triggerPassive('T08', m); addScore(G.killStreak * 5);
                     // v9.28: bossPending/bossSpawned 是「每 10 层一只」的楼层排程，
@@ -835,7 +844,7 @@
                 }
                 // v9.1: 爆裂词缀
                 if (m.affixes && m.affixes.includes('explosive')) {
-                    const exDmg = (20 + G.floor * 4) * getDifficultyMultiplier();
+                    const exDmg = (20 + G.floor * 4) * getMonsterScale();
                     for (const other of G.monsters) {
                         if (other === m) continue;
                         if (dist(m, other) < 80) {
@@ -862,7 +871,8 @@
                 const essenceGot = addCombatEssence(essenceDrop);
                 if (essenceGot > 0 && G.frame % 3 === 0) showFloatingText(m.x, m.y - m.r - 8, '💎+' + essenceGot, '#c0a0ff');
                 // v9.4: 遗物掉落（精英）。v9.22: 删掉 G.relicDropWave——只读不写的死字段。
-                if (m.isElite && Math.random() < 0.08 * (G.fateBuffs.dropRateMul || 1) && G.relics.length < 8) {
+                // v9.31: 与 BOSS 那条一样，撤掉 `G.relics.length < 8`（遗物不再有上限）。
+                if (m.isElite && Math.random() < 0.08 * (G.fateBuffs.dropRateMul || 1)) {
                     dropRelic();
                 }
                 // v9.2: 命运吸血
@@ -1113,7 +1123,25 @@
         if (G.monsters.length === 0 && G.monstersToSpawn === 0 && !G.selectingActive && !G.bossPending
             && !Tutorial.pendingScript()) {
             if (Tutorial.holdFloor()) { /* 教程：等清空字幕播完再进下一步 */ }
-            else if(G.floor%5===0){const n=getFloorClearCards();for(let c=0;c<n;c++)dropBalancedCard();G.floorCardsObtained+=n;logEvent('floor_clear',{floorKills:G.floorKills,cardsRewarded:n,stageEnd:true,snapshot:snapshotStats()});if(G.simMode){simAutoStatChoice();}else{showStatChoice();}}else{logEvent('floor_clear',{floorKills:G.floorKills,stageEnd:false,snapshot:snapshotStats()});advanceFloor();}
+            // v9.31: 原来这里是一整行压缩写法，而且两个分支都漏了牌数字段——
+            // 10-sim.js 读的是 `ev.data.cardsThisFloor`（**从来没有人写过它**），于是
+            // 211 层里有 210 层打印「获undefined牌」。现在统一成：
+            //   cardsRewarded = 清层奖励的牌（普通层 0）
+            //   floorCards    = 本层实际到手总数
+            // 顺带修掉 `G.floorCardsObtained += n` 的重复计数——dropBalancedCard() 里
+            // 已经自增过一次，那一行等于把清层奖励算两遍（该字段此前只写不读，所以
+            // 从来没暴露出来）。
+            else if (G.floor % 5 === 0) {
+                const n = getFloorClearCards();
+                for (let c = 0; c < n; c++) dropBalancedCard();
+                logEvent('floor_clear', { floorKills: G.floorKills, cardsRewarded: n,
+                    floorCards: G.floorCardsObtained, stageEnd: true, snapshot: snapshotStats() });
+                if (G.simMode) { simAutoStatChoice(); } else { showStatChoice(); }
+            } else {
+                logEvent('floor_clear', { floorKills: G.floorKills, cardsRewarded: 0,
+                    floorCards: G.floorCardsObtained, stageEnd: false, snapshot: snapshotStats() });
+                advanceFloor();
+            }
         }
 
         updateUI();

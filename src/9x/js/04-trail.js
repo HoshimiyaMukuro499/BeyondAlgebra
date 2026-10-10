@@ -282,7 +282,7 @@
             const radius = 350;
             if (d < radius) {
                 const falloff = 1 - (d / radius) * 0.7;
-                const dmg = Math.floor(trailDmg * falloff * getDifficultyMultiplier());
+                const dmg = Math.floor(trailDmg * falloff * getMonsterScale());
                 m.hp -= dmg;
                 spawnParticles(m.x, m.y, '#ffdd44', 8);
                 showFloatingText(m.x, m.y - m.r, '-' + dmg, '#ffdd44');
@@ -334,7 +334,7 @@
     // 而这个效果的量级（清场 + 拆塔）足以决定一波团战的胜负。挂在随机掉落上，
     // 等于把玩家的节奏交给抽卡；变成带冷却的技能后，什么时候按是玩家的决策。
     function activateEliminate() {
-        const dmg = Math.floor(60 * (2 + getDifficultyMultiplier()) / 3) * 3;
+        const dmg = Math.floor(60 * (2 + getMonsterScale()) / 3) * 3;
         let hitCount = 0;
         for (const m of G.monsters) {
             m.hp = Math.max(0, m.hp - dmg);
@@ -369,8 +369,71 @@
         activateEliminate();
     }
 
+    // ---------- v9.31 槽位满后的自动宣读 ----------
+    // 为什么要它：maxSlots 到 60 层封顶 7 个，而密文版是 7 张/层的掉落量。此后的手牌
+    // 既进不了新槽、又没有任何机制去消费，只能攒到 20 张然后被「替换最老一张」冲掉。
+    // 211 层的实测：1476 张牌进账，只合成出 32 个被动——95.7% 的卡到手即废。
+    //
+    // 规则（用户口径）：被动满了之后，手牌里出现「已经存在于被动系统内」的组合就
+    // **拿到牌就自动宣读**；多个组合同时命中时随机选一组。
+    function findAutoUpgrade() {
+        let used = 0;
+        for (const tid of Object.keys(G.passives)) used += G.passives[tid].length;
+        if (used < G.maxSlots) return null;      // 还有空槽 → 交给玩家自己组合，不抢
+        const trigs = G.hand.filter(c => c.type === 'trigger');
+        const effs = G.hand.filter(c => c.type === 'effect');
+        const pairs = [];
+        for (const t of trigs) {
+            const list = G.passives[t.id];
+            if (!list) continue;
+            for (const e of effs) {
+                if (list.some(p => p.effectId === e.id)) pairs.push({ trigger: t, effect: e });
+            }
+        }
+        if (pairs.length === 0) return null;
+        return pairs[Math.floor(Math.random() * pairs.length)];   // 多组命中 → 随机
+    }
+
+    // 呼点只有一个：05-update.js 的 update() 每帧调一次。放每帧而不是挂在三处
+    // G.hand.push 上，是为了覆盖全部拿牌路径（击杀掉落 / 商店买卡 / grantCards 批量发放），
+    // 也顺带覆盖「槽位刚刚变满」那一刻。每帧只宣读一组，所以不会同一帧把 20 张手牌
+    // 连锁清空、玩家什么都看不见。
+    function tryAutoUpgrade() {
+        const pick = findAutoUpgrade();
+        if (!pick) return false;
+        // doCombine 只写被动、不碰手牌（手牌的口径归 fillSlot / grantCards 管），
+        // 所以这两张要自己摘。pick 里的就是 G.hand 的同两个对象引用，indexOf 必定命中；
+        // 先摘 trigger 再 indexOf(effect) 也是安全的——indexOf 每次都在改过的数组上重算。
+        G.hand.splice(G.hand.indexOf(pick.trigger), 1);
+        G.hand.splice(G.hand.indexOf(pick.effect), 1);
+        if (!doCombine(pick.trigger, pick.effect)) {
+            // 到不了这里：findAutoUpgrade 保证这个组合已经在 G.passives 里，isUpgrade
+            // 必为 true，槽位检查必然放行。留着只是为了将来改坏时把牌还给玩家，
+            // 而不是静默吞掉两张。
+            G.hand.push(pick.trigger, pick.effect);
+            return false;
+        }
+        setFeedback(`🔮 ${pick.trigger.label}+${pick.effect.label} 自动升级`, '#ffb347');
+        return true;
+    }
+
     function doCombine(trigger, effect) {
         const triggerId = trigger.id, effectId = effect.id;
+
+        // ---------- v9.31 唤魔者是一次性宣读 ----------
+        // 放在槽位检查**之前**：宣读不受被动槽位限制，也不写 G.passives，所以
+        // 既不占槽、也不会被槽位满挡住。两张牌「宣读完即消失」在调用方天然成立——
+        // combineCards()（空格）在 doCombine 之后就把两个槽位置空，而 fillSlot()
+        // 在放牌时早已把它们从手牌里摘掉；executeBatch()（暂停排队）同理。
+        // 旧写法走 addPassive，会白占一个被动槽，而且 T14 永远不会被触发到。
+        if (triggerId === 'T14') {
+            triggerEvoker();
+            logEvent('card_combine', { trigger: triggerId, effect: effectId, chairHit: null, oneShot: true });
+            setFeedback('👹 唤魔者宣读！全场清空 + 三词条 BOSS 现身', '#a01f2e');
+            Tutorial.emit('combine', { chair: null });
+            return true;
+        }
+
         let usedSlots = 0;
         for (const tid of Object.keys(G.passives)) usedSlots += G.passives[tid].length;
         const isUpgrade = G.passives[triggerId] && G.passives[triggerId].some(p => p.effectId === effectId);
@@ -397,10 +460,9 @@
             showNotification(`🦽 ${chairHit.name}！`, '#ff8844', 240);
             spawnParticles(G.player.x, G.player.y, '#ff8844', 30);
         }
-        // v9.28: T01/T02 删掉了，宣读那一刻的即时触发只剩 T10（残血）与 T14（唤魔者）。
-        // 唤魔者是全项目最重的一张牌——清场 + 招 BOSS 都在这一行里，见 triggerEvoker()。
+        // v9.28: T01/T02 删掉了，宣读那一刻的即时触发只剩 T10（残血）。
+        // v9.31: T14（唤魔者）挪到函数开头单独处理——它不再产生被动，所以走不到这里。
         if (triggerId === 'T10' && G.player.hp < G.player.maxHp * 0.3) { triggerPassive('T10'); }
-        if (triggerId === 'T14') { triggerEvoker(); }
         setFeedback(msg, chairHit ? '#ff8844' : '#ffb347');
         Tutorial.emit('combine', { chair: chairHit ? chairHit.id : null });
         if (Tutorial.combos >= 2) Tutorial.emit('combine2');

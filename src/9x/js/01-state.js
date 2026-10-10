@@ -198,6 +198,23 @@
         return Math.pow(DIFF_BASE, G.floor - 1);
     }
 
+    // v9.31: 怪物数值的标尺。**难度标尺本身没变**——getDifficultyMultiplier() 仍然是
+    // HUD、图鉴与对局记录里那个「难度」，还是 1.56^(层-1)。这一条只管怪物的 HP / 攻击 /
+    // BOSS，以及「跟着难度一起涨的伤害源」（终结技、R 消除、E10 反噬、爆裂词缀）。
+    //
+    // 为什么伤害源也必须换过来：那些伤害源原来吃的是真难度（211 层 3.6e40），而怪物的
+    // 血量被 HP_OVERFLOW_GUARD 钉在 1e15——也就是说后期每一发核弹都是 1e25 倍的过量击杀。
+    // 如果只收怪物的血量、不收伤害源，玩家会一刀秒掉全场。
+    //
+    // 形状：60 层之前与 getDifficultyMultiplier() 逐字节一致（所以前期手感一点没动），
+    // 60 层之后从指数改成线性——拐点值 × (1 + (层-60) × 2%)。
+    // 211 层的标尺从 3.6e40 收到 1.0e12。
+    function getMonsterScale() {
+        if (G.floor <= MONSTER_SOFT_KNEE) return Math.pow(DIFF_BASE, G.floor - 1);
+        const knee = Math.pow(DIFF_BASE, MONSTER_SOFT_KNEE - 1);
+        return knee * (1 + (G.floor - MONSTER_SOFT_KNEE) * MONSTER_SOFT_RATE);
+    }
+
     // v9.27: 难度系数不再是「几百」——第 100 层就是 1.3e19。HUD 与结算界面上
     // 原来统一 toFixed(2)，现在会印出二十几位数字把版面撑破，所以按量级分档显示。
     function formatDiff(v) {

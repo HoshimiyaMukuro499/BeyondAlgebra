@@ -1,6 +1,6 @@
 # 数值与公式总表 · 9.x（AI 拓展版）
 
-> 调试用速查。所有数值直接摘自 [`src/9x/js/`](../src/9x/js/)（v9.30 状态），每个条目都标了出处。
+> 调试用速查。所有数值直接摘自 [`src/9x/js/`](../src/9x/js/)（v9.31 状态），每个条目都标了出处。
 > 行号是**当时的锚点**，源码一改就会漂——对不上时按函数名/关键字在文件里搜，别按行号硬找。
 > 调数值请改 `src/9x/`，改完跑 `npm run build:game` 重新拼装根目录的单文件 HTML——
 > 根目录的 `密文轨迹demo9.XX.html` 是**产物**，直接编辑会被下次构建覆盖。
@@ -58,6 +58,11 @@
 | 圈层半径放大 | ×1.5（削减区 100→150、减速区/火焰区 90→135） | `00-data.js` `AFFIX_ZONE_R_MUL` |
 | 圈层同屏上限 | 同属性 3 个 | `00-data.js` `AFFIX_ZONE_MAX_PER_KIND` |
 | 火焰圈结算 | 每 6 帧 1 点（≈0.167/帧） | `05-update.js` `FIRE_ZONE_TICK` / `FIRE_ZONE_DMG_PER_TICK` |
+| **玩家数值软上限**（v9.31） | `playerCap(base) = base × (1 + 层数 × 0.015)`——第 1 层 ×1.015 / 第 100 层 ×2.5 / **第 200 层 ×4**。取代了原来那批死数字，玩家自己的数值从第 21 层起不再冻住 | `00-data.js` `PLAYER_CAP_RATE` / `playerCap()` |
+| 玩家软上限的五个消费方（v9.31） | `E01` 攻击 `playerCap(250)` / `E02` 倍率 `playerCap(49)` / `E06` 轨伤 `playerCap(100)` / `E06` 轨宽 `getTrailWidthCap()` / `E11` 移速 `playerCap(6)`（**原先没有上限**）；商店「攻击强化」`playerCap(2000)`、「轨迹淬炼」`playerCap(400)`、「疾步」`playerCap(6)` | `02-combat.js` `applyPassiveEffect()`、`00-data.js` `STAT_CHOICES` |
+| 轨迹宽度上限（v9.31） | `getTrailWidthCap() = playerCap(150)`——E06 与商店「轨迹拓宽」**共用同一个**上限，且写成只增不减 | `00-data.js` `getTrailWidthCap()` |
+| **怪物数值软上限**（v9.31） | `getMonsterScale()`：60 层前 = `1.56^(层-1)`（与难度逐字节一致），60 层后 = `拐点值 × (1 + (层-60) × 0.02)`。211 层从 3.6e40 收到 **1.0e12**。→ 见 §1 | `01-state.js` `getMonsterScale()`、`00-data.js` `MONSTER_SOFT_KNEE` / `MONSTER_SOFT_RATE` |
+| 玩家数值软上限的三个例外（v9.31） | `RARE_E15_CAP` 30 / `player.maxHp` 300 / `fireRateMul` 2.0 **仍是死数字**（射速 ×8 会玩坏攻速，且不在用户点名的轴上） | `00-data.js` |
 | BOSS 前期减压 | **v9.27 起 `BOSS_EARLY_MUL_START = 0.35`**：1 层 ×0.35 → 20 层 ×1.0（HP 与攻击同乘；v9.25/9.26 起点是 0.5） | `00-data.js` `bossEarlyMul()` |
 | 难度系数显示 | `formatDiff(v)`：`< 1e4` 两位小数 / `< 1e6` 千分位 / 再往上 `e` 记数法 | `01-state.js` `formatDiff()` |
 | 图腾攻击力上限 | 玩家攻击力 × 1.0（按 `d×m/75` 分配，开火时现算） | `00-data.js` `TURRET_ATK_CEILING` / `TURRET_RATIO_NORM` |
@@ -66,7 +71,7 @@
 | 稀有卡概率（v9.28） | 第 40 层起 1%，每层 +0.1%，**第 80 层封顶 5%**；40 层前恒为 0 | `00-data.js` `rareChance()` |
 | 唤魔者召唤乘子（v9.28） | ×1.13（场上怪物 HP/攻击之和 × 它，与该层 BOSS 值取 **max**） | `00-data.js` `EVOKER_SUM_MUL` |
 | T03 效果乘子（v9.28） | ×1.2（`applyPassiveEffect` 与 `removePassive` **两边必须同步**） | `00-data.js` `T03_EFFECT_MUL` |
-| 稀有藏品「唤魔之钥」（v9.28） | 总分 lg +1（`G.score *= 10`）+ 每个已激活被动层数 +1；**不占**遗物上限 8 | `07-ui.js` `gainEvokerKey()` |
+| 稀有藏品「唤魔之钥」（v9.28） | 总分 lg +1（`G.score *= 10`）+ 每个已激活被动层数 +1；**不走** `dropRelic()`（独立来源，也不进随机池） | `07-ui.js` `gainEvokerKey()` |
 | 稀有效果板上限（v9.28） | E15 图腾加固·极 +3/次（≤30）/ E16 护盾扩容 +5/次（≤300）/ E17 急速装填 +0.08/次（≤2.0） | `00-data.js` `RARE_E15_CAP` / `RARE_E16_CAP` / `RARE_E17_CAP` |
 | 精英抽 BOSS 专属词条的权重（v9.28） | ×0.5（`ELITE_BOSS_AFFIX_WEIGHT`）；**BOSS 池不受影响**，仍 12 条等权 | `00-data.js` `pickAffixes()` |
 | 射击小怪（v9.28） | 25 层起；射程 119px（中环基础炮台 140 × 0.85）；开火间隔 40 帧 | `00-data.js` `ENEMY_SHOOTER_*` |
@@ -77,7 +82,9 @@
 | 轨迹段上限 | 120（普通）/ 60（冲刺） | `04-trail.js:97`、`05-update.js:115` |
 | 火焰轨迹上限 | 80 | `05-update.js:222` |
 | 手牌上限 | 20（满了替换最老一张） | `07-ui.js:138,409` |
-| 遗物上限 | 8 个 | `05-update.js:342,390` |
+| 遗物上限 | **没有上限**（v9.31 撤掉两道 `length < 8` 闸门）。真实天花板 = `RELICS` 表长 **12**（`dropRelic()` 自身仍做「同名只拿一次」去重）。**商店购买那条路既不过去重也不过上限**，两条路口径不同 | `05-update.js` BOSS/精英掉落分支、`07-ui.js` `dropRelic()` / 商店 |
+| 被动槽位 | 4 → 5（20 层）→ 6（40 层）→ 7（60 层），+1 来自遗物 | `01-state.js:32`、`07-ui.js:727-730`、`00-data.js` |
+| 槽满自动宣读（v9.31） | 槽位**满了**之后，手牌里「触发板 × 已在被动系统内的效果板」每帧自动升级一组（多组命中随机选）；一次只吃一组。槽位没满时**不生效**。`T14` 不在 `G.passives` 里，所以永远不被自动宣读 | `04-trail.js` `findAutoUpgrade()` / `tryAutoUpgrade()`、`05-update.js` `update()` |
 | 模拟模式每 tick 跑几帧 | `simSpeed` 默认 3 | `01-state.js:59` |
 | **一帧预算（v9.29 参考线）** | `FRAME_BUDGET_MS = 1000 / 60` = 16.67ms。**主循环没有锁帧**——裸 rAF，帧率 = 显示器刷新率；越过这条线就落到下一个 vsync，也就是**恰好 30** | `08-main.js` `FRAME_BUDGET_MS` |
 | 主循环计时叠层（v9.29） | `FPS · U 均值/峰值 · D 均值/峰值 · 其他`；`其他 = 1000/FPS − U − D`，装的是 GPU 与合成的异步时间 | `08-main.js` `sampleLoopCost()` / `drawFps()` |
@@ -110,6 +117,35 @@ v9.15–9.26      D(f) = 1.16 ^ (min(f,30)-1) × max(1, f/30) ^ 1.6
   [`EDITION.md` v9.27 §5](EDITION.md)。要点：**「前期 −30%」只在第 1 层成立**，
   第 4 层被底数抬高抹平、第 5 层起反超；BOSS 血量的 −30% 是干净的（1 层 ×0.70 线性回
   到 20 层 ×1.00，20–30 层与旧值完全相同）。
+
+### 怪物数值标尺（v9.31，与难度**分家**）
+
+`01-state.js` `getMonsterScale()`、`00-data.js` `MONSTER_SOFT_KNEE` / `MONSTER_SOFT_RATE`
+
+```
+S(f) = 1.56 ^ (f - 1)                                f ≤ 60
+     = 1.56 ^ 59 × (1 + (f - 60) × 0.02)             f > 60
+```
+
+- **难度标尺本身没动**：`getDifficultyMultiplier()` 仍是 `1.56^(f-1)`，HUD 上的「难度×」
+  与对局记录里的 `difficulty` 都还是它。新增的 `S(f)` **只给怪物数值用**。
+- 60 层之前两条**逐字节相等**，所以前 59 层手感一点没变；第 61 层是 `×1.02`
+  而不是 `×1.56`。取值：60 层 `2.48e11` / 100 层 `4.46e11`（旧式 `3.14e21`）/
+  211 层 **`1.0e12`**（旧式 `3.6e40`）。
+- 于是 `HP_OVERFLOW_GUARD = 1e15` 退化成**纯防溢出**：旧式在第 33 层就把怪物血量钳死，
+  第 33–211 层的怪**一模一样**；现在到 211 层也只用掉那道闸门的千分之一。
+- 吃新标尺的**八个消费方**（少换一个就会一刀秒掉全场，因为怪物血量收口了而伤害没有）：
+  `spawnMonster` / `spawnDebugMonster` / `getBossAtk()` / `spawnBossMinion`（`02-combat.js`）、
+  `E10` 反噬（`02-combat.js`）、终结技与 `activateEliminate()`（`04-trail.js`）、
+  爆裂词缀（`05-update.js`）。
+- `getBossHp()`（`00-data.js`）尾巴换成 `S(f) / 1.56^(DIFF_KNEE-1)`，
+  并显式钳成 `f ≤ DIFF_KNEE ? 1 : …`——第 30 / 60 层两个点与旧公式**完全相等**，
+  30 层以下必须钳住（旧式是 `Math.max(0, f - DIFF_KNEE)`，丢了这道钳子第 10 层
+  BOSS 会软掉 7290 倍）。
+- **不吃新标尺的**：`scoreValue`（分数不是战斗数值，且上 lg 显示）、
+  `06-render.js` / `07-ui.js` / `10-sim.js` 的难度**显示**、快照的 `difficulty` 字段。
+- **本版不动 `getTrailDamage()`**：它仍是平值，所以踩轨迹在后期依然是装饰性的。
+  乘标尺会让 21 层就一击必杀，列进 v9.32 候选。
 
 ### 每层怪物数
 
@@ -444,15 +480,19 @@ getTrailDamage() = (buffs.trailDmg + log2(f + 1) × 0.5) × fateBuffs.trailDmgMu
 ### 生成公式
 
 ```
-v9.27:
-hp  = (baseHp + hpScale)  × D × hpMult × 0.8 × early   // 精英：(baseHp + hpScale × 1.5)，early = 1
+v9.31:
+hp  = (baseHp + hpScale)  × S × hpMult × 0.8 × early   // 精英：(baseHp + hpScale × 1.5)，early = 1
 spd = (baseSpeed + speedScale) × min(D, 3.0)           // 精英：speedScale × 1.2（不乘 0.8）
-atk = (baseAtk + atkScale) × D^0.35 × 0.8 × early      // 精英：atkScale × 1.3，early = 1
+atk = (baseAtk + atkScale) × S^0.35 × 0.8 × early      // 精英：atkScale × 1.3，early = 1
 
+D     = 难度标尺 1.56^(f-1)          （HUD 显示的那个）
+S     = 怪物标尺 getMonsterScale()   （v9.31：60 层前 = D，之后线性，见 §1）
 early = (普通怪 && f < 30) ? EARLY_NORMAL_MUL (0.7) : 1
 ```
 
-硬钳：`hp ≤ 1e15`、`speed ≤ 6.0`、`atk ≤ 1e9`（v9.27 起只剩防溢出，见下）。
+硬钳：`hp ≤ 1e15`、`speed ≤ 6.0`、`atk ≤ 1e9`。
+**v9.31 起这三道只剩防溢出**——`S` 在 211 层才 `1.0e12`，离 1e15 还差三个数量级，
+怪物终于不会在第 33 层就被钳成同一个数值了。
 
 > **v9.24 起普通怪 HP 与攻击各 ×0.8**（`MONSTER_STAT_MUL`），**移速不动**——
 > 出怪变密之后再削移速只会变成「又慢又肉又没威胁」，纯拖时间。
@@ -523,11 +563,16 @@ spd = m.speed × (1 - slowAll) × (slowTimer > 0 ? 0.8 : 1) × 1.33
 `00-data.js:249-257`、`02-combat.js:424-481`
 
 ```
-v9.27:
-getBossHp() = floor(0.9 × 100000 × 1.7^(min(floor(f/10), 3) - 1) × 1.56^max(0, f - 30) × bossEarlyMul())
+v9.31:
+getBossHp() = floor(0.9 × 100000 × 1.7^(min(floor(f/10), 3) - 1) × tail × bossEarlyMul())
+tail         = (f ≤ 30) ? 1 : S(f) / 1.56^29          ← v9.31：尾巴换成怪物标尺
 上限 1e15（HP_OVERFLOW_GUARD；旧值 1e8）
 bossEarlyMul() = 0.35 + 0.65 × clamp((f - 1) / 19, 0, 1)   // 1 层 ×0.35 → 20 层 ×1.0，之后恒 1.0
 ```
+
+- **v9.31 `tail`**：第 30 / 60 层两个点与旧式 `1.56^max(0, f - 30)` **完全相等**，
+  第 61 层起改走线性（`×1.02`/层而不是 `×1.56`）。`f ≤ 30` 那道钳子**不能丢**——
+  旧式是 `Math.max(0, f - DIFF_KNEE)`，丢了第 10 层会算成 `1.56^-20`，BOSS 软掉 7290 倍。
 
 - v9.23 起整体 ×0.9（`BOSS_HP_MUL`）
 - **v9.27 起 `BOSS_EARLY_MUL_START = 0.35`**（v9.25/9.26 是 0.5）：第 1 层正好 −30%，
@@ -563,10 +608,12 @@ bossAtk = max( getBossAtk(), Σ(场上怪 atk) × EVOKER_SUM_MUL )
 | 排程 | `spawnBoss()` 本来就**不碰** `G.bossPending` / `G.bossSpawned`（那是调用方的活），所以唤魔者顶不掉「每 10 层一只」；BOSS 死亡分支里那两个标志也补了 `!m.isEvokerBoss` 守卫 |
 | 可反复 | 每次宣读都是新的一组 BOSS + 一把钥匙，**叠起来很凶** |
 | 代价 | 算的是**清场前**场上怪的数值之和（先算再清）；杀不掉就一直挂着 |
+| **一次性**（v9.31） | `T14` 在 `doCombine()` 的**槽位检查之前**被单独接管：**不受被动槽位限制**、**不写 `G.passives`**（所以不占槽、也不参与槽位计数），两张牌宣读完即消失。旧写法走 `addPassive`，会白占一个被动槽，而且 `triggerPassive('T14')` 在 `G.passives` 里找不到它就返回，**T14 永远不触发** |
+| 不会被自动宣读（v9.31） | §0「槽满自动宣读」遍历的是 `G.passives`，`T14` 不在里面，所以唤魔者**只能由玩家自己按** |
 
 **🗝️ 唤魔之钥**：`RELICS` 里 `hidden: true`，`dropRelic()` 直接跳过——只能从唤魔者
 BOSS 身上掉，不进随机池。效果：总分 **lg +1**（`G.score = floor(G.score × 10)`）
-+ 每个已激活被动层数 +1。**不占**遗物上限 8（`gainEvokerKey()` 直接 push）。
++ 每个已激活被动层数 +1。**不占**遗物名额（`gainEvokerKey()` 直接 push，不走 `dropRelic()`）。
 
 ### 击杀掉落
 
@@ -578,7 +625,7 @@ BOSS 身上掉，不进随机池。效果：总分 **lg +1**（`G.score = floor(
 | BOSS 分数 | `scoreValue × D`，硬顶兜底 300 |
 | 精华 | `1 + floor(f / 10)`；精英 +3；+ 遗物精华磁铁 +2；×(1 + essenceBonus)；再走本层上限（§12） |
 | BOSS 精华 | `10 + f`，同样计入本层上限 |
-| 遗物 | 精英 `0.08 × dropRateMul` / BOSS `0.30 × dropRateMul`，上限 8 个 |
+| 遗物 | 精英 `0.08 × dropRateMul` / BOSS `0.30 × dropRateMul`，**v9.31 起无上限** |
 | BOSS 卡牌 | `round((2 + floor(rand × 2)) × dropRateMul)` 张，即 2–3 × `dropRateMul` |
 | 连杀加分 | 连杀 ≥ 2 时触发 T08 并 `+ killStreak × 2`（BOSS 用 × 5） |
 | 吸血（命运/遗物） | 每杀回 `vampHeal`；BOSS 回 `vampHeal × 3` |
@@ -1122,7 +1169,7 @@ rollBossCardCount(): r < 0.50 → 1 ; < 0.70 → 2 ; < 0.90 → 3 ; else → 4
 | 👢 疾风之靴 | common | `speedMul ×1.25` |
 | 🔰 核心护盾发生器 | rare | 核心 `maxHp +20` |
 | 🗿 狂战图腾 | rare | 护盾 < 30% 时攻击翻倍 |
-| 🗝️ 唤魔之钥 🆕 | epic | **`hidden: true`**——只掉自唤魔者 BOSS，不进随机池；总分 lg +1（`score × 10`）+ 每个已激活被动层数 +1；**不占**遗物上限 8 |
+| 🗝️ 唤魔之钥 🆕 | epic | **`hidden: true`**——只掉自唤魔者 BOSS，不进随机池；总分 lg +1（`score × 10`）+ 每个已激活被动层数 +1；**不走** `dropRelic()`（v9.31 起遗物本来就无上限） |
 
 ### 命运抉择（8 选 2）
 

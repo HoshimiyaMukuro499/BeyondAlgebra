@@ -461,6 +461,27 @@
     const HP_OVERFLOW_GUARD = 1e15;     // 普通怪与 BOSS 的血量
     const ATK_OVERFLOW_GUARD = 1e9;     // 普通怪与 BOSS 的攻击（原来分别是 120 / 12 倍）
 
+    // ---------- v9.31 软上限 ----------
+    // 背景：v9.27 把难度改成全程 1.56^(层-1) 之后，上面那道 HP_OVERFLOW_GUARD(1e15)
+    // 从第 33 层起就把每只怪的血量钉死，之后 180 层里怪物**完全一样**——闸门事实上
+    // 退回到了 v9.27 想废掉的「难度闸门」。对局记录也印证：玩家的 攻/轨伤/轨宽/怪数
+    // 分别在 11/21/20/31 层撞上死上限，之后每 20 层的环比恒为 ×1.00，而难度是 ×7290。
+    //
+    // 所以两边都改成**随层数抬升的软上限**：
+    //   玩家：cap = base × (1 + 层数 × 0.015)        → 200 层约 ×4
+    //   怪物：60 层前照旧 1.56^(层-1)，之后 拐点值 × (1 + (层-60) × 0.02)
+    // 两条线的增速接近，后期相对难度大致持平，但玩家自己的数值终于是**看得见地涨**，
+    // 而不是第 21 层就冻住。硬闸门 1e15 / 1e9 保留，但从此只是纯防溢出——按软上限
+    // 算，211 层的怪血量约 8e12，够不到它们。
+    const PLAYER_CAP_RATE = 0.015;
+    const MONSTER_SOFT_KNEE = 60;       // 怪物数值从指数改线性的拐点
+    const MONSTER_SOFT_RATE = 0.02;     // 拐点之后每层 +2%（相对拐点值）
+    function playerCap(base) { return base * (1 + G.floor * PLAYER_CAP_RATE); }
+    // 轨迹宽度只有这一个上限——E06（02-combat.js）与「轨迹拓宽」（下面的 STAT_CHOICES）
+    // 共用它。v9.31 之前两处各写一个数（60 与 150），宽到 150 之后再拿「轨迹拓宽」会被
+    // Math.min(151, 60) 一路砍回 60。
+    function getTrailWidthCap() { return playerCap(150); }
+
     // ---------- v9.24 手机端虚拟摇杆 · v9.25 改为动态位置 ----------
     // v9.25: 底座不再是固定坐标，而是「按在哪、圆心就在哪」（见 09-events.js 的
     // setStickFromTouch）。所以这里只剩半径——而且半径的单位从 canvas 像素变成了
@@ -532,10 +553,19 @@
         // v9.27: 尾巴从多项式换成同一底数的指数。BOSS 自己那两段（1.7^(层/10)
         // 的「每 10 层跳一档」，30 层封顶）保持原样——用户没要求动它，而且它是
         // BOSS 独有的档位感，和全局难度曲线不是一回事。
+        // v9.31: 尾巴从「同一底数的指数」换成怪物软上限标尺（getMonsterScale）。
+        // 除以 DIFF_BASE^(DIFF_KNEE-1) 是为了让第 30 层那个点与旧公式**完全相等**
+        // （旧式在第 30 层是 DIFF_BASE^0 = 1，新式是 DIFF_BASE^29/DIFF_BASE^29 = 1），
+        // 第 60 层两者也相等（都是 DIFF_BASE^30）；第 61 层起新式改走线性。
+        // 30 层以下必须显式钳成 1——旧式那边是 `Math.max(0, 层-DIFF_KNEE)`，
+        // 少了这道钳子，第 10 层的尾巴会算成 1.56^-20（BOSS 直接软掉 7290 倍）。
         const g = Math.floor(G.floor / 10);
+        const tail = G.floor <= DIFF_KNEE
+            ? 1
+            : getMonsterScale() / Math.pow(DIFF_BASE, DIFF_KNEE - 1);
         return Math.floor(BOSS_HP_MUL * 100000
             * Math.pow(1.7, Math.min(g, 3) - 1)
-            * Math.pow(DIFF_BASE, Math.max(0, G.floor - DIFF_KNEE))
+            * tail
             * bossEarlyMul());
     }
 
@@ -678,19 +708,25 @@
     // shopCost 是商店单价基准，实际售价再乘 (1 + 层数×0.06)。
     const STAT_CHOICES = [
         { id: 'atkUp',     label: '攻击强化', emoji: '⚔️', desc: '永久攻击+3',        color: '#ff8844', shopCost: 12,
-          apply() { G.buffs.atkUp = Math.min(G.buffs.atkUp + 3, 2000); setFeedback('⚔️ 攻击力永久+3！', '#ff8844'); } },
+          apply() { G.buffs.atkUp = Math.min(G.buffs.atkUp + 3, playerCap(2000)); setFeedback('⚔️ 攻击力永久+3！', '#ff8844'); } },
         { id: 'heal',      label: '生命复苏', emoji: '💚', desc: '回复30%最大护盾',   color: '#44ff88', shopCost: 10,
           apply() { const healAmt = Math.floor(G.player.maxHp * 0.3); G.player.hp = Math.min(G.player.maxHp, G.player.hp + healAmt);
                     spawnParticles(G.player.x, G.player.y, '#44ff88', 12);
                     showFloatingText(G.player.x, G.player.y - G.player.r, '+' + healAmt, '#44ff88');
                     setFeedback('💚 回复' + healAmt + '护盾！', '#44ff88'); } },
         { id: 'speedUp',   label: '疾步',     emoji: '💨', desc: '永久移速+5%',       color: '#88ddff', shopCost: 12,
-          apply() { G.buffs.speedUp += 0.05; setFeedback('💨 移速永久+5%！', '#88ddff'); } },
+          apply() { G.buffs.speedUp = Math.min(G.buffs.speedUp + 0.05, playerCap(6)); setFeedback('💨 移速永久+5%！', '#88ddff'); } },
         { id: 'trailUp',   label: '轨迹淬炼', emoji: '🐾', desc: '永久轨迹伤害+1',    color: '#ffdd44', shopCost: 14,
-          apply() { G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1, 400); setFeedback('🐾 轨迹伤害永久+1！', '#ffdd44'); } },
+          apply() { G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1, playerCap(400)); setFeedback('🐾 轨迹伤害永久+1！', '#ffdd44'); } },
         // v9.18 新增两条
         { id: 'trailWidth', label: '轨迹拓宽', emoji: '📏', desc: '永久轨迹宽度+1',   color: '#66dd88', shopCost: 14,
-          apply() { G.buffs.trailWidth = Math.min(G.buffs.trailWidth + 1, 60); setFeedback('📏 轨迹宽度永久+1！', '#66dd88'); } },
+          // v9.31: 原来这里封 60，而 E06 封 150——宽到 150 之后再拿这一项，
+          // Math.min(151, 60) 会一路砍回 60，净亏 90。记录里 L41/L66/L81/L86 四次实测
+          // 全是 150→60，第四次之后永久停在 54。现在与 E06 共用同一个软上限，
+          // 而且写成**只增不减**，保证这条路径永远不会把已有的宽度吃掉。
+          apply() { G.buffs.trailWidth = Math.max(G.buffs.trailWidth,
+              Math.min(G.buffs.trailWidth + 1, getTrailWidthCap()));
+              setFeedback('📏 轨迹宽度永久+1！', '#66dd88'); } },
         // v9.20: 跟着基础血量一起缩到 30%（3 → 1）。不缩的话，塔基础血只剩
         // 2/4/6 而这一项还加 3，一次购买就能把小环从 2 顶到 5——比削弱前还硬。
         { id: 'turretHp',  label: '图腾加固', emoji: '🗼', desc: '图腾血量+1',        color: '#88aacc', shopCost: 14,

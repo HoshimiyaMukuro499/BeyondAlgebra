@@ -215,6 +215,22 @@ const factory = new Function(
   ' ENEMY_SHOT_LIFE: (typeof ENEMY_SHOT_LIFE !== "undefined") ? ENEMY_SHOT_LIFE : null,' +
   // v9.30 渲染降负载：静态背景烘焙 + 去 shadowBlur
   ' getBackdrop: (typeof getBackdrop !== "undefined") ? getBackdrop : null,' +
+  // v9.31 软上限 + 自动升级 + 唤魔者定位 + 记录格式
+  ' playerCap: (typeof playerCap !== "undefined") ? playerCap : null,' +
+  ' getTrailWidthCap: (typeof getTrailWidthCap !== "undefined") ? getTrailWidthCap : null,' +
+  ' getMonsterScale: (typeof getMonsterScale !== "undefined") ? getMonsterScale : null,' +
+  ' getMonsterScaleAtFloor: (typeof getMonsterScaleAtFloor !== "undefined") ? getMonsterScaleAtFloor : null,' +
+  ' getTrailWidth: (typeof getTrailWidth !== "undefined") ? getTrailWidth : null,' +
+  ' sumPassiveLayers: (typeof sumPassiveLayers !== "undefined") ? sumPassiveLayers : null,' +
+  ' findAutoUpgrade: (typeof findAutoUpgrade !== "undefined") ? findAutoUpgrade : null,' +
+  ' tryAutoUpgrade: (typeof tryAutoUpgrade !== "undefined") ? tryAutoUpgrade : null,' +
+  ' buildGameLogJSONL: (typeof buildGameLogJSONL !== "undefined") ? buildGameLogJSONL : null,' +
+  ' LOG_FORMAT_VERSION: (typeof LOG_FORMAT_VERSION !== "undefined") ? LOG_FORMAT_VERSION : null,' +
+  ' PLAYER_CAP_RATE: (typeof PLAYER_CAP_RATE !== "undefined") ? PLAYER_CAP_RATE : null,' +
+  ' MONSTER_SOFT_KNEE: (typeof MONSTER_SOFT_KNEE !== "undefined") ? MONSTER_SOFT_KNEE : null,' +
+  ' MONSTER_SOFT_RATE: (typeof MONSTER_SOFT_RATE !== "undefined") ? MONSTER_SOFT_RATE : null,' +
+  ' spawnBossMinion: (typeof spawnBossMinion !== "undefined") ? spawnBossMinion : null,' +
+  ' logEvent: (typeof logEvent !== "undefined") ? logEvent : null,' +
   ' STAGE_TYPES: (typeof STAGE_TYPES !== "undefined") ? STAGE_TYPES : null,' +
   ' CHAIR_COMBOS: (typeof CHAIR_COMBOS !== "undefined") ? CHAIR_COMBOS : null,' +
   ' dropRelic: (typeof dropRelic !== "undefined") ? dropRelic : null,' +
@@ -301,6 +317,14 @@ const HAS_V928 = !!(TRIG_ && EFFECTS && rareChance && triggerEvoker && gainEvoke
                     && damagePlayerSide && PASSIVE_REPEAT_EFFECTS && MONSTER_TYPES && MONSTER_TYPES.SHOOTER
                     && ENEMY_SHOOTER_RANGE && !TRIG_.find(t => t.id === 'T01')
                     && !TRIG_.find(t => t.id === 'T02'));
+// v9.31：软上限 + 自动宣读 + 唤魔者定位 + 记录格式。
+// 判据取「新符号齐了」——playerCap/getMonsterScale 是本版的核心，缺一个就整节跳过。
+const { playerCap, getTrailWidthCap, getMonsterScale, getMonsterScaleAtFloor, getTrailWidth,
+        findAutoUpgrade, tryAutoUpgrade, buildGameLogJSONL, LOG_FORMAT_VERSION,
+        PLAYER_CAP_RATE, MONSTER_SOFT_KNEE, MONSTER_SOFT_RATE,
+        spawnBossMinion, sumPassiveLayers, logEvent } = api;
+const HAS_V931 = !!(playerCap && getTrailWidthCap && getMonsterScale && tryAutoUpgrade
+                    && buildGameLogJSONL && LOG_FORMAT_VERSION && MONSTER_SOFT_KNEE);
 
 let pass = 0, fail = 0;
 const ok = (cond, label, extra = '') => {
@@ -3143,6 +3167,288 @@ if (!HAS_V930) {
     '哨兵：稀有效果板上限没被这版动过');
   ok(typeof ENEMY_SHOT_LIFE !== 'undefined' && ENEMY_SHOT_LIFE === 8,
     '哨兵：弹道存活帧数没被这版动过');
+}
+
+// ============================================================
+//  24. v9.31 玩家软上限 · 怪物数值软上限 · 槽满自动宣读 · 唤魔者一次性 · 记录格式
+// ============================================================
+if (!HAS_V931) {
+  section('24. v9.31（跳过：这是 9.30 及更早的产物）');
+} else {
+  section('24. v9.31 软上限 + 自动宣读 + 唤魔者定位 + 记录格式');
+
+  // ---------- 24a 玩家侧软上限：playerCap(base) = base × (1 + 层数 × 0.015) ----------
+  ok(PLAYER_CAP_RATE === 0.015, 'PLAYER_CAP_RATE = 0.015', `got ${PLAYER_CAP_RATE}`);
+  const capAt = (f, base) => { const old = G.floor; G.floor = f; const v = playerCap(base); G.floor = old; return v; };
+  ok(Math.abs(capAt(1, 250) - 253.75) < 1e-9, '第 1 层 playerCap(250) = 253.75（基准不被削）',
+    `got ${capAt(1, 250)}`);
+  ok(Math.abs(capAt(100, 250) - 625) < 1e-9, '第 100 层 playerCap(250) = 625（×2.5）',
+    `got ${capAt(100, 250)}`);
+  ok(Math.abs(capAt(200, 250) - 1000) < 1e-9, '第 200 层 playerCap(250) = 1000（×4，用户选的档位）',
+    `got ${capAt(200, 250)}`);
+  G.floor = 86;
+  ok(Math.abs(getTrailWidthCap() - 150 * (1 + 86 * PLAYER_CAP_RATE)) < 1e-9,
+    'getTrailWidthCap() 与 playerCap(150) 同口径（第 86 层 = 343.5）',
+    `got ${getTrailWidthCap()}`);
+
+  // ---------- 24b 怪物数值软上限：60 层前逐字节等于难度，之后线性 ----------
+  ok(MONSTER_SOFT_KNEE === 60 && MONSTER_SOFT_RATE === 0.02,
+    '拐点 60 层 / 之后每层 +2%', `${MONSTER_SOFT_KNEE} / ${MONSTER_SOFT_RATE}`);
+  for (const f of [1, 5, 30, 59, 60]) {
+    G.floor = f;
+    ok(Math.abs(getMonsterScale() - getDifficultyMultiplier()) < 1e-6,
+      `第 ${f} 层：怪物标尺与难度**完全一致**（拐点前不改玩法）`,
+      `${getMonsterScale()} vs ${getDifficultyMultiplier()}`);
+  }
+  G.floor = 60; const kneeVal = getMonsterScale();
+  G.floor = 61;
+  ok(Math.abs(getMonsterScale() / kneeVal - 1.02) < 1e-9,
+    '第 61 层 = 拐点值 ×1.02（线性，不是 ×1.56）', `got ×${getMonsterScale() / kneeVal}`);
+  G.floor = 211;
+  ok(getMonsterScale() > 9.0e11 && getMonsterScale() < 1.1e12,
+    '第 211 层怪物标尺 ≈ 1.0e12（旧写法是 3.6e40）', `got ${getMonsterScale()}`);
+  ok(getDifficultyMultiplier() > 1e40,
+    '哨兵：难度标尺本身没动（HUD 与记录里的「难度」还是 1.56^层）',
+    `got ${getDifficultyMultiplier()}`);
+  ok(getMonsterScaleAtFloor(211) === getMonsterScale() || Math.abs(getMonsterScaleAtFloor(211) - getMonsterScale()) < 1e-6,
+    'getMonsterScaleAtFloor(211) 与 getMonsterScale() 同值（曲线回放用的那条）');
+  ok(getMonsterScaleAtFloor(1) === 1, 'getMonsterScaleAtFloor(1) = 1');
+  G.floor = 60;
+  ok(Math.abs(getMonsterScaleAtFloor(60) - getMonsterScale()) < 1e-6,
+    'getMonsterScaleAtFloor(60) 与当前难度的第 60 层同值');
+
+  // 真的生成一只怪：血量不再被 1e15 闸门啃掉（旧写法第 33 层起就钉在 1e15）
+  fresh();
+  G.floor = 211;
+  spawnMonsterProbe();
+  const m211 = G.monsters[G.monsters.length - 1];
+  ok(!!m211 && m211.hp > 1e11 && m211.hp < HP_OVERFLOW_GUARD,
+    '第 211 层普通怪血量落在 1e11~1e15（不再是「180 层一模一样」）',
+    m211 && `hp=${m211.hp}`);
+
+  // BOSS 血量：30 层以下必须原封不动（旧式那道 Math.max(0, 层-DIFF_KNEE) 的钳子），
+  // 60 层之后跟普通怪一起改走线性。
+  fresh();
+  G.floor = 30;
+  ok(getBossHp() === 260100 || Math.abs(getBossHp() - 260100) <= 1,
+    '第 30 层 BOSS 血量仍是 26.01 万（拐点那个点与旧公式完全相等）', `got ${getBossHp()}`);
+  G.floor = 10;
+  ok(Math.abs(getBossHp() - Math.floor(90000 * bossEarlyMul())) <= 1,
+    '第 10 层 BOSS 血量仍按 9 万底数走（没被尾巴的钳子误伤）', `got ${getBossHp()}`);
+  G.floor = 60; const boss60 = getBossHp();
+  G.floor = 61;
+  ok(Math.abs(getBossHp() / boss60 - 1.02) < 1e-9,
+    '第 61 层 BOSS 血量 = 第 60 层 ×1.02（BOSS 也收口了，不再 ×1.56）',
+    `got ×${(getBossHp() / boss60).toFixed(4)}`);
+
+  // ---------- 24c 八个「跟着难度涨」的消费方全部换标尺 ----------
+  // 只剩两处 getDifficultyMultiplier() 的赋值：startFloor 的提示文案、06-render 的 HUD。
+  // 这两个是**显示**，必须留着；其余 8 个战斗消费方一个都不许再用它。
+  const diffAssign = (html.match(/const diff = getDifficultyMultiplier\(\);/g) || []).length;
+  ok(diffAssign === 2, '全项目只剩 2 处 getDifficultyMultiplier() 赋值（startFloor 文案 + HUD）',
+    `got ${diffAssign}`);
+  ok(html.includes("ctx.fillText(`${stIcon} 层${G.floor} 难度×${diff.toFixed(2)}`"),
+    'HUD 的「难度×」显示仍然读 getDifficultyMultiplier()（玩家看到的难度没变）');
+  ok((html.match(/getMonsterScale\(\)/g) || []).length >= 11,
+    'getMonsterScale() 有 ≥11 个消费点', `got ${(html.match(/getMonsterScale\(\)/g) || []).length}`);
+  for (const [fn, why] of [['spawnMonster', '怪物本体'], ['spawnDebugMonster', '调试生成'],
+                           ['spawnBossMinion', 'BOSS 爪牙'], ['getBossAtk', 'BOSS 攻击']]) {
+    const body = html.match(new RegExp('function ' + fn + '\\([^)]*\\)[\\s\\S]*?\\n    \\}'));
+    ok(!!body && body[0].includes('getMonsterScale()'),
+      `${fn}()（${why}）走 getMonsterScale()`);
+    ok(!!body && !body[0].includes('getDifficultyMultiplier()'),
+      `${fn}() 里不再有 getDifficultyMultiplier()`);
+  }
+  ok(/function activateEliminate\(\)[\s\S]*?getMonsterScale\(\)/.test(html)
+     || html.match(/getMonsterScale\(\)/g).length >= 11,
+    'R 消除 / 终结技 / E10 / 爆裂词缀也换了标尺（按消费点计数覆盖）');
+
+  // ---------- 24d 轨迹拓宽不再倒退（本版的分水岭 bug） ----------
+  fresh();
+  G.floor = 86;
+  G.buffs.trailWidth = 150;                       // 已经被 E06 顶到 150
+  const twChoice = STAT_CHOICES.find(c => c.id === 'trailWidth');
+  twChoice.apply();
+  ok(G.buffs.trailWidth === 151,
+    '150 宽 + 第 86 层「轨迹拓宽」→ 151（旧行为是 Math.min(151,60)=60，净亏 90）',
+    `got ${G.buffs.trailWidth}`);
+  // 上限仍然存在：第 200 层的软上限是 150×4=600，不是无限
+  fresh();
+  G.floor = 200;
+  G.buffs.trailWidth = getTrailWidthCap();
+  twChoice.apply();
+  ok(G.buffs.trailWidth === getTrailWidthCap() && getTrailWidthCap() === 600,
+    '第 200 层轨迹宽度封在 600（软上限还在，只是不再是死数字）',
+    `got ${G.buffs.trailWidth} / cap ${getTrailWidthCap()}`);
+
+  // ---------- 24e E11 移速终于有上限（原先四条轴里唯一没阀门的） ----------
+  fresh();
+  G.floor = 1;
+  G.passives = { T06: [{ effectId: 'E11', count: 1 }] };
+  for (let i = 0; i < 200; i++) triggerPassive('T06');
+  ok(Math.abs(G.buffs.speedUp - playerCap(6)) < 1e-9,
+    `E11 叠 200 次封顶在 playerCap(6) = ${playerCap(6)}`, `got ${G.buffs.speedUp}`);
+
+  // ---------- 24f 槽位满后的自动宣读 ----------
+  const mkCard = (id, type) => ({ id, type, label: id, emoji: '◆', color: '#fff' });
+  // (1) 槽位没满 → 绝不抢玩家的组合权
+  fresh();
+  G.maxSlots = 4;
+  G.passives = { T06: [{ effectId: 'E01', count: 1 }] };
+  G.hand = [mkCard('T06', 'trigger'), mkCard('E01', 'effect')];
+  ok(findAutoUpgrade() === null, '槽位没满 → findAutoUpgrade() 返回 null');
+  ok(tryAutoUpgrade() === false && G.hand.length === 2,
+    '槽位没满 → tryAutoUpgrade() 返回 false 且手牌一张不动', `hand=${G.hand.length}`);
+  // (2) 满了但没有「已在被动里」的组合 → 不动
+  fresh();
+  G.maxSlots = 1;
+  G.passives = { T06: [{ effectId: 'E01', count: 1 }] };
+  G.hand = [mkCard('T07', 'trigger'), mkCard('E02', 'effect')];
+  ok(tryAutoUpgrade() === false && G.hand.length === 2,
+    '槽位满但手牌里没有已存在的组合 → 不动手牌', `hand=${G.hand.length}`);
+  // (3) 满了 + 有已存在的组合 → 自动宣读一组
+  fresh();
+  G.maxSlots = 1;
+  G.passives = { T06: [{ effectId: 'E01', count: 1 }] };
+  const layersBefore = sumPassiveLayers();
+  G.hand = [mkCard('T06', 'trigger'), mkCard('E01', 'effect'), mkCard('T07', 'trigger')];
+  ok(tryAutoUpgrade() === true, '槽位满 + 命中 → 自动宣读返回 true');
+  ok(sumPassiveLayers() === layersBefore + 1, '宣读后该被动层数 +1（是升级，不是新开槽）',
+    `${layersBefore} → ${sumPassiveLayers()}`);
+  ok(G.hand.length === 1 && G.hand[0].id === 'T07',
+    '手牌恰好少 2 张，剩下那张没被误吞', `hand=[${G.hand.map(c => c.id)}]`);
+  ok(Object.keys(G.passives).length === 1 && G.passives.T06.length === 1,
+    '仍然只有 1 个槽（升级不会长出第 2 条组合）');
+  // (4) 一次只宣读一组——20 张手牌不会同一帧被清空
+  fresh();
+  G.maxSlots = 1;
+  G.passives = { T06: [{ effectId: 'E01', count: 1 }] };
+  G.hand = [];
+  for (let i = 0; i < 10; i++) G.hand.push(mkCard('T06', 'trigger'), mkCard('E01', 'effect'));
+  tryAutoUpgrade();
+  ok(G.hand.length === 18, '一次 tryAutoUpgrade() 只吃一组（手牌 20 → 18）',
+    `got ${G.hand.length}`);
+  // (5) 多组命中 → 随机选一组（两组都必须被选到过）
+  fresh();
+  G.maxSlots = 2;
+  G.passives = { T06: [{ effectId: 'E01', count: 1 }], T07: [{ effectId: 'E02', count: 1 }] };
+  G.hand = [mkCard('T06', 'trigger'), mkCard('T07', 'trigger'),
+            mkCard('E01', 'effect'), mkCard('E02', 'effect')];
+  const seen = new Set();
+  for (let i = 0; i < 200; i++) {
+    const p = findAutoUpgrade();
+    if (!p) continue;
+    seen.add(p.trigger.id + '+' + p.effect.id);
+    // 每次选中的都必须是合法组合（触发 + 已在被动里的那个效果）
+    if (!['T06+E01', 'T07+E02'].includes(p.trigger.id + '+' + p.effect.id)) seen.add('BAD:' + p.trigger.id + '+' + p.effect.id);
+  }
+  ok(seen.has('T06+E01') && seen.has('T07+E02'),
+    '200 次里两组都能被随机选中（不是永远挑第一组）', [...seen].join(','));
+  ok(![...seen].some(s => s.startsWith('BAD:')),
+    '且从不选出跨组的非法配对（T06+E02 / T07+E01 都不行）', [...seen].join(','));
+
+  // ---------- 24g 唤魔者：一次性宣读，不占槽位 ----------
+  fresh();
+  G.floor = 60;                                            // 词条按 minWave 解锁，低层没有三词条
+  G.maxSlots = 1;
+  G.passives = { T06: [{ effectId: 'E01', count: 1 }] };   // 故意塞满
+  G.monsters = [mkM(400, 280)];
+  const okT14 = doCombine(mkCard('T14', 'trigger'), mkCard('E01', 'effect'));
+  ok(okT14 === true, '槽位已满时唤魔者照样宣读（不受槽位限制）');
+  ok(G.passives.T14 === undefined, 'T14 不写进 G.passives（不占被动槽）');
+  ok(Object.keys(G.passives).length === 1 && G.passives.T06[0].count === 1,
+    '原有被动一点没被碰（宣读不产生被动、也不改别人层数）');
+  const evokers = G.monsters.filter(m => m.isEvokerBoss);
+  ok(G.monsters.length === 1 && evokers.length === 1,
+    '全场清空 + 招出 1 只唤魔者 BOSS', `场上 ${G.monsters.length} 只`);
+  ok(evokers.length === 1 && evokers[0].affixes.length === 3,
+    '唤魔者是三词条 BOSS', evokers[0] && `${evokers[0].affixes.length} 条`);
+  let t14Threw = false;
+  try { triggerPassive('T14'); } catch (e) { t14Threw = true; }
+  ok(!t14Threw, "triggerPassive('T14') 不报错（G.passives 里没有它时安全返回）");
+  // 两张牌「宣读完即消失」是调用方口径：combineCards() 在 doCombine 后清空两个槽位
+  ok(/triggerSlot = null;[\s\S]{0,200}effectSlot = null;/.test(html)
+     || /G\.triggerSlot = null/.test(html),
+    'combineCards() 在宣读后把两个槽位置空（两张牌都消失）');
+
+  // ---------- 24h 遗物没有上限 ----------
+  // 断言前先剥掉行注释：v9.31 的注释里**故意**引用了被撤掉的旧写法，
+  // 直接 includes() 会被自己的注释绊倒。
+  const codeOnly = html.replace(/^[ \t]*\/\/.*$/gm, '');
+  ok(!codeOnly.includes('G.relics.length < 8'),
+    '两处 `G.relics.length < 8` 闸门都已撤掉（只剩注释里的引用）');
+  fresh();
+  G.relics = RELICS.filter(r => !r.hidden).slice(0, 8)
+                   .map(r => ({ id: r.id, name: r.name, rarity: r.rarity, emoji: r.emoji }));
+  ok(G.relics.length === 8, '先把遗物塞到 8 件');
+  G.hand = [];
+  const elite = mkM(400, 280);
+  elite.isElite = true; elite.hp = 0; elite.maxHp = 100; elite.scoreValue = 5;
+  G.monsters = [elite];
+  const realRandom2 = Math.random;
+  Math.random = () => 0.001;                 // 精英 8% 掉落必中
+  update();
+  Math.random = realRandom2;
+  ok(G.relics.length === 9, '8 件遗物时精英照样掉第 9 件（旧行为是不掉）',
+    `got ${G.relics.length}`);
+  // 不去重才是 bug：dropRelic() 自己那道「同名只拿一次」必须还在
+  ok(/RELICS\.filter\(r => !r\.hidden && !G\.relics\.find\(r2 => r2\.id === r\.id\)\)/.test(html),
+    'dropRelic() 的「同名不重复」去重原样保留（真实上限 = 表长 12）');
+
+  // ---------- 24i 对局记录：字段 + 版本号 + .jsonl ----------
+  ok(!codeOnly.includes('ev.data.cardsThisFloor'),
+    '全项目不再读 cardsThisFloor（undefined 的来源；只剩注释里的引用）');
+  ok(html.includes('获${ev.data.cardsRewarded||0}牌'),
+    '文本报告改读 cardsRewarded（210/211 层的「获undefined牌」修掉）');
+  ok(html.includes("cardsRewarded: n,") && html.includes('cardsRewarded: 0,'),
+    'floor_clear 的两个分支都带上了 cardsRewarded（清层 n / 普通层 0）');
+  const metaV = JSON.parse(fs.readFileSync(path.join(ROOT, 'src/9x/meta.json'), 'utf8')).version;
+  ok(LOG_FORMAT_VERSION === metaV,
+    `LOG_FORMAT_VERSION 等于 meta.json 的版本（${metaV}）`, `got ${LOG_FORMAT_VERSION}`);
+  ok(!html.includes("version: '9.10'"), "硬编码的 version: '9.10' 已消失");
+  ok(html.includes('const LOG_FORMAT_VERSION'), '源码里用的是构建期占位符替换出来的常量');
+
+  // JSONL：三种行都在，且每行都 JSON.parse 得通
+  fresh();
+  G.floor = 86;
+  G.hand = [];
+  api.startFloor();                               // 真实产出一条 floor_start（含 snapshotStats）
+  const firstSnap = G.gameLog[G.gameLog.length - 1].data.snapshot;
+  logEvent('card_drop', { card: 'T06', cardType: 'trigger' });
+  logEvent('floor_clear', { floorKills: 97, cardsRewarded: 2, floorCards: 9, stageEnd: true, snapshot: firstSnap });
+  const jsonl = buildGameLogJSONL();
+  ok(jsonl.endsWith('\n'), 'JSONL 以换行收尾（标准行分隔）');
+  const rows = jsonl.trim().split('\n');
+  let parseFail = 0, parsed = [];
+  for (const line of rows) { try { parsed.push(JSON.parse(line)); } catch (e) { parseFail++; } }
+  ok(parseFail === 0, `每行都是合法 JSON（${rows.length} 行）`, `坏行 ${parseFail}`);
+  ok(parsed[0].t === 'meta' && parsed[0].v === LOG_FORMAT_VERSION,
+    '第一行是 meta，版本号与游戏版本一致', JSON.stringify(parsed[0]).slice(0, 80));
+  const floorRow = parsed.find(r => r.t === 'floor');
+  ok(!!floorRow && floorRow.f === 86, '有第 86 层的 floor 行', JSON.stringify(floorRow || {}));
+  ok(!!floorRow && floorRow.kills === 97 && floorRow.cardsRewarded === 2 && floorRow.cards === 9,
+    'floor 行合并了同层 floor_clear 的 kills / cardsRewarded / cards',
+    JSON.stringify(floorRow || {}));
+  ok(!!floorRow && typeof floorRow.ms === 'number' && typeof floorRow.diff === 'number'
+     && floorRow.ms < floorRow.diff,
+    'floor 行同时给出难度 diff 与怪物标尺 ms（两条曲线能直接画）',
+    `diff=${floorRow && floorRow.diff} ms=${floorRow && floorRow.ms}`);
+  const evRow = parsed.find(r => r.t === 'ev' && r.e === 'card_drop');
+  ok(!!evRow && evRow.f === 86 && evRow.d.card === 'T06',
+    '事件流里透传了 card_drop（含所在层与原始 data）', JSON.stringify(evRow || {}));
+  ok(!parsed.some(r => r.t === 'ev' && r.e === 'floor_start'),
+    '快照类事件不再在事件流里重复一份（t:floor 已经代表了）');
+  ok(typeof G.gameLog !== 'undefined' && parsed.filter(r => r.t === 'floor').length === 1,
+    '每层只出一行 floor（不会因 game_over 重复）');
+
+  // ---------- 24j 玩法哨兵 ----------
+  ok(typeof RARE_E15_CAP !== 'undefined' && RARE_E15_CAP === 30,
+    '哨兵：稀有卡上限没被这版动过（30 仍是死数字，没走 playerCap）');
+  ok(typeof ENEMY_SHOOTER_RANGE !== 'undefined' && ENEMY_SHOOTER_RANGE === 119,
+    '哨兵：射击怪射程没被这版动过');
+  ok(typeof RARE_E16_CAP !== 'undefined' && RARE_E16_CAP === 300
+     && typeof RARE_E17_CAP !== 'undefined' && RARE_E17_CAP === 2.0,
+    '哨兵：稀有卡的 maxHp / 射速上限仍是 300 / 2.0（没被 ×4 波及）');
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);

@@ -1,10 +1,76 @@
     // ---------- v9.10 导出对局记录 ----------
+    // v9.31: 版本号不再硬编码。这里原来写死 'v9.10'（那是**格式版本**，不是游戏版本），
+    // 于是 v9.28 的对局记录头上还印着 v9.10。改成读构建期占位符——
+    // web/bundle-game.mjs 会对整个产物做 replaceAll('{{VERSION}}', meta.version)，
+    // 所以打包出来的 密文轨迹demoX.X.html 里这个常量就是真实版本号。
+    const LOG_FORMAT_VERSION = '{{VERSION}}';
+
+    // v9.31: 机器可读的那一份。每行一个紧凑 JSON 对象，三种 t：
+    //   meta  —— 一行头
+    //   floor —— 每层一行（快照，供画曲线；一个 jq 就能按字段取列）
+    //   ev    —— 其余事件原样透传（"事件流单独一个数组"的那份）
+    // 为什么不拆成两个文件：同一个文件里按 t 分流，一次下载、一次解析，
+    // 层与事件的时间轴也不会对不上。
+    function buildGameLogJSONL() {
+        const lines = [];
+        lines.push(JSON.stringify({
+            t: 'meta', v: LOG_FORMAT_VERSION, cls: G.playerClass ? G.playerClass.name : 'none',
+            floor: G.floor, score: G.score, kills: G.killCount, maxCombo: G.maxCombo,
+            relics: G.relics.map(r => r.name), layers: sumPassiveLayers(),
+        }));
+        // 先按层收集快照：floor_start 那份是「开战前」，floor_clear / game_over 补上
+        // 本层收尾的 kills 与 cards。
+        const byFloor = new Map();
+        for (const ev of G.gameLog) {
+            if (ev.type === 'floor_start') {
+                byFloor.set(ev.floor, { ev, d: ev.data, kills: null, cards: 0, cardsRewarded: 0 });
+            } else if (ev.type === 'floor_clear' || ev.type === 'game_over') {
+                const row = byFloor.get(ev.floor);
+                if (!row) continue;
+                row.kills = ev.type === 'floor_clear' ? ev.data.floorKills : null;
+                row.cards = ev.data.floorCards || 0;
+                row.cardsRewarded = ev.data.cardsRewarded || 0;
+            }
+        }
+        for (const f of [...byFloor.keys()].sort((a, b) => a - b)) {
+            const row = byFloor.get(f);
+            const s = row.d.snapshot;
+            lines.push(JSON.stringify({
+                t: 'floor', f: f,
+                diff: +getDiffAtFloor(f).toPrecision(4),
+                ms: +getMonsterScaleAtFloor(f).toPrecision(4),
+                spawn: row.d.monsterCount, boss: !!row.d.isBoss,
+                hp: s.hp, maxHp: s.maxHp, coreHp: s.coreHp, coreMaxHp: s.coreMaxHp,
+                atk: s.atk, mult: +(+s.mult).toFixed(2), td: s.trailDmg, tw: s.trailWidth,
+                spd: s.speed, slow: s.slowAll, layers: s.passives,
+                relics: s.relics.length, hand: s.handCount,
+                kills: row.kills, cards: row.cards, cardsRewarded: row.cardsRewarded,
+            }));
+        }
+        // 事件流：快照类已经在上一段消化过了，这里透传其余的全部事件。
+        const SNAPSHOT_EVENTS = new Set(['floor_start', 'floor_clear', 'game_over']);
+        for (const ev of G.gameLog) {
+            if (SNAPSHOT_EVENTS.has(ev.type)) continue;
+            lines.push(JSON.stringify({ t: 'ev', f: ev.floor, e: ev.type, d: ev.data }));
+        }
+        return lines.join('\n') + '\n';
+    }
+
+    // 曲线回放要用「那一层的难度」——G.floor 是当前值，读历史某层就得自己算。
+    // 与 getDifficultyMultiplier / getMonsterScale 是同一条公式，只是把层数参数化了。
+    function getDiffAtFloor(f) { return Math.pow(DIFF_BASE, f - 1); }
+    function getMonsterScaleAtFloor(f) {
+        if (f <= MONSTER_SOFT_KNEE) return Math.pow(DIFF_BASE, f - 1);
+        const knee = Math.pow(DIFF_BASE, MONSTER_SOFT_KNEE - 1);
+        return knee * (1 + (f - MONSTER_SOFT_KNEE) * MONSTER_SOFT_RATE);
+    }
+
     function exportGameLog() {
         if (G.gameLog.length === 0) { setFeedback('📋 暂无对局记录', '#8aa3c0'); return; }
         // 生成格式化文本报告
         let report = [];
         report.push('═══════════════════════════════════');
-        report.push('  《密纹轨迹》对局记录  v9.10');
+        report.push(`  《密纹轨迹》对局记录  v${LOG_FORMAT_VERSION}`);
         report.push('═══════════════════════════════════');
         report.push('');
         const clsName = G.playerClass ? G.playerClass.name : '未选择';
@@ -37,7 +103,9 @@
                     break;
                 case 'floor_clear':
                     const fc = ev.data.snapshot;
-                    report.push(`  ✔ 清场: ${ev.data.floorKills}杀 获${ev.data.cardsThisFloor}牌`);
+                    // v9.31: 字段名一直是 cardsRewarded，这里却读 cardsThisFloor，
+                    // 于是 210/211 层都印成「获undefined牌」。补上本层实际拿到的手牌数。
+                    report.push(`  ✔ 清场: ${ev.data.floorKills}杀 获${ev.data.cardsRewarded||0}牌 本层累计手牌${ev.data.floorCards||0}张`);
                     report.push(`    属性 | HP${fc.hp}/${fc.maxHp} 攻${fc.atk} 倍×${fc.mult} 轨伤${fc.trailDmg} 轨宽${fc.trailWidth} 速${fc.speed}`);
                     break;
                 case 'stat_choice':
@@ -69,13 +137,19 @@
         report.push('');
         report.push('═══════════════════════════════════');
         const text = report.join('\n');
-        // 直接下载为文本文件
-        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = `密文轨迹_对局记录_层${G.floor}_分${fmtScore(G.score)}.txt`;
-        a.click(); URL.revokeObjectURL(url);
-        setFeedback('📋 对局记录已下载！', '#aaddbb');
+        // v9.31: 同一个手势里连下两份——人看的 .txt，机器读的 .jsonl。
+        // 用同一个 base 名，两份文件在下载目录里天然配对。
+        const base = `密文轨迹_对局记录_层${G.floor}_分${fmtScore(G.score)}`;
+        const dl = (content, mime, ext) => {
+            const blob = new Blob([content], { type: mime });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `${base}.${ext}`;
+            a.click(); URL.revokeObjectURL(url);
+        };
+        dl(text, 'text/plain;charset=utf-8', 'txt');
+        dl(buildGameLogJSONL(), 'application/x-ndjson;charset=utf-8', 'jsonl');
+        setFeedback('📋 对局记录已下载（.txt + .jsonl）！', '#aaddbb');
     }
 
     // ============================================================
@@ -85,7 +159,7 @@
     // ---------- JSON导出 ----------
     function exportGameLogJSON() {
         const result = {
-            version: '9.10',
+            version: LOG_FORMAT_VERSION,   // v9.31: 原来硬编码 '9.10'
             timestamp: new Date().toISOString(),
             summary: {
                 className: G.playerClass ? G.playerClass.name : 'none',

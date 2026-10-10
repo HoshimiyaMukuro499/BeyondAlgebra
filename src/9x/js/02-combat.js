@@ -102,14 +102,14 @@
         switch (effectId) {
             case 'E01': {
                 const val = (isHighFreq ? 5 : 12) * layers * vmul;
-                G.buffs.atkUp = Math.min(G.buffs.atkUp + val, 250);
+                G.buffs.atkUp = Math.min(G.buffs.atkUp + val, playerCap(250));
                 if (!isInitial) spawnParticles(p.x, p.y, '#ff8844', 5);
                 setFeedback(`⚔️ 攻击+${val} (累计+${Math.round(G.buffs.atkUp)})`, '#ff8844');
                 break;
             }
             case 'E02': {
                 const val = 0.25 * vmul;   // 重复路径：layers 恒为 1，只乘 vmul
-                G.buffs.multUp = Math.min(G.buffs.multUp + val, 49);
+                G.buffs.multUp = Math.min(G.buffs.multUp + val, playerCap(49));
                 if (!isInitial) spawnParticles(p.x, p.y, '#ffdd44', 5);
                 setFeedback(`💥 倍率+${val.toFixed(2)} (累计x${(1 + G.buffs.multUp).toFixed(1)})`, '#ffdd44');
                 break;
@@ -125,8 +125,11 @@
             // v9.23: E04「移速减慢」删除——和 E14「延缓」、轨迹迟缓三套减速重叠。
             // G.buffs.slowAll 字段本身保留（冰轨永冻 / 时间膨胀器还在写它）。
             case 'E06':
-                G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1 * vmul, 100);
-                G.buffs.trailWidth = Math.min(G.buffs.trailWidth + 2 * vmul, 150);
+                // v9.31: 两个上限都改成随层数抬升的软上限。轨宽与「轨迹拓宽」共用
+                // getTrailWidthCap()——以前这里写 150、那里写 60，宽到 150 之后再去
+                // 拿「轨迹拓宽」会被 Math.min(151, 60) 一路砍回 60。
+                G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1 * vmul, playerCap(100));
+                G.buffs.trailWidth = Math.min(G.buffs.trailWidth + 2 * vmul, getTrailWidthCap());
                 if (!isInitial) setFeedback(`⬆️ 轨迹伤害+${(1 * vmul).toFixed(1)}，宽度+${(2 * vmul).toFixed(1)}`, '#66ddff');
                 break;
             case 'E07':
@@ -140,7 +143,7 @@
                 break;
             case 'E10':
                 if (!isInitial && G.monsters.length > 0) {
-                    const dmg = Math.floor(60 * (2 + getDifficultyMultiplier()) / 3 * vmul);
+                    const dmg = Math.floor(60 * (2 + getMonsterScale()) / 3 * vmul);
                     G.monsters.forEach(m => {
                         m.hp = Math.max(0, m.hp - dmg);
                         spawnParticles(m.x, m.y, '#ff6644', 4);
@@ -150,7 +153,10 @@
                 }
                 break;
             case 'E11':
-                G.buffs.speedUp += 0.35 * vmul;
+                // v9.31: 补上上限。E11 原是**唯一没有 Math.min 的成长轴**——实测到 211 层
+                // 移速已经 ×17.7，而它旁边的攻击/轨伤/轨宽全都撞死在死数字上。基准取 6：
+                // 软上限在 211 层是 ×25，够不着现状，纯粹是个安全阀。
+                G.buffs.speedUp = Math.min(G.buffs.speedUp + 0.35 * vmul, playerCap(6));
                 if (!isInitial) setFeedback(`💨 移速+${Math.round(0.35 * vmul * 100)}% (累计x${G.buffs.speedUp.toFixed(1)})`, '#88ddff');
                 break;
             case 'E12':
@@ -314,7 +320,8 @@
 
     // ---------- 怪物生成 ----------
     function spawnMonster(forced) {
-        const diff = getDifficultyMultiplier();
+        // v9.31: 怪物数值改吃软上限标尺（60 层前与难度完全一致，之后改线性）。
+        const diff = getMonsterScale();
         const eliteChance = G.forceEliteWave ? 1.0 : getEliteChance();
 
         // v9.4: 从画布四边外随机进场（v9.22: 'ambush' 伏击波分支删除——
@@ -474,7 +481,7 @@
         }
         const type = MONSTER_TYPES[typeKey.toUpperCase()];
         if (!type) return;
-        const p = G.player; const diff = getDifficultyMultiplier();
+        const p = G.player; const diff = getMonsterScale();   // v9.31: 与 spawnMonster 同口径
         let hp = (type.baseHp + type.hpScale) * diff;
         let spd = (type.baseSpeed + type.speedScale) * Math.min(diff, 3.0);
         let atk = (type.baseAtk + type.atkScale) * Math.min(diff, 4.0);
@@ -593,7 +600,7 @@
         const type = MONSTER_TYPES.BOSS;
         // v9.25: 攻击也吃前期减压系数（用户说的是「数值」，HP 与攻击都算）。
         // v9.27: 12 倍安全阀撤掉，与普通怪同一处理（见 spawnMonster 的注释）。
-        return type.baseAtk * Math.pow(getDifficultyMultiplier(), 0.35) * bossEarlyMul();
+        return type.baseAtk * Math.pow(getMonsterScale(), 0.35) * bossEarlyMul();
     }
 
     // v9.28: opts 让「唤魔者招出来的 BOSS」复用同一份出场逻辑，而不是抄第二遍。
@@ -686,7 +693,7 @@
         const types = ['basic', 'fast', 'tank'];
         const typeId = types[Math.floor(Math.random() * types.length)];
         const type = MONSTER_TYPES[typeId.toUpperCase()] || MONSTER_TYPES.BASIC;
-        const diff = getDifficultyMultiplier();
+        const diff = getMonsterScale();   // v9.31: 爪牙跟着主人一起收口
         const angle = rand(0, Math.PI * 2);
         const d = boss.r + 30 + rand(10, 40);
         const m = {
