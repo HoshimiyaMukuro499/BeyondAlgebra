@@ -108,6 +108,38 @@
         ctx.textAlign = 'center'; ctx.fillText('点击节点选择路线 · 蜿蜒小径记录你的冒险', w/2, h - 12);
     }
 
+    // ---------- v9.30: 静态背景层的离屏缓存 ----------
+    // 背景径向渐变与网格线都是**静态**的（固定画布尺寸、固定圆心与色标、固定 40px 间距），
+    // 原先却每帧重做一遍：重建一次覆盖全屏的径向渐变（780×560 = 43.7 万像素），
+    // 再拉 34 条各自独立的 beginPath/stroke。烘焙成一张离屏画布后，每帧退化成一次 drawImage。
+    // 尺寸变了才重建——正常一局只会建这一次。探针的假 DOM 里 createElement('canvas')
+    // 同样有 getContext()，所以无头跑得通。
+    let _backdrop = null, _backdropW = 0, _backdropH = 0;
+    function getBackdrop() {
+        const w = G.canvasWidth || 780, h = G.canvasHeight || 560;
+        if (_backdrop && _backdropW === w && _backdropH === h) return _backdrop;
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const g = c.getContext('2d');
+        const grad = g.createRadialGradient(390, 280, 50, 390, 280, 400);
+        grad.addColorStop(0, '#162030');
+        grad.addColorStop(1, '#0a101a');
+        g.fillStyle = grad;
+        g.fillRect(0, 0, w, h);
+        // 网格照抄原来的写法：仍然是每列/每行各自一次 stroke。
+        // 这一层只在开局建一次，合并成单条 path 省不下任何东西，却会让抗锯齿
+        // 产生 ≤2/255 的差异——留成原样，这张图才和 v9.29 的逐帧画法**逐字节一致**。
+        // （真要省，省的是 draw() 里那 34 次每帧的 stroke，不是这里的 34 次一次性。）
+        g.strokeStyle = 'rgba(40,70,100,0.2)';
+        g.lineWidth = 0.5;
+        for (let x = 0; x < w; x += 40) { g.beginPath();
+            g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
+        for (let y = 0; y < h; y += 40) { g.beginPath();
+            g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+        _backdrop = c; _backdropW = w; _backdropH = h;
+        return c;
+    }
+
     // ---------- 渲染 ----------
     function draw() {
         const w = G.canvasWidth || 780;
@@ -117,20 +149,8 @@
         // v9.7: 地图模式（教程的字幕要覆盖在地图之上）
         if (G.mapMode) { drawWindingMap(); drawTutorial(); return; }
 
-        // 背景
-        const grad = ctx.createRadialGradient(390, 280, 50, 390, 280, 400);
-        grad.addColorStop(0, '#162030');
-        grad.addColorStop(1, '#0a101a');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, w, h);
-
-        // 网格
-        ctx.strokeStyle = 'rgba(40,70,100,0.2)';
-        ctx.lineWidth = 0.5;
-        for (let x = 0; x < w; x += 40) { ctx.beginPath();
-            ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
-        for (let y = 0; y < h; y += 40) { ctx.beginPath();
-            ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+        // 背景 + 网格：v9.30 起由 getBackdrop() 一次性烘焙好，这里只贴一张图。
+        ctx.drawImage(getBackdrop(), 0, 0);
 
         // v9.4: 地形障碍
         for (const t of G.terrain) {
@@ -157,7 +177,10 @@
             ctx.strokeStyle = style.color.replace('{a}', a);
             ctx.lineWidth = width;
             ctx.shadowColor = style.glow.replace('{a}', (alpha * 0.3).toFixed(2));
-            ctx.shadowBlur = t.trailType === 'lightning' ? 30 : 20;
+            // v9.30: 30/20 → 12/8。模糊的开销大致按 (半径 + blur)² 涨，20 砍到 8 大约只剩三分之一。
+            // 轨迹上限 120 段，是场上数量最多的一类，虽然不像怪物那样随层数增长，
+            // 但它是每帧的固定底噪——底噪压下去，后加的怪才有余量。光晕还在，只是收得更紧。
+            ctx.shadowBlur = t.trailType === 'lightning' ? 12 : 8;
             ctx.stroke();
             ctx.shadowBlur = 0;
         }
@@ -240,7 +263,9 @@
             ctx.strokeStyle = style.color.replace('{a}', a);
             ctx.lineWidth = width;
             ctx.shadowColor = style.glow.replace('{a}', (alpha * 0.6).toFixed(2));
-            ctx.shadowBlur = 35; ctx.stroke(); ctx.shadowBlur = 0;
+            // v9.30: 35 → 14。冲刺轨迹是最宽的一类线（基础宽 ×1.5），模糊 35 时单段的
+            // 模糊面积接近普通轨迹的三倍，而它上限有 60 段——冲刺一下就是一次尖峰。
+            ctx.shadowBlur = 14; ctx.stroke(); ctx.shadowBlur = 0;
         }
 
         // v9.1: 火焰轨迹（灼烧怪）
@@ -253,7 +278,7 @@
             ctx.lineWidth = 5;
             if (ft.life > 20) {
                 ctx.shadowColor = `rgba(255, 80, 20, ${alpha * 0.4})`;
-                ctx.shadowBlur = 12;
+                ctx.shadowBlur = 6;   // v9.30: 12 → 6，火焰轨迹上限 80 段
             }
             ctx.stroke();
             ctx.shadowBlur = 0;
@@ -269,7 +294,7 @@
             ctx.strokeStyle = `rgba(204, 102, 221, ${alpha * 0.85})`;
             ctx.lineWidth = 2.5;
             ctx.shadowColor = `rgba(204, 102, 221, ${alpha * 0.5})`;
-            ctx.shadowBlur = 8;
+            ctx.shadowBlur = 4;   // v9.30: 8 → 4，弹道最多 60 条
             ctx.stroke();
             ctx.shadowBlur = 0;
         }
@@ -290,7 +315,7 @@
             ctx.strokeStyle = df.toShield ? `rgba(255,140,60,${a * 0.9})` : `rgba(255,60,60,${a * 0.9})`;
             ctx.lineWidth = 2.5;
             ctx.shadowColor = ctx.strokeStyle;
-            ctx.shadowBlur = 10;
+            ctx.shadowBlur = 6;   // v9.30: 10 → 6
             ctx.stroke();
             ctx.shadowBlur = 0;
             ctx.beginPath();
@@ -456,13 +481,18 @@
                 }
                 const wraithAlpha = m.isWraith ? 0.55 : 1;
                 ctx.globalAlpha = wraithAlpha;
-                ctx.shadowColor = m.isElite ? '#ff664466' : '#ff444433';
-                ctx.shadowBlur = 15;
+                // v9.30: 这里原本是 shadowBlur = 15。shadowBlur 是 Canvas2D 里最贵的操作
+                // ——每个实体都要单独走一遍模糊通道——而场上最多 50 只怪，后期精英比例
+                // 还能到 ~28%，光这一行就能吃掉十几毫秒。换成一个廉价的光晕圆：多一次 fill，
+                // 但没有模糊通道。视觉上同样都是「怪物外面一圈淡淡的暖光」，精英的光晕更大更亮。
+                ctx.beginPath();
+                ctx.arc(m.x, m.y, m.r + (m.isElite ? 7 : 4), 0, Math.PI * 2);
+                ctx.fillStyle = m.isElite ? 'rgba(255,102,68,0.16)' : 'rgba(255,68,68,0.09)';
+                ctx.fill();
                 ctx.beginPath();
                 ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
                 ctx.fillStyle = m.color || '#cc6633';
                 ctx.fill();
-                ctx.shadowBlur = 0;
                 ctx.strokeStyle = m.isElite ? '#ff8866' : '#ffaa66';
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
@@ -586,7 +616,7 @@
         for (const b of G.bullets) {
             const isCrit = b.isCrit;
             ctx.shadowColor = isCrit ? '#ff6644aa' : '#ffdd44aa';
-            ctx.shadowBlur = isCrit ? 18 : 12;
+            ctx.shadowBlur = isCrit ? 10 : 6;   // v9.30: 18/12 → 10/6，子弹数没有硬上限，是另一处随攻速增长的模糊
             ctx.beginPath();
             ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
             ctx.fillStyle = isCrit ? '#ff6644' : '#ffdd44';

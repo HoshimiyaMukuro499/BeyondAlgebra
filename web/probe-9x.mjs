@@ -213,6 +213,8 @@ const factory = new Function(
   ' ENEMY_SHOOTER_INTERVAL: (typeof ENEMY_SHOOTER_INTERVAL !== "undefined") ? ENEMY_SHOOTER_INTERVAL : null,' +
   ' ENEMY_SHOOTER_UNLOCK_FLOOR: (typeof ENEMY_SHOOTER_UNLOCK_FLOOR !== "undefined") ? ENEMY_SHOOTER_UNLOCK_FLOOR : null,' +
   ' ENEMY_SHOT_LIFE: (typeof ENEMY_SHOT_LIFE !== "undefined") ? ENEMY_SHOT_LIFE : null,' +
+  // v9.30 渲染降负载：静态背景烘焙 + 去 shadowBlur
+  ' getBackdrop: (typeof getBackdrop !== "undefined") ? getBackdrop : null,' +
   ' STAGE_TYPES: (typeof STAGE_TYPES !== "undefined") ? STAGE_TYPES : null,' +
   ' CHAIR_COMBOS: (typeof CHAIR_COMBOS !== "undefined") ? CHAIR_COMBOS : null,' +
   ' dropRelic: (typeof dropRelic !== "undefined") ? dropRelic : null,' +
@@ -280,7 +282,7 @@ const { AFFIX_ZONE_R_MUL, AFFIX_ZONE_MAX_PER_KIND, bossEarlyMul, BOSS_EARLY_RAMP
         spawnMonster, fireEnemyShot, getShooterRange, STAGE_TYPES, CHAIR_COMBOS,
         dropRelic, RELICS,
         ENEMY_SHOOTER_RANGE, ENEMY_SHOOTER_INTERVAL, ENEMY_SHOOTER_UNLOCK_FLOOR,
-        ENEMY_SHOT_LIFE } = api;
+        ENEMY_SHOT_LIFE, getBackdrop } = api;
 const HAS_V925 = !!(bossEarlyMul && spawnAffixZone && tickAffixZones && tryEliminate
                     && getPlayerAttackPower && setStickFromTouch);
 // v9.26：pointer-events 收敛到 setCanvasPointer() 这一个入口。
@@ -3062,6 +3064,85 @@ if (!HAS_V929) {
     '哨兵：v9.28 的射击怪射程没被这版动过');
   ok(typeof RARE_E15_CAP !== 'undefined' && RARE_E15_CAP === 30,
     '哨兵：v9.28 的稀有效果板上限没被这版动过');
+}
+
+// ============================================================
+//  23. v9.30 渲染降负载：静态背景烘焙 + 去 shadowBlur（玩法数值一律不动）
+// ============================================================
+const HAS_V930 = html.includes('function getBackdrop()');
+if (!HAS_V930) {
+  section('23. v9.30 渲染降负载（跳过：这是 9.29 及更早的产物）');
+} else {
+  section('23. v9.30 渲染降负载 · 只动绘制，不动任何玩法数值');
+
+  // --- 背景 + 网格烘焙成离屏画布 ---
+  ok((html.match(/function getBackdrop\(\)/g) || []).length === 1,
+    'getBackdrop() 只定义一次');
+  ok((html.match(/createRadialGradient\(390, 280/g) || []).length === 1,
+    '全屏背景渐变只在 getBackdrop() 里建（draw() 里那份每帧重建的已经没了）',
+    `got ${(html.match(/createRadialGradient\(390, 280/g) || []).length}`);
+  ok(html.includes('ctx.drawImage(getBackdrop(), 0, 0);'),
+    'draw() 每帧只贴一次背景图');
+  ok((html.match(/rgba\(40,70,100,0\.2\)/g) || []).length === 1,
+    '网格样式只剩 getBackdrop() 里那一处（draw() 里的 34 次 stroke 已合并）',
+    `got ${(html.match(/rgba\(40,70,100,0\.2\)/g) || []).length}`);
+  // 烘焙层里的网格**故意**保留原来「每列一根独立 stroke」的写法：
+  // 它只在开局跑一次，合并省不下东西，却会让抗锯齿产生 ≤2/255 的差异。
+  // 保住逐字节一致，比省这一次性开销值。所以这里断言的是「网格已经搬进 getBackdrop」，
+  // 而不是「网格被合并成一条 path」。
+  const bake = html.match(/function getBackdrop\(\)[\s\S]*?\n    \}/);
+  ok(!!bake, '能定位到 getBackdrop() 函数体');
+  if (bake) {
+    ok(bake[0].includes('g.moveTo(x, 0); g.lineTo(x, h);')
+       && bake[0].includes('g.moveTo(0, y); g.lineTo(w, y);'),
+      '竖线与横线都在烘焙层里画');
+    ok(bake[0].includes('g.createRadialGradient(390, 280, 50, 390, 280, 400)'),
+      '渐变圆心/半径与 v9.29 完全一致（390,280 / 50 / 400）');
+    ok(bake[0].includes("grad.addColorStop(0, '#162030')")
+       && bake[0].includes("grad.addColorStop(1, '#0a101a')"),
+      '渐变色标与 v9.29 完全一致');
+  }
+  ok(!/ctx\.beginPath\(\);\s*\n\s*ctx\.moveTo\(x, 0\)/.test(html),
+    'draw() 里不再有「每列一根独立 stroke」的写法（已经全部搬进烘焙层）');
+
+  // 缓存必须真的生效——每帧重建就等于白改
+  if (typeof getBackdrop === 'function') {
+    const b1 = getBackdrop(), b2 = getBackdrop();
+    ok(!!b1 && b1.width === 780 && b1.height === 560,
+      'getBackdrop() 产出一张 780×560 的离屏画布',
+      `got ${b1 && b1.width}×${b1 && b1.height}`);
+    ok(b1 === b2, '尺寸没变时复用同一张（不会每帧重建）');
+  } else {
+    ok(false, 'getBackdrop 没导出，缓存验证跑不了');
+  }
+
+  // --- shadowBlur 全面下调 ---
+  const sb = (n) => (html.match(new RegExp('ctx\\.shadowBlur = ' + n + ';', 'g')) || []).length;
+  ok(sb(15) === 0, '普通怪的 shadowBlur = 15 已彻底移除', `got ${sb(15)}`);
+  ok(sb(8) === 0 && sb(10) === 0 && sb(12) === 0,
+    '原来 8 / 10 / 12 三档模糊都降下来了',
+    `got 8:${sb(8)} 10:${sb(10)} 12:${sb(12)}`);
+  ok(sb(4) === 1, '敌方弹道 8 → 4', `got ${sb(4)}`);
+  ok(sb(6) === 2, '火焰轨迹与伤害转移都降到 6', `got ${sb(6)}`);
+  ok(sb(14) === 1, '冲刺轨迹 35 → 14', `got ${sb(14)}`);
+  ok(html.includes("ctx.shadowBlur = t.trailType === 'lightning' ? 12 : 8;"),
+    '轨迹光晕 30/20 → 12/8');
+  ok(html.includes('ctx.shadowBlur = isCrit ? 10 : 6;'),
+    '子弹光晕 18/12 → 10/6');
+  // 只放过两处「全场上只有一个」的模糊：玩家 20、BOSS 35。
+  ok(sb(20) === 1 && sb(35) === 1,
+    '玩家(20)与 BOSS(35)这两个单实体光晕原样保留',
+    `got 20:${sb(20)} 35:${sb(35)}`);
+  ok(html.includes('ctx.arc(m.x, m.y, m.r + (m.isElite ? 7 : 4), 0, Math.PI * 2);'),
+    '普通怪的回光由一次廉价 fill 顶上（精英的光晕更大）');
+
+  // --- 玩法哨兵：这一版只该动渲染 ---
+  ok(typeof ENEMY_SHOOTER_RANGE !== 'undefined' && ENEMY_SHOOTER_RANGE === 119,
+    '哨兵：射击怪射程没被这版动过');
+  ok(typeof RARE_E15_CAP !== 'undefined' && RARE_E15_CAP === 30,
+    '哨兵：稀有效果板上限没被这版动过');
+  ok(typeof ENEMY_SHOT_LIFE !== 'undefined' && ENEMY_SHOT_LIFE === 8,
+    '哨兵：弹道存活帧数没被这版动过');
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);
