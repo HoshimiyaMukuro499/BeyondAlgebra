@@ -28,14 +28,14 @@
             if (k === 'right') { e.preventDefault(); Tutorial.codexPage = Math.min(CODEX_PAGES.length - 1, Tutorial.codexPage + 1); return; }
             if (k === 'escape') { e.preventDefault(); Tutorial.codexOpen = false; return; }
         }
-        // 调试模式：按键1~7生成对应怪物（教程期间禁用，免得打乱脚本）
+        // 调试模式：按键1~9生成对应怪物（教程期间禁用，免得打乱脚本）
         if (k === '`' || k === 'backquote') {
             if (Tutorial.active) { e.preventDefault(); setFeedback('🎓 教程期间禁用调试模式', '#8ab3d0'); return; }
             e.preventDefault(); G.debug = !G.debug;
-            setFeedback(G.debug ? '🐛 调试模式开启！按键1~7生成怪物' : '🐛 调试模式关闭', '#88ccff'); return; }
+            setFeedback(G.debug ? '🐛 调试模式开启！按键1~9生成怪物' : '🐛 调试模式关闭', '#88ccff'); return; }
         if (G.debug) {
             const num = parseInt(k);
-            if (num >= 1 && num <= 8) { e.preventDefault();
+            if (num >= 1 && num <= 9) { e.preventDefault();
                 spawnDebugMonster(DEBUG_TYPE_KEYS[num - 1]); return; }
         }
         if (k === 'w' || k === 'a' || k === 's' || k === 'd') { e.preventDefault();

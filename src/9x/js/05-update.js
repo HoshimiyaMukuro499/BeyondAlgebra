@@ -16,6 +16,70 @@
     const FIRE_ZONE_TICK = 6;
     const FIRE_ZONE_DMG_PER_TICK = 1;
 
+    // ---------- v9.28 玩家承伤的唯一出口 ----------
+    // 「护盾先吃、护盾破了才扣核心」这条规则原来手写在 3 处（怪物撞核心 / 火焰区 /
+    // 敌图腾），另外 5 处只扣护盾、护盾归零就停在 0——荆棘反伤、爆裂新星、
+    // 火轨迹、环境危险区。于是「吸血类 / 反伤类 / 火圈类技能对主血量也要生效」
+    // 这件事在各处表现不一致。全部收敛到这里：任何打玩家的来源都走同一条结算。
+    //
+    // 谁负责飘字、粒子用什么颜色仍由调用点自己决定（那里本来就有各自配色，
+    // 统一成一个色反而是退化）；opts.silent 给逐帧结算的来源用——它们自己带节流。
+    // 返回 'shield' | 'core'，调用点可以据此选颜色/落点。
+    // v9.28: 全项目**唯一**的一处玩家掉血结算。原本「护盾先吃、破了扣核心」这条规则
+    // 手写在 3 处，另外 5 处只扣护盾、护盾归零就停在 0。现在 8 条来源全部走这里。
+    //   opts.shieldOnly —— 只作用于护盾，护盾归零后不再往下走（**荆棘专用**：
+    //     用户点名荆棘只作用于护盾，火圈那类才是「破了继续咬核心」）。
+    //   opts.silent / noText / color / particles —— 给每帧都在跳的来源（火轨迹、
+    //     危险区）降噪用，避免一帧一个飘字。
+    function damagePlayerSide(dmg, opts) {
+        opts = opts || {};
+        const color = opts.color || '#ff6644';
+        if (G.player.hp > 0 || opts.shieldOnly) {
+            G.player.hp = Math.max(0, G.player.hp - dmg);
+            if (!opts.silent) {
+                spawnParticles(G.player.x, G.player.y, color, opts.particles || 6);
+                if (!opts.noText) showFloatingText(G.player.x, G.player.y - G.player.r, '-' + Math.floor(dmg), color);
+            }
+            if (G.player.hp <= 0) setFeedback('🛡️ 护盾耗尽！核心暴露！', '#ff4444');
+            return 'shield';
+        }
+        G.core.hp = Math.max(0, G.core.hp - dmg);
+        if (!opts.silent) {
+            spawnParticles(G.core.x, G.core.y, '#ff3333', opts.particles || 8);
+            if (!opts.noText) showFloatingText(G.core.x, G.core.y - G.core.r, '-' + Math.floor(dmg), '#ff3333');
+        }
+        return 'core';
+    }
+
+    // ---------- v9.28 射击小怪 ----------
+    // 射程取怪物自己身上的值（类型表里写死 119），缺了才回落到常量——
+    // 群生词条分裂出来的残影、以及将来任何复制字段的生成路径都可能只带一部分字段，
+    // 回落到 0 的话会变成「一只永远打不出伤害的怪」，所以这里有兜底。
+    function getShooterRange(m) { return m.shootRange || ENEMY_SHOOTER_RANGE; }
+
+    // 远程一击。伤害口径与近战**完全一致**，只是不再需要贴脸：
+    //   打炮台 —— max(1, atk × 0.05)（同 05-update.js 的近战分支）
+    //   打核心 —— atk × 0.35 × 减伤，走 damagePlayerSide()（盾 → 核心）
+    // 命中是即时的；G.enemyShots 里只留一条会淡出的弹道，纯粹给渲染看。
+    function fireEnemyShot(m, target) {
+        if (target && target !== G.core) {
+            const tDmg = Math.max(1, Math.round(m.atk * 0.05));
+            target.hp -= tDmg;
+            spawnParticles(target.x, target.y, '#ff6644', 6);
+            showFloatingText(target.x, target.y - target.r - 6, '-' + tDmg, '#ff6644');
+        } else {
+            // 和近战撞核心同款：断连杀、走封印词条。Tutorial.emit 也一并保留——
+            // 射击小怪第 25 层才进池，教程局碰不到它，留着只是让两条路径对称。
+            Tutorial.emit('hit');
+            breakKillStreak();
+            damagePlayerSide(m.atk * 0.35 * G.fateBuffs.damageTakenMul, { color: '#cc66dd' });
+            onAffixCoreHit(m);
+        }
+        G.enemyShots.push({ x1: m.x, y1: m.y, x2: target.x, y2: target.y, life: ENEMY_SHOT_LIFE });
+        if (G.enemyShots.length > 60) G.enemyShots.shift();
+        spawnParticles(m.x, m.y, '#cc66dd', 3);
+    }
+
     // ---------- v9.22 障碍物绕行 ----------
     // 老做法是「下一步会撞上 → 朝障碍中心 ±1.2 弧度随机偏一下、速度砍到 0.6」，
     // 两个毛病：
@@ -156,14 +220,9 @@
             if (++z.tick < FIRE_ZONE_TICK) continue;
             z.tick = 0;
             if (dist(z, G.player) <= z.r + G.player.r) {
-                // 护盾优先，护盾破了才打核心——和怪物撞核心同一套结算
-                if (G.player.hp > 0) {
-                    G.player.hp = Math.max(0, G.player.hp - FIRE_ZONE_DMG_PER_TICK);
-                    spawnParticles(G.player.x, G.player.y, '#ff6622', 1);
-                    if (G.player.hp <= 0) setFeedback('🛡️ 护盾耗尽！核心暴露！', '#ff4444');
-                } else {
-                    G.core.hp = Math.max(0, G.core.hp - FIRE_ZONE_DMG_PER_TICK);
-                }
+                // v9.28: 「护盾优先、破了才扣核心」原来在这里手写了一遍，现在走统一出口。
+                // 火圈每 6 帧结算一次，所以照旧只飘粒子、不飘字（每 6 帧一行会刷屏）。
+                damagePlayerSide(FIRE_ZONE_DMG_PER_TICK, { color: '#ff6622', particles: 1, noText: true });
             }
             // v9.23 定的「火焰烧塔」不该因为火换了形状就失效——沿用同一个速率
             for (const t of G.turrets) {
@@ -364,17 +423,14 @@
                 spawnParticles(target.x, target.y, '#ff8844', 6);
                 showFloatingText(target.x, target.y - target.r - 6, '-' + Math.ceil(dmg), '#ff8844');
             } else {
-                // 护盾优先，护盾破了才打到核心——和怪物撞核心同一套结算
-                if (G.player.hp > 0) {
-                    G.player.hp = Math.max(0, G.player.hp - dmg);
-                    spawnParticles(G.player.x, G.player.y, '#ff8844', 6);
-                    showFloatingText(G.player.x, G.player.y - G.player.r, '-' + Math.ceil(dmg), '#ff8844');
-                    if (G.player.hp <= 0) setFeedback('🛡️ 护盾耗尽！核心暴露！', '#ff4444');
-                } else {
-                    G.core.hp -= dmg;
-                    spawnParticles(G.core.x, G.core.y, '#ff3333', 6);
-                    showFloatingText(G.core.x, G.core.y - G.core.r, '-' + Math.ceil(dmg), '#ff3333');
-                }
+                // v9.28: 统一走 damagePlayerSide()（敌图腾打玩家，保留自己的橙色）。
+                // 飘字沿用 Math.ceil 的老口径，落点按实际打中的那一边选。
+                const hit = damagePlayerSide(dmg, { color: '#ff8844', particles: 6, noText: true });
+                showFloatingText(
+                    hit === 'shield' ? G.player.x : G.core.x,
+                    hit === 'shield' ? G.player.y - G.player.r : G.core.y - G.core.r,
+                    '-' + Math.ceil(dmg),
+                    hit === 'shield' ? '#ff8844' : '#ff3333');
             }
         }
     }
@@ -492,7 +548,9 @@
         // 自动射击
         if (G.monsters.length > 0) {
             G.fireCounter++;
-            if (G.fireCounter >= G.fireRate) {
+            // v9.28: ÷G.buffs.fireRateMul（稀有效果板 E17）。⚠️ 这是**两道闸门之一**，
+            // 另一道在 04-trail.js 的 shootCooldown——只改一边等于没改。
+            if (G.fireCounter >= G.fireRate / G.buffs.fireRateMul) {
                 G.fireCounter = 0;
                 autoShoot();
             }
@@ -526,10 +584,10 @@
                     showFloatingText(m.x, m.y - m.r, '-' + Math.floor(bulletDmg), '#ff8844');
                     // v9.22: 子弹不再给终极技充能——改成固定时间回复，见 04-trail.js
                     // v9.1: 荆棘词缀反弹
+                    // v9.28: 荆棘**只作用于护盾**（shieldOnly）——护盾归零后它就停了，
+                    // 不会接着咬核心。这一条是用户点名保留的例外，与火圈相反。
                     if (m.affixes && m.affixes.includes('thorns')) {
-                        const thornDmg = bulletDmg * (0.08 + G.floor * 0.002);
-                        G.player.hp = Math.max(0, G.player.hp - thornDmg);
-                        showFloatingText(G.player.x, G.player.y - G.player.r, '-' + Math.floor(thornDmg), '#ff6644');
+                        damagePlayerSide(bulletDmg * (0.08 + G.floor * 0.002), { color: '#ff6644', shieldOnly: true });
                     }
                     hit = true;
                     if (!b.hit) {
@@ -559,28 +617,74 @@
             if (m.frozen > 0) m.frozen--;
             if (m.stunned > 0) m.stunned--;
             if (m.slowTimer > 0) m.slowTimer--;   // v9.19: E14 延缓
+
+            // ---------- v9.28 多层冰冻/延缓的持续伤害 ----------
+            // 只有被 n>1 的 E13/E14 控住的怪才挂着 passiveFreeze/passiveSlow；
+            // 轨迹踩踏的迟缓（上面的 onTrail）与冰轨永冻都只写 slowTimer/frozen，
+            // 碰不到这两个字段——所以「平A 铺轨白送 DoT」在结构上不可能发生。
+            // 两个标记与各自的真实计时器同步递减，记的永远是「被这个被动控住的剩余时间」。
+            //
+            // 位置：在 `if (!disabled)` 之前、轨迹伤害块之前。冰冻中的怪会跳过移动块
+            // 但仍然会跑轨迹伤害块，挂在那儿会变成「冻着打得更多」，语义就乱了。
+            if (m.passiveFreeze > 0) m.passiveFreeze--;
+            if (m.passiveSlow > 0) m.passiveSlow--;
+            if (m.passiveFreeze > 0 || m.passiveSlow > 0) {
+                m.passiveDotTimer = (m.passiveDotTimer || 0) + 1;
+                if (m.passiveDotTimer >= 60) {
+                    // 「每秒 100% 攻击力」= 一整个 getPlayerAttackPower()。
+                    // 同时被冰冻与延缓时仍然只敲一次——需求说的是「每秒收到」。
+                    const dot = getPlayerAttackPower();
+                    m.hp = Math.max(0, m.hp - dot);
+                    spawnParticles(m.x, m.y, '#8fd0ff', 4);
+                    showFloatingText(m.x, m.y - m.r, '❄' + Math.round(dot), '#8fd0ff');
+                    m.passiveDotTimer = 0;
+                }
+            } else {
+                m.passiveDotTimer = 0;   // 脱控归零，下次被控重新计满 1 秒
+            }
+
             const disabled = m.frozen > 0 || m.stunned > 0 || m._dashMove;
 
             if (!disabled) {
                 // v9.17: 索敌「图腾与核心中离自己更近的那一个」
+                // v9.28: 射击小怪是唯一的例外——它**无条件优先炮台**（场上只要有塔就锁塔，
+                // 不管塔比核心远多少），一座塔都没有时才改锁核心。
                 const nT = nearestTurret(m);
                 const dCore = dist(m, G.core);
-                const target = (nT && nT.d < dCore) ? nT.t : G.core;
+                const target = m.isShooter
+                    ? (nT ? nT.t : G.core)
+                    : ((nT && nT.d < dCore) ? nT.t : G.core);
+                const targetDist = m.isShooter
+                    ? (nT ? nT.d : dCore)
+                    : ((nT && nT.d < dCore) ? nT.d : dCore);
                 const angle = angleTo(m, target);
-                // v9.19: slowTimer 只在速度公式里乘一次（不像 slowAll 那样在生成时也乘）。
-                // v9.22: slowTimer 现在有两个来源——E14「延缓」和踩到轨迹——两者共用
-                // 同一个字段和同一个 0.8，取的是更长的那个持续时间。
-                const spd = m.speed * (1 - G.buffs.slowAll) * (m.slowTimer > 0 ? 0.8 : 1) * 1.33;
-                let mx = Math.cos(angle) * spd;
-                let my = Math.sin(angle) * spd;
-                // v9.22: 轨迹不再阻挡怪物——接触轨迹改为挂 3 秒迟缓（见下面的接触块）。
-                // v9.4: 地形障碍绕行
-                [mx, my] = steerAroundTerrain(m, mx, my, target, spd);
-                m.vx_prev = mx; m.vy_prev = my;
-                m.x += mx; m.y += my;
-                // 绕开的是「最挡路」的那一个，切线走法可能蹭进旁边的障碍——
-                // 移动之后再兜一次底，保证任何一帧结束时怪都不在障碍内部。
-                pushOutOfTerrain(m, m.r + 2);
+                // v9.28: 射击小怪走到射程内就停下开火——不再往前贴脸。
+                // 近战判定半径是 target.r + m.r（塔 14、核心 30，都远小于 119），
+                // 所以停住的射击怪一辈子也进不去下面那段近战分支，不需要额外排除。
+                const shooterHolds = m.isShooter && targetDist <= getShooterRange(m) + target.r;
+                if (m.isShooter && shooterHolds) {
+                    if (m.shootTimer > 0) m.shootTimer--;
+                    if (m.shootTimer <= 0) {
+                        m.shootTimer = m.shootInterval || ENEMY_SHOOTER_INTERVAL;
+                        fireEnemyShot(m, target);
+                    }
+                }
+                if (!shooterHolds) {
+                    // v9.19: slowTimer 只在速度公式里乘一次（不像 slowAll 那样在生成时也乘）。
+                    // v9.22: slowTimer 现在有两个来源——E14「延缓」和踩到轨迹——两者共用
+                    // 同一个字段和同一个 0.8，取的是更长的那个持续时间。
+                    const spd = m.speed * (1 - G.buffs.slowAll) * (m.slowTimer > 0 ? 0.8 : 1) * 1.33;
+                    let mx = Math.cos(angle) * spd;
+                    let my = Math.sin(angle) * spd;
+                    // v9.22: 轨迹不再阻挡怪物——接触轨迹改为挂 3 秒迟缓（见下面的接触块）。
+                    // v9.4: 地形障碍绕行
+                    [mx, my] = steerAroundTerrain(m, mx, my, target, spd);
+                    m.vx_prev = mx; m.vy_prev = my;
+                    m.x += mx; m.y += my;
+                    // 绕开的是「最挡路」的那一个，切线走法可能蹭进旁边的障碍——
+                    // 移动之后再兜一次底，保证任何一帧结束时怪都不在障碍内部。
+                    pushOutOfTerrain(m, m.r + 2);
+                }
 
                 // v9.1: 灼烧怪火轨
                 if (m.isScorcher) {
@@ -626,10 +730,9 @@
                 showFloatingText(m.x, m.y - m.r, '-' + Math.floor(td), isSprintHit ? '#ffaa00' : '#ffaa44');
                 // v9.22: 轨迹伤害不再给终极技充能（改固定时间回复）
                 // v9.1: 荆棘词缀 + T03
+                // v9.28: 同子弹那一处——荆棘只作用于护盾。
                 if (m.affixes && m.affixes.includes('thorns')) {
-                    const thornDmg = td * (0.08 + G.floor * 0.002);
-                    G.player.hp = Math.max(0, G.player.hp - thornDmg);
-                    showFloatingText(G.player.x, G.player.y - G.player.r, '-' + Math.floor(thornDmg), '#ff6644');
+                    damagePlayerSide(td * (0.08 + G.floor * 0.002), { color: '#ff6644', shieldOnly: true });
                 }
                 if (m.isElite || m.isBoss) triggerPassive('T03', m);
                 triggerPassive('T06', m);
@@ -661,18 +764,9 @@
                         Tutorial.emit('hit');
                         breakKillStreak(); // v9.15: 核心挨打就断连
                         const dmg = m.atk * 0.35 * G.fateBuffs.damageTakenMul;
-                        if (G.player.hp > 0) {
-                            G.player.hp = Math.max(0, G.player.hp - dmg);
-                            spawnParticles(G.player.x, G.player.y, '#ff6644', 6);
-                            showFloatingText(G.player.x, G.player.y - G.player.r, '-' + Math.floor(dmg), '#ff6644');
-                            if (G.player.hp <= 0) {
-                                setFeedback('🛡️ 护盾耗尽！核心暴露！', '#ff4444');
-                            }
-                        } else {
-                            G.core.hp -= dmg;
-                            spawnParticles(G.core.x, G.core.y, '#ff3333', 8);
-                            showFloatingText(G.core.x, G.core.y - G.core.r, '-' + Math.floor(dmg), '#ff3333');
-                        }
+                        // v9.28: 统一走 damagePlayerSide()。Tutorial.emit('hit') 与
+                        // breakKillStreak() 留在外面——它们不是血量结算。
+                        damagePlayerSide(dmg, { color: '#ff6644' });
                         // v9.1: 吸血词缀
                         if (m.affixes && m.affixes.includes('vampiric') && G.player.hp <= 0) {
                             const vampHeal = dmg * (0.15 + G.floor * 0.01);
@@ -717,8 +811,14 @@
                     if (G.fateBuffs.vampHeal > 0) {
                         G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.fateBuffs.vampHeal * 3);
                     }
+                    // v9.28: 唤魔者 BOSS 额外掉一把「唤魔之钥」。它是真 BOSS——上面那套
+                    // 普通掉落（精华 / 遗物 / 卡牌 / T08 / 连杀分）照常吃，只是多掉一个。
+                    // 钥匙**不占**遗物上限 8，所以不走 dropRelic() 的那道闸门。
+                    if (m.isEvokerBoss) gainEvokerKey();
                     triggerPassive('T08', m); addScore(G.killStreak * 5);
-                    G.bossPending = false; G.bossSpawned = false;
+                    // v9.28: bossPending/bossSpawned 是「每 10 层一只」的楼层排程，
+                    // 打死唤魔者招出来的那只不该顺手把它们清掉。
+                    if (!m.isEvokerBoss) { G.bossPending = false; G.bossSpawned = false; }
                     // v9.22: 卡牌数也吃 dropRateMul；飘字改用实际到手的 bossGot
                     // （原来说的是未受本层精华上限钳制的 10+层，跟真掉的对不上）
                     const drops = Math.round((2 + Math.floor(Math.random() * 2)) * (G.fateBuffs.dropRateMul || 1));
@@ -744,8 +844,8 @@
                         }
                     }
                     if (dist(m, G.player) < 80) {
-                        G.player.hp = Math.max(0, G.player.hp - exDmg * 0.3);
-                        showFloatingText(G.player.x, G.player.y - G.player.r, '-' + Math.floor(exDmg * 0.3), '#ff6622');
+                        // v9.28: 爆裂新星也走「盾→核心」（原来是只扣护盾）。
+                        damagePlayerSide(exDmg * 0.3, { color: '#ff6622' });
                     }
                     spawnParticles(m.x, m.y, '#ff6622', 25);
                 }
@@ -799,6 +899,12 @@
             if (G.trails[i].life <= 0) G.trails.splice(i, 1);
         }
 
+        // v9.28: 射击小怪的弹道拖尾——只负责淡出，伤害在 fireEnemyShot() 里就已经结算了。
+        for (let i = G.enemyShots.length - 1; i >= 0; i--) {
+            G.enemyShots[i].life--;
+            if (G.enemyShots[i].life <= 0) G.enemyShots.splice(i, 1);
+        }
+
         // v9.1: 火焰轨迹伤害与衰减
         for (let i = G.fireTrails.length - 1; i >= 0; i--) {
             G.fireTrails[i].life--;
@@ -806,15 +912,15 @@
             const ft = G.fireTrails[i];
             const fmx = (ft.x1 + ft.x2) / 2, fmy = (ft.y1 + ft.y2) / 2;
             if (dist(G.player, { x: fmx, y: fmy }) < G.player.r + 14) {
-                // v9.19: 火焰仍然扣护盾，但视觉上表现为「伤害从玩家飞向核心的护盾」。
-                // 节流到每 6 帧一条——每帧 0.8 伤害的话，不节流就是满屏飞线。
-                const hadShield = G.player.hp > 0;
-                G.player.hp = Math.max(0, G.player.hp - 0.8);
+                // v9.19: 火焰的视觉是「伤害从玩家飞向核心的护盾」，节流到每 6 帧一条飞线。
+                // v9.28: 承伤改走统一出口——护盾破了之后火焰继续咬核心，不再停在 0。
+                // 这个来源本来就是逐帧结算，飘字/粒子由这里自己节流，所以传 silent。
+                const zone = damagePlayerSide(0.8, { silent: true });
                 if (G.frame % 6 === 0) {
                     G.damageFlows.push({
                         x1: G.player.x, y1: G.player.y,
                         x2: G.core.x, y2: G.core.y,
-                        t: 0, life: 14, toShield: hadShield,
+                        t: 0, life: 14, toShield: zone === 'shield',
                     });
                     if (G.damageFlows.length > 40) G.damageFlows.shift();
                 }
@@ -926,7 +1032,9 @@
                 const hz = G.hazardZones[i];
                 hz.life--;
                 if (hz.life <= 0) { G.hazardZones.splice(i, 1); continue; }
-                if (dist(G.player, hz) < hz.r + G.player.r) G.player.hp = Math.max(0, G.player.hp - 1.2);
+                // v9.28: 环境危险区也走「盾→核心」（原来是只扣护盾）。逐帧结算，
+                // 所以完全静默——它原本就没有任何飘字与粒子。
+                if (dist(G.player, hz) < hz.r + G.player.r) damagePlayerSide(1.2, { silent: true });
                 for (const m of G.monsters) {
                     if (dist(m, hz) < hz.r + m.r) m.hp -= 4;
                 }

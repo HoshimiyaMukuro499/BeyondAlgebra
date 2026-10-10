@@ -48,12 +48,16 @@
         G.passives[triggerId].splice(idx, 1);
         if (G.passives[triggerId].length === 0) delete G.passives[triggerId];
         const isHF = (triggerId === 'T06' || triggerId === 'T07' || triggerId === 'T08');
-        // 回退被动效果（与applyPassiveEffect中的isInitial值保持一致）
-        if (effectId === 'E01') G.buffs.atkUp -= removed.count * (isHF ? 5 : 12);
-        if (effectId === 'E02') G.buffs.multUp -= removed.count * 0.25;
-        if (effectId === 'E06') { G.buffs.trailDmg -= removed.count * 1;
-            G.buffs.trailWidth -= removed.count * 2; }
-        if (effectId === 'E11') G.buffs.speedUp -= removed.count * 0.35;
+        // v9.28: 回退必须与 applyPassiveEffect 的贡献**逐项同源**，否则移除一张 T03 被动
+        // 会多扣（把 atkUp 扣成负数）或少扣（留下残值）。倍率从 getPassiveValueMul 取，
+        // 与那边读的是同一份。末尾再夹一次 0——上限（250/49/100/150）会让累积值低于
+        // 名义贡献，这是本项目一直有的近似，夹 0 至少保证不会出现负数。
+        const vmul = getPassiveValueMul(triggerId);
+        if (effectId === 'E01') G.buffs.atkUp = Math.max(0, G.buffs.atkUp - removed.count * (isHF ? 5 : 12) * vmul);
+        if (effectId === 'E02') G.buffs.multUp = Math.max(0, G.buffs.multUp - removed.count * 0.25 * vmul);
+        if (effectId === 'E06') { G.buffs.trailDmg = Math.max(0, G.buffs.trailDmg - removed.count * 1 * vmul);
+            G.buffs.trailWidth = Math.max(0, G.buffs.trailWidth - removed.count * 2 * vmul); }
+        if (effectId === 'E11') G.buffs.speedUp = Math.max(0, G.buffs.speedUp - removed.count * 0.35 * vmul);
         setFeedback(`🗑 移除 ${removed.count}层被动`, '#8aa3c0');
         updatePassiveUI();
         updateUI();
@@ -107,11 +111,14 @@
             container.innerHTML = '<span style="color:#5a7a9a;font-size:10px;">手牌为空</span>';
             return;
         }
-        container.innerHTML = G.hand.map((c, i) =>
-            `<div class="hand-card ${c.type === 'trigger' ? 'trigger-card' : 'effect-card'}" data-idx="${i}">
+        // v9.28: 稀有卡（唤魔者）自带 cardColor，一张卡一个色；其余卡走 CSS 默认配色。
+        container.innerHTML = G.hand.map((c, i) => {
+            const cls = 'hand-card ' + (c.rare ? 'rare-card ' : '') + (c.type === 'trigger' ? 'trigger-card' : 'effect-card');
+            const style = c.cardColor ? ` style="border-color:${c.cardColor};box-shadow:inset 0 0 12px ${c.cardColor}55;"` : '';
+            return `<div class="${cls}"${style} data-idx="${i}">
                 ${c.emoji} ${c.label} <span class="tag">${c.type === 'trigger' ? '触发' : '效果'}</span>
-            </div>`
-        ).join('');
+            </div>`;
+        }).join('');
         container.querySelectorAll('.hand-card').forEach(el => {
             el.addEventListener('mousedown', function(e) {
                 e.preventDefault();
@@ -205,7 +212,8 @@
 
     // ---------- v9.4 遗物系统 ----------
     function dropRelic() {
-        const available = RELICS.filter(r => !G.relics.find(r2 => r2.id === r.id));
+        // v9.28: hidden 的遗物（唤魔之钥）不进随机池——它只能从唤魔者 BOSS 身上掉。
+        const available = RELICS.filter(r => !r.hidden && !G.relics.find(r2 => r2.id === r.id));
         if (available.length === 0) return;
         const weights = available.map(r => r.rarity === 'epic' ? 15 : r.rarity === 'rare' ? 35 : 50);
         const totalW = weights.reduce((a, b) => a + b, 0);
@@ -217,6 +225,37 @@
         logEvent('relic_get', { relicName: selected.name, rarity: selected.rarity });
         setFeedback(`🏺 获得遗物：${selected.emoji} ${selected.name} — ${selected.desc}`, '#ffb347');
         showNotification(`🏺 ${selected.name}！`, '#ffb347', 200);
+        updateRelicUI();
+        updateUI();
+    }
+
+    // ---------- v9.28 唤魔之钥 ----------
+    // 唤魔者 BOSS 的专属掉落。**不走 dropRelic()**：那个函数有一道 `遗物 < 8` 的闸门
+    // （钥匙是独立来源的稀有藏品，不该占那个名额），而且会从扣掉 hidden 的池子里随机抽。
+    // 效果：① 总分 lg +1（即 score ×10，见 fmtScore）② 已激活的每个密文版被动层数 +1。
+    // 「层数 +1」只动 G.passives 里的 count，**不新增槽位**——槽位数数的是
+    // G.passives[tid].length，与 count 无关，所以不会把槽位顶爆。
+    function gainEvokerKey() {
+        const key = RELICS.find(r => r.id === 'evokerKey');
+        if (!key) return;
+        G.relics.push(key);
+        key.apply(G);
+        // ① 总分 lg +1。fmtScore 取的就是 log10，乘 10 正好让它 +1.00。
+        G.score = Math.floor(G.score * 10);
+        // ② 每个已激活的被动 +1 层，并按 addPassive 的口径补一次永久属性结算
+        //    （E01/E06/E11/E15/E16/E17 这类「每次触发都涨一点」的会跟着涨）。
+        //    传 isInitial = true：这里是「层数凭空 +1」，不该再放一次特效。
+        for (const tid of Object.keys(G.passives)) {
+            for (const p of G.passives[tid]) {
+                p.count += 1;
+                applyPassiveEffect(tid, p.effectId, true);
+            }
+        }
+        updatePassiveUI();
+        logEvent('relic_get', { relicName: key.name, rarity: key.rarity });
+        setFeedback(`🗝️ 获得稀有藏品：${key.name} — ${key.desc}`, '#ffd24a');
+        showNotification('🗝️ 唤魔之钥！', '#ffd24a', 220);
+        spawnParticles(G.player.x, G.player.y, '#ffd24a', 30);
         updateRelicUI();
         updateUI();
     }
@@ -533,13 +572,16 @@
         const grid = document.getElementById('libraryGrid');
         if (!grid) return;
         let html = '';
-        TRIGGERS.forEach(t => {
-            html += `<div class="lib-card lib-trigger" data-type="trigger" data-id="${t.id}" data-label="${t.label}" data-emoji="${t.emoji}">
+        // v9.28: 稀有卡在 40 层前不进牌库——否则开局就能看到还没解锁的卡。
+        const rareLocked = G.floor < RARE_CARD_MIN_FLOOR;
+        const visible = c => !(c.rare && rareLocked);
+        TRIGGERS.filter(visible).forEach(t => {
+            html += `<div class="lib-card lib-trigger${t.rare ? ' lib-rare' : ''}" data-type="trigger" data-id="${t.id}" data-label="${t.label}" data-emoji="${t.emoji}">
                 ${t.emoji} ${t.label} <span class="badge">触发</span><span class="count-badge">∞</span>
             </div>`;
         });
-        EFFECTS.forEach(e => {
-            html += `<div class="lib-card lib-effect" data-type="effect" data-id="${e.id}" data-label="${e.label}" data-emoji="${e.emoji}">
+        EFFECTS.filter(visible).forEach(e => {
+            html += `<div class="lib-card lib-effect${e.rare ? ' lib-rare' : ''}" data-type="effect" data-id="${e.id}" data-label="${e.label}" data-emoji="${e.emoji}">
                 ${e.emoji} ${e.label} <span class="badge">效果</span><span class="count-badge">∞</span>
             </div>`;
         });

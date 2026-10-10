@@ -177,6 +177,47 @@ const factory = new Function(
   ' ATK_OVERFLOW_GUARD: (typeof ATK_OVERFLOW_GUARD !== "undefined") ? ATK_OVERFLOW_GUARD : null,' +
   ' BOSS_EARLY_MUL_START: (typeof BOSS_EARLY_MUL_START !== "undefined") ? BOSS_EARLY_MUL_START : null,' +
   ' formatDiff: (typeof formatDiff !== "undefined") ? formatDiff : null,' +
+  // v9.28 稀有密文版（唤魔者）+ 触发板精简 + 效果板层数落实 + 伤害通道统一 + 射击小怪
+  ' TRIGGERS: (typeof TRIGGERS !== "undefined") ? TRIGGERS : null,' +
+  ' EFFECTS: (typeof EFFECTS !== "undefined") ? EFFECTS : null,' +
+  ' rareChance: (typeof rareChance !== "undefined") ? rareChance : null,' +
+  ' randomTrigger: (typeof randomTrigger !== "undefined") ? randomTrigger : null,' +
+  ' randomEffect: (typeof randomEffect !== "undefined") ? randomEffect : null,' +
+  ' pickAffixes: (typeof pickAffixes !== "undefined") ? pickAffixes : null,' +
+  ' RARE_CARD_MIN_FLOOR: (typeof RARE_CARD_MIN_FLOOR !== "undefined") ? RARE_CARD_MIN_FLOOR : null,' +
+  ' RARE_CARD_MIN_CHANCE: (typeof RARE_CARD_MIN_CHANCE !== "undefined") ? RARE_CARD_MIN_CHANCE : null,' +
+  ' RARE_CARD_MAX_CHANCE: (typeof RARE_CARD_MAX_CHANCE !== "undefined") ? RARE_CARD_MAX_CHANCE : null,' +
+  ' RARE_E15_CAP: (typeof RARE_E15_CAP !== "undefined") ? RARE_E15_CAP : null,' +
+  ' RARE_E16_CAP: (typeof RARE_E16_CAP !== "undefined") ? RARE_E16_CAP : null,' +
+  ' RARE_E17_CAP: (typeof RARE_E17_CAP !== "undefined") ? RARE_E17_CAP : null,' +
+  ' T03_EFFECT_MUL: (typeof T03_EFFECT_MUL !== "undefined") ? T03_EFFECT_MUL : null,' +
+  ' FREEZE_MAX_FRAMES: (typeof FREEZE_MAX_FRAMES !== "undefined") ? FREEZE_MAX_FRAMES : null,' +
+  ' EVOKER_SUM_MUL: (typeof EVOKER_SUM_MUL !== "undefined") ? EVOKER_SUM_MUL : null,' +
+  ' ELITE_BOSS_AFFIX_WEIGHT: (typeof ELITE_BOSS_AFFIX_WEIGHT !== "undefined") ? ELITE_BOSS_AFFIX_WEIGHT : null,' +
+  ' triggerEvoker: (typeof triggerEvoker !== "undefined") ? triggerEvoker : null,' +
+  ' spawnBoss: (typeof spawnBoss !== "undefined") ? spawnBoss : null,' +
+  ' getBossHp: (typeof getBossHp !== "undefined") ? getBossHp : null,' +
+  ' getBossAtk: (typeof getBossAtk !== "undefined") ? getBossAtk : null,' +
+  ' gainEvokerKey: (typeof gainEvokerKey !== "undefined") ? gainEvokerKey : null,' +
+  ' damagePlayerSide: (typeof damagePlayerSide !== "undefined") ? damagePlayerSide : null,' +
+  ' addPassive: (typeof addPassive !== "undefined") ? addPassive : null,' +
+  ' triggerPassive: (typeof triggerPassive !== "undefined") ? triggerPassive : null,' +
+  ' removePassive: (typeof removePassive !== "undefined") ? removePassive : null,' +
+  ' getPassiveValueMul: (typeof getPassiveValueMul !== "undefined") ? getPassiveValueMul : null,' +
+  ' PASSIVE_REPEAT_EFFECTS: (typeof PASSIVE_REPEAT_EFFECTS !== "undefined") ? PASSIVE_REPEAT_EFFECTS : null,' +
+  ' spawnMonster: (typeof spawnMonster !== "undefined") ? spawnMonster : null,' +
+  ' fireEnemyShot: (typeof fireEnemyShot !== "undefined") ? fireEnemyShot : null,' +
+  ' getShooterRange: (typeof getShooterRange !== "undefined") ? getShooterRange : null,' +
+  ' MONSTER_TYPES: (typeof MONSTER_TYPES !== "undefined") ? MONSTER_TYPES : null,' +
+  ' ENEMY_SHOOTER_RANGE: (typeof ENEMY_SHOOTER_RANGE !== "undefined") ? ENEMY_SHOOTER_RANGE : null,' +
+  ' ENEMY_SHOOTER_INTERVAL: (typeof ENEMY_SHOOTER_INTERVAL !== "undefined") ? ENEMY_SHOOTER_INTERVAL : null,' +
+  ' ENEMY_SHOOTER_UNLOCK_FLOOR: (typeof ENEMY_SHOOTER_UNLOCK_FLOOR !== "undefined") ? ENEMY_SHOOTER_UNLOCK_FLOOR : null,' +
+  ' ENEMY_SHOT_LIFE: (typeof ENEMY_SHOT_LIFE !== "undefined") ? ENEMY_SHOT_LIFE : null,' +
+  ' STAGE_TYPES: (typeof STAGE_TYPES !== "undefined") ? STAGE_TYPES : null,' +
+  ' CHAIR_COMBOS: (typeof CHAIR_COMBOS !== "undefined") ? CHAIR_COMBOS : null,' +
+  ' dropRelic: (typeof dropRelic !== "undefined") ? dropRelic : null,' +
+  ' RELICS: (typeof RELICS !== "undefined") ? RELICS : null,' +
+  ' applyPassiveEffect: (typeof applyPassiveEffect !== "undefined") ? applyPassiveEffect : null,' +
   // 已删符号的存在性探针——拿 KILL_BURSTS/MAP_NODES 这类名字去断言「确实删干净了」
   ' deletedSymbols: { KILL_BURSTS: typeof KILL_BURSTS !== "undefined",' +
   '  MAP_NODES: typeof MAP_NODES !== "undefined",' +
@@ -226,7 +267,20 @@ const { AFFIX_ZONE_R_MUL, AFFIX_ZONE_MAX_PER_KIND, bossEarlyMul, BOSS_EARLY_RAMP
         tickBossCardMilestones,
         setCanvasPointer, showNodeMap, TUTORIAL_NODEMAP,
         DIFF_BASE, DIFF_TAIL, EARLY_NORMAL_MUL, HP_OVERFLOW_GUARD, ATK_OVERFLOW_GUARD,
-        BOSS_EARLY_MUL_START, formatDiff } = api;
+        BOSS_EARLY_MUL_START, formatDiff,
+        // v9.28 —— 只在这里取「前面没解构过」的名字；TRIG_ / EFFECTS / MONSTER_TYPES /
+        // pickAffixes / randomEffect / randomTrigger / addPassive / spawnBoss / getBossHp
+        // 上面已经绑过了，重复声明会直接 SyntaxError。
+        rareChance, RARE_CARD_MIN_FLOOR, RARE_CARD_MIN_CHANCE, RARE_CARD_MAX_CHANCE,
+        RARE_E15_CAP, RARE_E16_CAP, RARE_E17_CAP,
+        T03_EFFECT_MUL, FREEZE_MAX_FRAMES, EVOKER_SUM_MUL, ELITE_BOSS_AFFIX_WEIGHT,
+        triggerEvoker, getBossAtk, gainEvokerKey,
+        damagePlayerSide, triggerPassive, removePassive,
+        getPassiveValueMul, PASSIVE_REPEAT_EFFECTS, applyPassiveEffect,
+        spawnMonster, fireEnemyShot, getShooterRange, STAGE_TYPES, CHAIR_COMBOS,
+        dropRelic, RELICS,
+        ENEMY_SHOOTER_RANGE, ENEMY_SHOOTER_INTERVAL, ENEMY_SHOOTER_UNLOCK_FLOOR,
+        ENEMY_SHOT_LIFE } = api;
 const HAS_V925 = !!(bossEarlyMul && spawnAffixZone && tickAffixZones && tryEliminate
                     && getPlayerAttackPower && setStickFromTouch);
 // v9.26：pointer-events 收敛到 setCanvasPointer() 这一个入口。
@@ -239,6 +293,12 @@ const HAS_V926 = !!(setCanvasPointer && api.canvas);
 // 而不是 typeof ——对 null 做 typeof 得到的是 'object'，那个开关永远不亮。
 const HAS_V927 = !!(DIFF_BASE && !DIFF_TAIL && EARLY_NORMAL_MUL
                     && HP_OVERFLOW_GUARD && ATK_OVERFLOW_GUARD && formatDiff);
+// v9.28：稀有密文版 + 唤魔者 + 伤害通道统一 + 射击小怪。
+// 判据取「新符号齐了」+「被删的 T01/T02 确实不在了」两条一起。
+const HAS_V928 = !!(TRIG_ && EFFECTS && rareChance && triggerEvoker && gainEvokerKey
+                    && damagePlayerSide && PASSIVE_REPEAT_EFFECTS && MONSTER_TYPES && MONSTER_TYPES.SHOOTER
+                    && ENEMY_SHOOTER_RANGE && !TRIG_.find(t => t.id === 'T01')
+                    && !TRIG_.find(t => t.id === 'T02'));
 
 let pass = 0, fail = 0;
 const ok = (cond, label, extra = '') => {
@@ -1747,8 +1807,8 @@ if (!HAS_V925) {
   ok(OLD_IDS.every(id => { const d = affixDef(id); return d && !d.bossOnly; }),
     '原来那 6 条一条都没被标成 bossOnly');
 
-  // 19b 精英只抽非 bossOnly —— 跑 500 次，8 个新 id 一次都不许出现
-  // 这是「新词条变 BOSS 专属」这条需求最直接的回归防线。
+  // 19b 精英池的边界。v9.25 是「一条 bossOnly 都不许漏」；v9.28 反过来——
+  // 精英与 BOSS 词条共享，专属的 8 条精英也抽得到，但只算半权。
   G.floor = 40;   // 门槛全开，排除「抽不到是因为层数不够」
   let leaked = [];
   for (let i = 0; i < 500; i++) {
@@ -1758,8 +1818,40 @@ if (!HAS_V925) {
       if (!d || d.bossOnly) leaked.push(id);
     }
   }
-  ok(leaked.length === 0, '精英 500 次抽取里一条 bossOnly 都没漏出来',
-    leaked.slice(0, 5).join(','));
+  if (!HAS_V928) {
+    ok(leaked.length === 0, '精英 500 次抽取里一条 bossOnly 都没漏出来',
+      leaked.slice(0, 5).join(','));
+  } else {
+    ok(leaked.length > 0, 'v9.28：精英现在抽得到 bossOnly（共享池）',
+      `500×3 次里一条都没出：${leaked.length}`);
+    // 半权 = 同一条词条被抽中的概率只有普通词条的一半。用「抽 2 个、只看第一个」的
+    // 边际频率去估：8 条专属各 0.5 权、6 条普通各 1 权 ⇒ 专属占比 4/10 = 0.4。
+    let bossFirst = 0, trials = 4000;
+    for (let i = 0; i < trials; i++) {
+      const d = affixDef(pickAffixes(1, { bossOnly: false })[0]);
+      if (d && d.bossOnly) bossFirst++;
+    }
+    const rate = bossFirst / trials;
+    ok(Math.abs(rate - 0.4) < 0.04, `专属半权：首个词条是 bossOnly 的频率 ≈ 0.40（实测 ${rate.toFixed(3)}）`,
+      `got ${rate.toFixed(4)}`);
+    // BOSS 池不受影响：半权只写在 `if (isElite)` 分支里，BOSS 走的是原来那条
+    // 均匀洗牌。这里做**结构性**断言而不是频率断言——老路径用的是
+    // `.sort(() => Math.random() - 0.5)`，那不是一个均匀洗牌（索引靠前的元素
+    // 更容易留在前面），拿它统计占比只会测出这个偏置，测不出权重。
+    ok(/if \(isElite\) \{/.test(html),
+      'BOSS 池一视同仁：半权逻辑被 `if (isElite)` 圈住，非精英路径没被碰到');
+    ok(/const shuffled = \[\.\.\.pool\]\.sort\(\(\) => Math\.random\(\) - 0\.5\);/.test(html),
+      '非精英路径仍是原来那条均匀洗牌（BOSS 分布没被顺手改掉）');
+    // 两组都抽得到（沿用 19b 的旧口径）
+    let sawB = { boss: false, plain: false };
+    for (let i = 0; i < 300; i++) {
+      for (const id of pickAffixes(2, { bossOnly: 'any' })) {
+        const d = affixDef(id);
+        if (d && d.bossOnly) sawB.boss = true; else sawB.plain = true;
+      }
+    }
+    ok(sawB.boss && sawB.plain, 'BOSS 池两组都抽得到', JSON.stringify(sawB));
+  }
   // 反向：只要 bossOnly 的那些
   let bossOnlyOk = true;
   for (let i = 0; i < 200; i++) {
@@ -2433,5 +2525,490 @@ if (!HAS_V927) {
   ok(fmtCalls === 3, 'HUD / 结算界面 / 模拟报告三处都走 formatDiff()', `got ${fmtCalls}`);
 }
 
+// ============================================================
+//  21. v9.28 稀有密文版（唤魔者）· 触发板精简 · 层数落实 · 伤害通道统一 · 射击小怪
+// ============================================================
+if (!HAS_V928) {
+  section('21. v9.28（跳过：这是 9.27 及更早的产物）');
+} else {
+  section('21. v9.28 稀有密文版 + 唤魔者 + 触发板精简 + 层数落实 + 射击小怪');
+
+  // ---------- 21a 稀有概率：40 层 1%，线性爬到 80 层 5% ----------
+  const rc = (f) => { G.floor = f; return rareChance(); };
+  ok(RARE_CARD_MIN_FLOOR === 40, '稀有卡第 40 层起出现', `got ${RARE_CARD_MIN_FLOOR}`);
+  ok(rc(1) === 0 && rc(39) === 0, '第 1 / 39 层：出率 0（与旧版本行为一致）',
+    `got ${rc(1)} / ${rc(39)}`);
+  ok(Math.abs(rc(40) - 0.01) < 1e-12, '第 40 层 = 1%', `got ${rc(40)}`);
+  ok(Math.abs(rc(60) - 0.03) < 1e-12, '第 60 层 = 3%（线性中点）', `got ${rc(60)}`);
+  ok(Math.abs(rc(80) - 0.05) < 1e-12, '第 80 层 = 5%', `got ${rc(80)}`);
+  ok(Math.abs(rc(120) - 0.05) < 1e-12, '第 120 层仍是 5%（封顶，不是继续涨）', `got ${rc(120)}`);
+
+  // ---------- 21b 触发板精简：T01 / T02 已删，T03 改名，T14 进池 ----------
+  ok(!TRIG_.find(t => t.id === 'T01'), 'T01「对自身」已删除');
+  ok(!TRIG_.find(t => t.id === 'T02'), 'T02「对敌群」已删除');
+  const t03 = TRIG_.find(t => t.id === 'T03');
+  ok(!!t03 && t03.label === '命中精英时', 'T03 改名「对精英生效」→「命中精英时」',
+    t03 && t03.label);
+  const t14 = TRIG_.find(t => t.id === 'T14');
+  ok(!!t14 && t14.rare === true, 'T14「唤魔者」存在且标记 rare', JSON.stringify(t14));
+  ok(!!t14 && t14.cardColor === '#a01f2e', '唤魔者是红卡（cardColor 有值）',
+    t14 && t14.cardColor);
+  // 其它卡不许有 cardColor —— 「只给这一张红」这条要成立
+  const othersColored = TRIG_.filter(t => t.id !== 'T14' && t.cardColor).map(t => t.id);
+  ok(othersColored.length === 0, '只有唤魔者带 cardColor，其余触发板走默认配色',
+    othersColored.join(','));
+  // 教程第 5 层的脚本掉落与模拟器的自动组合表都必须改绑 T08
+  ok(/t:'T08', e:'E07', name:'爆轨清场'/.test(html),
+    '自动组合表：爆轨清场 = T08+E07（旧写法 t:\'T02\' 已消失）');
+  ok(!/t:'T02'/.test(html), '全项目不再有任何一处引用 T02');
+  const chairBoom = CHAIR_COMBOS.find(c => c.name === '爆轨清场');
+  ok(!!chairBoom && chairBoom.trigger === 'T08', 'CHAIR_COMBOS 里爆轨清场的 trigger = T08',
+    chairBoom && chairBoom.trigger);
+  ok(/on: 'kill', n: 2, card: 'T08'/.test(html), '教程第 5 层的脚本掉落改成 T08');
+  ok(!/card: 'T01'/.test(html) && !/card: 'T02'/.test(html),
+    '教程脚本里不再发 T01 / T02（dropScriptedCard 找不到 id 时会静默 no-op，这条必须显式断言）');
+
+  // ---------- 21c 三张稀有效果板 ----------
+  for (const id of ['E15', 'E16', 'E17']) {
+    const e = EFFECTS.find(x => x.id === id);
+    ok(!!e && e.rare === true, `${id} 存在且标记 rare`, JSON.stringify(e));
+  }
+  ok(RARE_E15_CAP === 30 && RARE_E16_CAP === 300 && RARE_E17_CAP === 2.0,
+    '三张稀有卡各自的上限 = 30 / 300 / 2.0',
+    `${RARE_E15_CAP} / ${RARE_E16_CAP} / ${RARE_E17_CAP}`);
+  // 39 层抽 500 次，一次都不许出稀有
+  fresh();
+  G.floor = 39;
+  let rareLeak = 0;
+  for (let i = 0; i < 500; i++) { if (randomEffect().rare) rareLeak++; }
+  ok(rareLeak === 0, '第 39 层抽 500 次效果板，稀有卡一次都没出', `got ${rareLeak}`);
+  let rareTrigLeak = 0;
+  for (let i = 0; i < 500; i++) { if (api.randomTrigger().rare) rareTrigLeak++; }
+  ok(rareTrigLeak === 0, '第 39 层抽 500 次触发板，唤魔者一次都没出', `got ${rareTrigLeak}`);
+  // 第 80 层：出率 5%，500 次应当抽到几十张（给个宽松下界，别做成随机性断言）
+  fresh();
+  G.floor = 80;
+  let rareHit = 0;
+  for (let i = 0; i < 500; i++) { if (randomEffect().rare) rareHit++; }
+  ok(rareHit > 5 && rareHit < 80, `第 80 层 500 次抽出稀有卡 ${rareHit} 张（期望 ≈25）`);
+
+  // 三张稀有卡的上限确实夹得住（拿 T06 这种高频触发板猛抽）
+  fresh();
+  G.floor = 80;
+  G.passives = { T06: [{ effectId: 'E15', count: 1 }] };
+  for (let i = 0; i < 200; i++) triggerPassive('T06');
+  ok(G.turretHpBonus === RARE_E15_CAP, `E15 叠 200 次封顶在 +${RARE_E15_CAP}`,
+    `got ${G.turretHpBonus}`);
+  fresh();
+  G.floor = 80;
+  G.passives = { T06: [{ effectId: 'E16', count: 1 }] };
+  for (let i = 0; i < 400; i++) triggerPassive('T06');
+  ok(G.player.maxHp === RARE_E16_CAP, `E16 封顶在 ${RARE_E16_CAP}`, `got ${G.player.maxHp}`);
+  fresh();
+  G.floor = 80;
+  G.passives = { T06: [{ effectId: 'E17', count: 1 }] };
+  for (let i = 0; i < 200; i++) triggerPassive('T06');
+  ok(Math.abs(G.buffs.fireRateMul - RARE_E17_CAP) < 1e-9,
+    `E17 封顶在 ×${RARE_E17_CAP}`, `got ${G.buffs.fireRateMul}`);
+  // E17 是「两道闸门」效果：两处都必须读 fireRateMul
+  ok(/G\.fireCounter >= G\.fireRate \/ G\.buffs\.fireRateMul/.test(html),
+    '射速闸门 1（05-update.js 的 fireCounter）读了 fireRateMul');
+  ok(/PLAYER_FIRE_RATE_MUL \/ G\.buffs\.fireRateMul/.test(html),
+    '射速闸门 2（04-trail.js 的 shootCooldown）也读了 fireRateMul');
+
+  // ---------- 21d T03 ×1.2 与 removePassive 的回退 ----------
+  ok(T03_EFFECT_MUL === 1.2, 'T03_EFFECT_MUL = 1.2', `got ${T03_EFFECT_MUL}`);
+  ok(getPassiveValueMul('T03') === 1.2 && getPassiveValueMul('T06') === 1,
+    'getPassiveValueMul：T03 才是 1.2，其余触发板是 1');
+  fresh();
+  addPassive('T03', 'E01');
+  ok(Math.abs(G.buffs.atkUp - 12 * 1.2) < 1e-9,
+    'T03+E01 一次生效 = 12 × 1.2 = 14.4（不是 12）', `got ${G.buffs.atkUp}`);
+  removePassive('T03', 'E01');
+  ok(Math.abs(G.buffs.atkUp) < 1e-9, 'removePassive 后 atkUp 归零（回退同步了 ×1.2）',
+    `got ${G.buffs.atkUp}`);
+  ok(G.buffs.atkUp >= 0, 'atkUp 不会变成负数');
+  // 对照组：同样一张 E01 挂在 T06 上就该是原值
+  fresh();
+  addPassive('T06', 'E01');
+  ok(Math.abs(G.buffs.atkUp - 5) < 1e-9, '对照：T06（高频）× E01 = 5，没被 ×1.2 波及',
+    `got ${G.buffs.atkUp}`);
+
+  // ---------- 21e 层数落实 ----------
+  ok(PASSIVE_REPEAT_EFFECTS.has('E10') && PASSIVE_REPEAT_EFFECTS.has('E02'),
+    'E02 / E10 走「触发次数 ×n」');
+  ok(!PASSIVE_REPEAT_EFFECTS.has('E13') && !PASSIVE_REPEAT_EFFECTS.has('E14')
+     && !PASSIVE_REPEAT_EFFECTS.has('E01'),
+    'E01 / E13 / E14 走「数值或时长 ×n」（不在重复集合里）');
+  ok(FREEZE_MAX_FRAMES === 600, '冰冻封顶 FREEZE_MAX_FRAMES = 600（旧的 180 会让第 4 层起叠不上去）',
+    `got ${FREEZE_MAX_FRAMES}`);
+
+  // E01 3 层：一次结算 +36（不是 +12）
+  fresh();
+  applyPassiveEffect('T12', 'E01', false, null, 3);
+  ok(Math.abs(G.buffs.atkUp - 36) < 1e-9, 'E01 3 层一次结算 = 12×3 = 36', `got ${G.buffs.atkUp}`);
+
+  // E10 3 层：仍然打 3 次（走重复路径）
+  fresh();
+  G.floor = 10;
+  const dotM = mkM(300, 300);
+  G.monsters = [dotM];
+  G.passives = { T12: [{ effectId: 'E10', count: 3 }] };
+  triggerPassive('T12');
+  const e10Single = Math.floor(60 * (2 + getDifficultyMultiplier()) / 3);
+  ok(Math.abs((1e6 - dotM.hp) - e10Single * 3) < 1e-6,
+    `E10 3 层打 3 次（每次 ${e10Single}，共 ${e10Single * 3}）`, `got ${1e6 - dotM.hp}`);
+
+  // E13 3 层：54×3 = 162（旧写法重复 3 次各 54，被 Math.min(…,180) 截断成 162 也一样，
+  // 但 4 层起旧写法就截在 180 了——下面用 5 层把这条分水岭钉死）
+  fresh();
+  const fz = mkM(300, 300);
+  G.monsters = [fz];
+  applyPassiveEffect('T12', 'E13', false, fz, 3);
+  ok(fz.frozen === 162, 'E13 3 层：冰冻 54×3 = 162 帧', `got ${fz.frozen}`);
+  ok(fz.passiveFreeze === 162, 'E13 3 层挂上了持续伤害标记', `got ${fz.passiveFreeze}`);
+  fresh();
+  const fz5 = mkM(300, 300);
+  G.monsters = [fz5];
+  applyPassiveEffect('T12', 'E13', false, fz5, 5);
+  ok(fz5.frozen === 270, 'E13 5 层 = 270 帧（旧的 180 封顶会让这里停在 180）',
+    `got ${fz5.frozen}`);
+  fresh();
+  const fz1 = mkM(300, 300);
+  G.monsters = [fz1];
+  applyPassiveEffect('T12', 'E13', false, fz1, 1);
+  ok(fz1.frozen === 54 && !fz1.passiveFreeze,
+    'E13 1 层：54 帧且**不挂**持续伤害标记',
+    `${fz1.frozen} / ${fz1.passiveFreeze}`);
+
+  // E14 3 层：60×3 = 180。**这是新旧的分水岭**——旧写法 Math.max(slowTimer, 60) 恒为 60。
+  fresh();
+  const sl = mkM(300, 300);
+  G.monsters = [sl];
+  applyPassiveEffect('T12', 'E14', false, sl, 3);
+  ok(sl.slowTimer === 180, 'E14 3 层：延缓 60×3 = 180 帧（旧行为恒为 60）',
+    `got ${sl.slowTimer}`);
+  ok(sl.passiveSlow === 180, 'E14 3 层挂上了持续伤害标记', `got ${sl.passiveSlow}`);
+
+  // 持续伤害标记只能由 E13/E14 写 —— 轨迹踩踏的迟缓绝不能碰它
+  ok((html.match(/\.passiveFreeze =/g) || []).length === 1,
+    'passiveFreeze 全项目只有一处赋值（E13 分支）',
+    `got ${(html.match(/\.passiveFreeze =/g) || []).length}`);
+  ok((html.match(/\.passiveSlow =/g) || []).length === 1,
+    'passiveSlow 全项目只有一处赋值（E14 分支）',
+    `got ${(html.match(/\.passiveSlow =/g) || []).length}`);
+
+  // DoT 整跑一遍：被多层冰冻的怪，满 60 帧掉一次 100% 攻击力
+  {
+    fresh();
+    G.frame = 0;
+    G.monstersToSpawn = 0; G.spawnTimer = 0;
+    const dm = mkM(600, 500);
+    dm.passiveFreeze = 120; dm.frozen = 120;
+    dm.passiveDotTimer = 0;
+    G.monsters = [dm];
+    const hp0 = dm.hp;
+    const want = getPlayerAttackPower();
+    for (let i = 0; i < 60; i++) { G.bullets.length = 0; update(); }
+    ok(Math.abs((hp0 - dm.hp) - want) < 1e-6,
+      `多层控制每秒吃一次 100% 攻击力（${Math.round(want)} 点）`, `got ${hp0 - dm.hp}`);
+
+    // 对照：同样冻住但**没挂标记**（1 层冰冻）→ 一点血都不掉
+    fresh();
+    G.frame = 0;
+    G.monstersToSpawn = 0; G.spawnTimer = 0;
+    const dm1 = mkM(600, 500);
+    dm1.frozen = 120; dm1.passiveFreeze = 0; dm1.passiveDotTimer = 0;
+    G.monsters = [dm1];
+    const hp1 = dm1.hp;
+    for (let i = 0; i < 60; i++) { G.bullets.length = 0; update(); }
+    ok(dm1.hp === hp1, '对照：1 层冰冻不掉血（标记是 n>1 才有的）', `got ${hp1 - dm1.hp}`);
+
+    // 对照：只有轨迹迟缓（slowTimer）也没标记 → 不掉血
+    fresh();
+    G.frame = 0;
+    G.monstersToSpawn = 0; G.spawnTimer = 0;
+    const dm2 = mkM(600, 500);
+    dm2.slowTimer = 120; dm2.passiveSlow = 0; dm2.passiveDotTimer = 0;
+    G.monsters = [dm2];
+    const hp2 = dm2.hp;
+    for (let i = 0; i < 60; i++) { G.bullets.length = 0; update(); }
+    ok(dm2.hp === hp2, '对照：轨迹迟缓不掉血（不会被平A铺轨白送 DoT）', `got ${hp2 - dm2.hp}`);
+  }
+
+  // ---------- 21f 伤害通道统一到「盾 → 核心」 ----------
+  fresh();
+  G.player.hp = 50; G.player.maxHp = 100;
+  G.core.hp = 100;
+  const side1 = damagePlayerSide(60);
+  ok(side1 === 'shield' && G.player.hp === 0 && G.core.hp === 100,
+    '护盾 50 挨 60：护盾归零，这一下的溢出**不**穿到核心（与撞核心那处的口径一致）',
+    `${side1} 盾 ${G.player.hp} / 核心 ${G.core.hp}`);
+  const hitSide = damagePlayerSide(5);
+  ok(hitSide === 'core' && G.core.hp === 95,
+    '护盾归零后，同一条渠道的伤害转而去扣核心（这就是「对主血量也会生效」）',
+    `${hitSide} / ${G.core.hp}`);
+  fresh();
+  G.player.hp = 100; G.core.hp = 100;
+  ok(damagePlayerSide(30) === 'shield' && G.player.hp === 70 && G.core.hp === 100,
+    '护盾够用时核心一点不掉，返回 "shield"', `${G.player.hp} / ${G.core.hp}`);
+  // 荆棘是**唯一的例外**：只作用于护盾，护盾归零后不再咬核心。
+  // 火圈 / 火轨迹那几条才是「破了继续扣血量」。
+  fresh();
+  G.player.hp = 40; G.core.hp = 100;
+  const sideT = damagePlayerSide(60, { shieldOnly: true });
+  ok(sideT === 'shield' && G.player.hp === 0 && G.core.hp === 100,
+    '荆棘：只作用于护盾，护盾归零后核心一点不掉',
+    `${sideT} 盾 ${G.player.hp} / 核心 ${G.core.hp}`);
+  ok(damagePlayerSide(10, { shieldOnly: true }) === 'shield' && G.core.hp === 100,
+    '荆棘：护盾已经是 0 时也打不到核心（不是「0 就往下走」）', `got ${G.core.hp}`);
+  ok((html.match(/shieldOnly: true/g) || []).length === 2,
+    '全项目只有荆棘那两处（子弹反弹 / 轨迹反弹）传 shieldOnly',
+    `got ${(html.match(/shieldOnly: true/g) || []).length}`);
+  // 火圈 / 火轨迹仍能打到核心
+  fresh();
+  G.player.hp = 0; G.core.hp = 100;
+  damagePlayerSide(7, { color: '#ff6622', particles: 1, noText: true });
+  ok(G.core.hp === 93, '火圈类（不带 shieldOnly）护盾破了之后照常扣核心血量',
+    `got ${G.core.hp}`);
+  // 8 条伤害来源全部收敛到这一个入口
+  const dpsCalls = (html.match(/damagePlayerSide\(/g) || []).length;
+  ok(dpsCalls >= 9, `damagePlayerSide() 有 1 处定义 + ≥8 处调用（实测 ${dpsCalls} 处）`,
+    `got ${dpsCalls}`);
+  // 旧的「只扣护盾、破了停在 0」写法不许再出现
+  ok(!/G\.player\.hp = Math\.max\(0, G\.player\.hp - td \*/.test(html),
+    '荆棘/火轨迹那两条旧的「只扣护盾」写法已经删掉');
+
+  // ---------- 21g 唤魔者 ----------
+  ok(EVOKER_SUM_MUL === 1.13, 'EVOKER_SUM_MUL = 1.13', `got ${EVOKER_SUM_MUL}`);
+  fresh();
+  G.floor = 50;
+  G.monsters = [
+    { x: 100, y: 100, r: 12, hp: 1e12, maxHp: 1e12, atk: 1e6, type: 'basic', isBoss: false, isElite: false, frozen: 0, stunned: 0, slowTimer: 0, hitCooldown: 0, trailDamageCooldown: 9999, vx_prev: 0, vy_prev: 0, _fireCounter: 0, affixes: [], moveTimer: 0, isMoving: false },
+    { x: 200, y: 100, r: 12, hp: 1e12, maxHp: 1e12, atk: 1e6, type: 'basic', isBoss: false, isElite: false, frozen: 0, stunned: 0, slowTimer: 0, hitCooldown: 0, trailDamageCooldown: 9999, vx_prev: 0, vy_prev: 0, _fireCounter: 0, affixes: [], moveTimer: 0, isMoving: false },
+    { x: 300, y: 100, r: 12, hp: 1e12, maxHp: 1e12, atk: 1e6, type: 'basic', isBoss: false, isElite: false, frozen: 0, stunned: 0, slowTimer: 0, hitCooldown: 0, trailDamageCooldown: 9999, vx_prev: 0, vy_prev: 0, _fireCounter: 0, affixes: [], moveTimer: 0, isMoving: false },
+  ];
+  const killsBefore = G.killCount, scoreBefore = G.score, streakBefore = G.killStreak;
+  const sumHp = 3e12, sumAtk = 3e6;
+  triggerEvoker();
+  ok(G.monsters.length === 1, '唤魔者宣读后场上只剩 1 只', `got ${G.monsters.length}`);
+  const ev = G.monsters[0];
+  ok(!!ev && ev.isBoss === true, '招出来的是 BOSS');
+  ok(!!ev && ev.isEvokerBoss === true, '并且带 isEvokerBoss 标记');
+  ok(!!ev && ev.affixes.length === 3, '是三词条（普通 BOSS 只有 2 个）',
+    ev && ev.affixes.length);
+  const wantHp = Math.max(getBossHp(), sumHp * EVOKER_SUM_MUL);
+  const wantAtk = Math.max(getBossAtk(), sumAtk * EVOKER_SUM_MUL);
+  ok(!!ev && Math.abs(ev.hp - wantHp) < 1e-6,
+    `HP = max(该层 BOSS, Σ怪 ×1.13) = ${wantHp.toExponential(3)}`,
+    `got ${ev && ev.hp.toExponential(3)}`);
+  ok(!!ev && Math.abs(ev.atk - wantAtk) < 1e-6,
+    `攻击也取同一个 max 口径 = ${wantAtk.toExponential(3)}`,
+    `got ${ev && ev.atk.toExponential(3)}`);
+  ok(G.killCount === killsBefore, '清场**没有**增加击杀数（不走 registerKill）',
+    `got ${G.killCount - killsBefore}`);
+  ok(G.score === scoreBefore, '清场没有加分', `got ${G.score - scoreBefore}`);
+  ok(G.killStreak === streakBefore, '清场没有断连杀', `got ${G.killStreak - streakBefore}`);
+  // 66 层 BOSS 不可能赢过 Σ怪 的场景要真的走「该层 BOSS 值」那一支
+  fresh();
+  G.floor = 50;
+  G.monsters = [{ x: 100, y: 100, r: 12, hp: 10, maxHp: 10, atk: 1, type: 'basic', isBoss: false, isElite: false, frozen: 0, stunned: 0, slowTimer: 0, hitCooldown: 0, trailDamageCooldown: 9999, vx_prev: 0, vy_prev: 0, _fireCounter: 0, affixes: [], moveTimer: 0, isMoving: false }];
+  const bossHp50 = getBossHp();
+  triggerEvoker();
+  ok(G.monsters.length === 1 && Math.abs(G.monsters[0].hp - bossHp50) < 1e-6,
+    '怪太少时取的是「该层 BOSS 的数值」那一支',
+    `got ${G.monsters[0] && G.monsters[0].hp} vs ${bossHp50}`);
+  ok(G.monsters[0].isEvokerBoss === true && G.bossPending === false,
+    '唤魔者不碰 G.bossPending（每 10 层一只的排程不受影响）', `got ${G.bossPending}`);
+
+  // ---------- 21h 唤魔之钥 ----------
+  const keyRelic = RELICS.find(r => r.id === 'evokerKey');
+  ok(!!keyRelic && keyRelic.hidden === true, '唤魔之钥登记在 RELICS 里且 hidden',
+    JSON.stringify(keyRelic && keyRelic.id));
+  ok(!!keyRelic && keyRelic.rarity === 'epic', '唤魔之钥是 epic');
+  fresh();
+  G.score = 1234;
+  G.passives = { T06: [{ effectId: 'E01', count: 2 }], T12: [{ effectId: 'E13', count: 5 }] };
+  G.buffs.atkUp = 0;
+  gainEvokerKey();
+  ok(G.score === 12340, '总分 lg +1（1234 → 12340）', `got ${G.score}`);
+  ok(G.relics.some(r => r.id === 'evokerKey'), '遗物栏里出现了唤魔之钥',
+    G.relics.map(r => r.id).join(','));
+  ok(G.passives.T06[0].count === 3 && G.passives.T12[0].count === 6,
+    '已激活的被动全部 +1 层',
+    `${G.passives.T06[0].count} / ${G.passives.T12[0].count}`);
+  ok(Math.abs(G.buffs.atkUp - 5) < 1e-9,
+    '层数 +1 的同时按 addPassive 的口径补了一次永久属性结算（T06×E01 → +5）',
+    `got ${G.buffs.atkUp}`);
+  ok(G.maxSlots === 4, '钥匙不新增槽位（槽位数的是 passives[tid].length）',
+    `got ${G.maxSlots}`);
+  // hidden 的遗物不进随机池
+  fresh();
+  let keyFromPool = 0;
+  for (let i = 0; i < 200; i++) {
+    if (G.relics.some(r => r.id === 'evokerKey')) { keyFromPool++; break; }
+    dropRelic();
+  }
+  ok(keyFromPool === 0, 'dropRelic() 抽 200 次一次都不出唤魔之钥（hidden 已过滤）');
+  // 钥匙不占遗物上限 8：拿到 9 件也要能进
+  fresh();
+  G.relics = RELICS.filter(r => !r.hidden).slice(0, 9);
+  const beforeLen = G.relics.length;
+  G.passives = {};
+  gainEvokerKey();
+  ok(G.relics.length === beforeLen + 1, '钥匙不占遗物上限 8（已有 9 件也进得去）',
+    `got ${G.relics.length}`);
+
+  // ---------- 21i 精英与 BOSS 词条共享 ----------
+  ok(ELITE_BOSS_AFFIX_WEIGHT === 0.5, 'ELITE_BOSS_AFFIX_WEIGHT = 0.5', `got ${ELITE_BOSS_AFFIX_WEIGHT}`);
+  fresh();
+  G.floor = 40;
+  // 精英池：14 条全在，专属半权 ⇒ 抽出 2 条时至少可能出到专属（上面 19b 已统计频率）
+  let eliteSawBoss = false, eliteSawPlain = false;
+  for (let i = 0; i < 300; i++) {
+    for (const id of pickAffixes(2, { bossOnly: false })) {
+      const d = affixDef(id);
+      if (d && d.bossOnly) eliteSawBoss = true; else eliteSawPlain = true;
+    }
+  }
+  ok(eliteSawBoss && eliteSawPlain, '精英池两组都抽得到（专属半权）',
+    `专属 ${eliteSawBoss} / 普通 ${eliteSawPlain}`);
+  // BOSS 池：仍然全程均匀，且仍然排除 dash / swarm
+  let bossExcluded = [];
+  for (let i = 0; i < 400; i++) {
+    for (const id of pickAffixes(2, { exclude: ['dash', 'swarm'], bossOnly: 'any' })) {
+      if (id === 'dash' || id === 'swarm') bossExcluded.push(id);
+    }
+  }
+  ok(bossExcluded.length === 0, 'BOSS 池仍然排除突进 / 群生',
+    bossExcluded.slice(0, 3).join(','));
+  // 排除生效、数量正确（沿用 18b 的旧断言口径）
+  G.floor = 30;
+  const picked2 = pickAffixes(2, { exclude: ['dash', 'swarm'], bossOnly: 'any' });
+  ok(picked2.length === 2 && picked2.indexOf('dash') < 0 && picked2.indexOf('swarm') < 0,
+    'pickAffixes(2) 恰好 2 个且排除了 dash / swarm', picked2.join(','));
+
+  // ---------- 21j 射击小怪 ----------
+  ok(ENEMY_SHOOTER_RANGE === 119, '射程 = 中环基础炮台 140 × 0.85 = 119px',
+    `got ${ENEMY_SHOOTER_RANGE}`);
+  ok(ENEMY_SHOOTER_INTERVAL === 40, '开火间隔 = 主人公初始射速 40 帧',
+    `got ${ENEMY_SHOOTER_INTERVAL}`);
+  ok(ENEMY_SHOOTER_UNLOCK_FLOOR === 25, '第 25 层起登场', `got ${ENEMY_SHOOTER_UNLOCK_FLOOR}`);
+  const sh = MONSTER_TYPES.SHOOTER;
+  ok(!!sh && sh.id === 'shooter' && sh.isShooter === true, 'MONSTER_TYPES.SHOOTER 存在且 isShooter');
+  ok(!!sh && sh.unlocksAtWave === 25, '类型表里的解锁层 = 25', sh && sh.unlocksAtWave);
+  ok(!!sh && sh.shootRange === ENEMY_SHOOTER_RANGE && sh.shootInterval === ENEMY_SHOOTER_INTERVAL,
+    '类型表里的射程 / 间隔与常量同源', sh && `${sh.shootRange} / ${sh.shootInterval}`);
+  // 每一个关卡类型的权重表都得显式写 shooter，否则会退回到那个兜底 weight
+  const missingStage = (STAGE_TYPES || []).filter(s => s.weights && s.weights.shooter === undefined)
+    .map(s => s.id);
+  ok(missingStage.length === 0, '所有关卡类型的权重表都写了 shooter', missingStage.join(','));
+  const bossStageDef = (STAGE_TYPES || []).find(s => s.id === 'bossStage');
+  ok(!bossStageDef || bossStageDef.weights.shooter === 0, 'BOSS 关不刷射击怪');
+
+  // 第 24 层一只都不出、第 25 层开始出
+  {
+    const sample = (floor, n) => {
+      G.floor = floor;
+      let hit = 0;
+      for (let i = 0; i < n; i++) {
+        G.monsters = [];
+        spawnMonsterProbe();
+        if (G.monsters[0] && G.monsters[0].isShooter) hit++;
+      }
+      return hit;
+    };
+    fresh();
+    ok(sample(24, 3000) === 0, '第 24 层刷 3000 只，一只射击怪都没有');
+    const at25 = sample(25, 3000);
+    ok(at25 > 0, `第 25 层开始出现射击怪（3000 只里 ${at25} 只）`);
+    ok(at25 < 900, `出率不失控（${(at25 / 3000 * 100).toFixed(1)}%）`);
+  }
+
+  // 索敌：**无条件优先炮台**——哪怕核心近得多
+  fresh();
+  G.frame = 0; G.monstersToSpawn = 0; G.spawnTimer = 0;
+  const shooter = mkM(100, 100);
+  shooter.isShooter = true; shooter.shootRange = ENEMY_SHOOTER_RANGE;
+  shooter.shootInterval = ENEMY_SHOOTER_INTERVAL; shooter.shootTimer = 9999;
+  shooter.speed = 1;
+  G.monsters = [shooter];
+  G.turrets = [{ x: 740, y: 540, r: 14, type: 'basic', emoji: '🗼', color: '#88aacc',
+                 fireRate: 25, fireTimer: 0, range: 140, ratio: 30,
+                 hp: 999, maxHp: 999, tier: '中环', loopKey: 'k', spawnAnim: 0 }];
+  const dTurret = Math.hypot(740 - 100, 540 - 100);
+  const dCore = Math.hypot(G.core.x - 100, G.core.y - 100);
+  ok(dCore < dTurret, '构造成立：核心比炮台近', `${Math.round(dCore)} < ${Math.round(dTurret)}`);
+  const sx0 = shooter.x, sy0 = shooter.y;
+  for (let i = 0; i < 10; i++) { G.bullets.length = 0; update(); }
+  ok(shooter.x > sx0 && shooter.y > sy0,
+    '射击怪朝炮台走（不是朝更近的核心）', `${(shooter.x - sx0).toFixed(1)}, ${(shooter.y - sy0).toFixed(1)}`);
+
+  // 到射程内停下开火：炮台掉血、弹道进 G.enemyShots
+  fresh();
+  G.frame = 0; G.monstersToSpawn = 0; G.spawnTimer = 0;
+  const shooter2 = mkM(400, 300);
+  shooter2.isShooter = true; shooter2.shootRange = ENEMY_SHOOTER_RANGE;
+  shooter2.shootInterval = ENEMY_SHOOTER_INTERVAL; shooter2.shootTimer = 0;
+  shooter2.atk = 100;
+  G.monsters = [shooter2];
+  G.turrets = [{ x: 400 + 100, y: 300, r: 14, type: 'basic', emoji: '🗼', color: '#88aacc',
+                 fireRate: 25, fireTimer: 0, range: 140, ratio: 30,
+                 hp: 999, maxHp: 999, tier: '中环', loopKey: 'k', spawnAnim: 0 }];
+  const hpBeforeT = G.turrets[0].hp;
+  G.enemyShots = [];
+  update();
+  const wantTDmg = Math.max(1, Math.round(100 * 0.05));
+  ok(G.turrets[0].hp === hpBeforeT - wantTDmg,
+    `射程内（100px < 119+14）开火，炮台掉 ${wantTDmg} 点（与近战同一口径）`,
+    `got ${hpBeforeT - G.turrets[0].hp}`);
+  ok(G.enemyShots.length === 1, '弹道进了 G.enemyShots（渲染用）', `got ${G.enemyShots.length}`);
+  ok(shooter2.y === 300 && shooter2.x === 400, '到射程内就停下，不再贴脸',
+    `${shooter2.x}, ${shooter2.y}`);
+  ok(ENEMY_SHOT_LIFE > 0 && G.enemyShots[0].life > 0, '弹道有存活帧数', `got ${G.enemyShots[0].life}`);
+
+  // 射程外不动手
+  fresh();
+  G.frame = 0; G.monstersToSpawn = 0; G.spawnTimer = 0;
+  const shooter3 = mkM(100, 300);
+  shooter3.isShooter = true; shooter3.shootRange = ENEMY_SHOOTER_RANGE;
+  shooter3.shootInterval = ENEMY_SHOOTER_INTERVAL; shooter3.shootTimer = 0;
+  shooter3.atk = 100;
+  G.monsters = [shooter3];
+  G.turrets = [{ x: 740, y: 300, r: 14, type: 'basic', emoji: '🗼', color: '#88aacc',
+                 fireRate: 25, fireTimer: 0, range: 140, ratio: 30,
+                 hp: 999, maxHp: 999, tier: '中环', loopKey: 'k', spawnAnim: 0 }];
+  G.enemyShots = [];
+  update();
+  ok(G.turrets[0].hp === 999 && G.enemyShots.length === 0,
+    '射程外（640px）不浪费一发，先走过去',
+    `${G.turrets[0].hp} / ${G.enemyShots.length}`);
+
+  // 没有炮台时就锁核心
+  fresh();
+  G.frame = 0; G.monstersToSpawn = 0; G.spawnTimer = 0;
+  const shooter4 = mkM(100, 100);
+  shooter4.isShooter = true; shooter4.shootRange = ENEMY_SHOOTER_RANGE;
+  shooter4.shootInterval = ENEMY_SHOOTER_INTERVAL; shooter4.shootTimer = 0;
+  shooter4.atk = 100;
+  G.monsters = [shooter4];
+  G.turrets = [];
+  G.enemyShots = [];
+  G.player.hp = 100; G.core.hp = 100;
+  // 放到离核心 200px 处再跑，让它自己走进 119+30 的射程
+  G.core.x = 390; G.core.y = 280;
+  shooter4.x = 390; shooter4.y = 280 - 200;
+  let coreShot = false;
+  for (let i = 0; i < 200 && !coreShot; i++) {
+    G.bullets.length = 0;
+    const before = G.player.hp + G.core.hp;
+    update();
+    if (G.player.hp + G.core.hp < before) coreShot = true;
+  }
+  ok(coreShot, '场上一座塔都没有时，它改锁核心并开火（护盾开始掉）');
+  ok(G.turrets.length === 0, '全程没有炮台（对照条件成立）');
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);
+
 process.exit(fail === 0 ? 0 : 1);

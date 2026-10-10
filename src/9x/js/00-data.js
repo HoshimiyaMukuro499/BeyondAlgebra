@@ -3,16 +3,24 @@
     // ============================================================
 
     // ---------- 词条数据 ----------
+    // v9.28: T01「对自身」与 T02「对敌群」删除——这两张说的是同一件事的两种写法，
+    // 而且「触发条件」本来就是触发板唯一的信息，多一张同义的只是把池子稀释。
+    // T03 改名「命中精英时」（**只改 label，id 保持 T03**——05-update.js 有两处按
+    // 字符串引用它），并给它一个 ×1.2 的加成，见 T03_EFFECT_MUL。
     const TRIGGERS = [
-        { id: 'T01', label: '对自身', emoji: '🧍' },
-        { id: 'T02', label: '对敌群', emoji: '👾' },
-        { id: 'T03', label: '对精英生效', emoji: '⭐' },
+        { id: 'T03', label: '命中精英时', emoji: '⭐' },
         { id: 'T06', label: '怪触轨', emoji: '🐾' },
         { id: 'T07', label: '射击命中', emoji: '🎯' },
         // v9.23: T08、「连环击杀」出率 -30%（权重 1 → 0.7）。
         { id: 'T08', label: '连环击杀', emoji: '🔥', weight: 0.7 },
         { id: 'T10', label: '残血触发', emoji: '❤️‍🔥' },
         { id: 'T12', label: '闭环触发', emoji: '⭕' },
+        // v9.28: 稀有触发板「唤魔者」。40 层起按 rareChance() 抽取（1% → 5%），
+        // 是全局最重的一张牌：**宣读那一刻**清空全场怪物，然后当场招出一只
+        // 数值取 max（该层 BOSS 值, 清场前全场怪数值之和 ×1.13）的三词条 BOSS，
+        // 打死它才拿得到稀有藏品「唤魔之钥」。见 02-combat.js 的 triggerEvoker()。
+        // cardColor 只给这一张卡上红色（07-ui.js 的 renderHandUI 读它写 inline 样式）。
+        { id: 'T14', label: '唤魔者', emoji: '👹', rare: true, cardColor: '#a01f2e' },
         // v9.25: T13「消除」**已从手牌里拿掉**——它变成玩家的一个技能：
         // 30 秒冷却，按 R 触发一次（见 04-trail.js 的 activateEliminate()）。
         // 原因：它作为卡牌时，抽到与否完全看运气，而它的效果是「清场 + 拆塔」，
@@ -20,16 +28,38 @@
         // 现在的 weight 机制只剩 T08 在用（0.7，见上），所以 randomTrigger() 保留。
     ];
 
-    // v9.21: 触发板的加权随机。原来是 pool[Math.floor(Math.random()*pool.length)]，
-    // 给触发板加 weight 后那样写等于没加权，所以所有「随机发一张触发板」的地方
-    // 都必须走这里。（找牌、图鉴那种按 id 命中的查找不需要。）
-    function randomTrigger() {
-        let total = 0;
-        for (const t of TRIGGERS) total += (t.weight || 1);
-        let r = Math.random() * total;
-        for (const t of TRIGGERS) { r -= (t.weight || 1); if (r <= 0) return t; }
-        return TRIGGERS[TRIGGERS.length - 1];
+    // ---------- v9.28 稀有密文版 ----------
+    // 40 层之前卡池里没有任何新东西，后期就是同一套牌反复叠层。加一组只在
+    // 40 层后出现的稀有卡：3 张稀有效果板 + 1 张稀有触发板「唤魔者」。
+    // 概率：第 40 层 1%，线性爬到第 80 层 5%，之后恒 5%。
+    // 落点在 randomTrigger() / randomEffect() 内部——开局白送、击杀掉落、清层
+    // 三选一、休息点、商店、牌库全都走这两个函数，一处改完全覆盖。
+    const RARE_CARD_MIN_FLOOR = 40;
+    const RARE_CARD_MIN_CHANCE = 0.01;   // 第 40 层
+    const RARE_CARD_MAX_CHANCE = 0.05;   // 第 80 层起封顶
+    function rareChance() {
+        if (G.floor < RARE_CARD_MIN_FLOOR) return 0;
+        const t = Math.min(1, (G.floor - RARE_CARD_MIN_FLOOR) / 40);   // 40 → 80 层
+        return RARE_CARD_MIN_CHANCE + (RARE_CARD_MAX_CHANCE - RARE_CARD_MIN_CHANCE) * t;
     }
+
+    // v9.21/v9.23: 加权随机。触发板与效果板各一份权重表（T08 / E02 / E11 是 0.7），
+    // 原来这段逻辑在 randomTrigger / randomEffect 里各抄了一遍，v9.28 抽成公共的。
+    function pickWeighted(list) {
+        let total = 0;
+        for (const c of list) total += (c.weight || 1);
+        let r = Math.random() * total;
+        for (const c of list) { r -= (c.weight || 1); if (r <= 0) return c; }
+        return list[list.length - 1];
+    }
+
+    // 所有「随机发一张触发板」的地方都必须走这里（找牌、图鉴那种按 id 命中的查找不需要）。
+    function randomTrigger() {
+        const rare = TRIGGERS.filter(t => t.rare);
+        if (rare.length > 0 && Math.random() < rareChance()) return pickWeighted(rare);
+        return pickWeighted(TRIGGERS.filter(t => !t.rare));
+    }
+
     const EFFECTS = [
         { id: 'E01', label: '攻击增幅', emoji: '⚔️' },
         // v9.23: E02「连环击」与 E11「自速暴涨」出率 -30%（权重 1 → 0.7）。
@@ -45,18 +75,55 @@
         { id: 'E12', label: '闪电链', emoji: '⚡' },
         { id: 'E13', label: '冰冻', emoji: '❄️' },
         { id: 'E14', label: '延缓', emoji: '⏳' },   // v9.19
+        // v9.28 稀有效果板（40 层起 1%~5%）。数值刻意放低——它们的强度不靠单张，
+        // 靠「40 层之后卡池终于有新东西」这件事本身。三张都有上限，见 RARE_E1x_CAP：
+        // 它们是「每次触发都涨一点」的永久属性，挂在 T06 这种每帧都在发生的触发板上，
+        // 不封顶会滚成天文数字。
+        { id: 'E15', label: '图腾加固·极', emoji: '🗿', rare: true },   // 图腾血量 +3（商店版是 +1）
+        { id: 'E16', label: '护盾扩容', emoji: '🔰', rare: true },       // 护盾上限 +5（基础 100）
+        { id: 'E17', label: '急速装填', emoji: '⏩', rare: true },       // 射速 +8%（全局基础 1.2）
     ];
 
-    // v9.23: 效果板的加权随机，和 randomTrigger() 同款。权重只用来压 E02/E11
-    // 的出率，其余效果板都是 1。凡是「随机发一张效果板」的地方都必须走这里，
-    // 直接下标取 EFFECTS 会绕过权重。（按 id 命中的查找不需要。）
+    // v9.23: 效果板的加权随机，和 randomTrigger() 同款。凡是「随机发一张效果板」
+    // 的地方都必须走这里，直接下标取 EFFECTS 会绕过权重与稀有判定。
+    //（按 id 命中的查找不需要。）
     function randomEffect() {
-        let total = 0;
-        for (const e of EFFECTS) total += (e.weight || 1);
-        let r = Math.random() * total;
-        for (const e of EFFECTS) { r -= (e.weight || 1); if (r <= 0) return e; }
-        return EFFECTS[EFFECTS.length - 1];
+        const rare = EFFECTS.filter(e => e.rare);
+        if (rare.length > 0 && Math.random() < rareChance()) return pickWeighted(rare);
+        return pickWeighted(EFFECTS.filter(e => !e.rare));
     }
+
+    // v9.28: 三张稀有效果板的上限。E15 对照「图腾加固」商店版只加 1 点、
+    // 图腾上限 10 座；E16 对照基础护盾 100；E17 对照全局 PLAYER_FIRE_RATE_MUL=1.2。
+    const RARE_E15_CAP = 30;      // 图腾血量加成
+    const RARE_E16_CAP = 300;     // 玩家护盾上限
+    const RARE_E17_CAP = 2.0;     // 射速倍率
+
+    // v9.28: T03「命中精英时」的生效数值倍率——它从「换个条件的触发板」变成
+    // 「值得为它配一张强效果板」的触发板。applyPassiveEffect() 与 removePassive()
+    // 必须读同一个来源，否则移除一张 T03 被动会多扣/少扣。
+    const T03_EFFECT_MUL = 1.2;
+
+    // v9.28: 冰冻的绝对上限（帧）。原来是写死的 180，n 层累加第 4 层就被截断
+    // （54×4=216 → 180），等于「层数越高越看不出来」。改成 600（10 秒）——
+    // ×n 的成长由乘法本身提供，这个数只负责兜底「永远冻住」。
+    const FREEZE_MAX_FRAMES = 600;
+
+    // v9.28: 唤魔者 BOSS 的数值口径——该层 BOSS 值与「清场前全场怪数值之和 ×1.13」
+    // 取大者。清场是好处，招出来的 BOSS 就是代价：清场前怪越多、越强，BOSS 越硬。
+    const EVOKER_SUM_MUL = 1.13;
+
+    // ---------- v9.28 射击小怪的三个数 ----------
+    // 射程 = 中环基础炮台（TURRET_MID_RANGE × m 1.0）的 85%。0.85 是需求本身，
+    // 所以比值与基数分开写，别把 119 直接硬编进类型表里。
+    const TURRET_MID_RANGE = 140;
+    const ENEMY_SHOOTER_RANGE_MUL = 0.85;
+    const ENEMY_SHOOTER_RANGE = Math.round(TURRET_MID_RANGE * ENEMY_SHOOTER_RANGE_MUL);  // 119
+    const ENEMY_SHOOTER_UNLOCK_FLOOR = 25;
+    // 「攻击频率为主人公初始射击频率」——就是 G.fireRate 的初值 40 帧
+    // （01-state.js / 08-main.js 的 G.fireRate = 40）。改了那边要同步改这里。
+    const ENEMY_SHOOTER_INTERVAL = 40;
+    const ENEMY_SHOT_LIFE = 8;   // 弹道拖尾的存活帧数（只是渲染用，命中是即时的）
 
     // ---------- 怪物类型定义 ----------
     const MONSTER_TYPES = {
@@ -183,6 +250,27 @@
             isWraith: true, bulletResist: 0.3,
             unlocksAtWave: 12,
         },
+        // v9.28: 射击小怪。第 25 层起进池（走 unlocksAtWave，和灼烧 8 / 虚灵 12 同一套）。
+        // 它跟别的怪只差两件事：① 索敌**无条件优先炮台**（场上有塔就锁塔，没有才锁核心）
+        // ② 走到射程内就停下远程开火，不贴脸。伤害口径与近战完全一致，见 fireEnemyShot()。
+        // 射程取「中环基础炮台 🗼」的 85%：中环 m = 1.0，basic 的 rg = 140 → 119px
+        // （炮台射程表在 04-trail.js 的 T 里，改那边要同步改这里的 TURRET_MID_RANGE）。
+        SHOOTER: {
+            id: 'shooter', label: '射击', emoji: '🔫',
+            color: '#cc66dd', eliteColor: '#bb44cc',
+            baseHp: 30, hpScale: 13,
+            baseSpeed: 0.1875, speedScale: 0.008,
+            baseAtk: 6, atkScale: 1.2,
+            radius: 12, eliteRadius: 16,
+            scoreValue: 11, eliteScoreValue: 26,
+            // STAGE_TYPES 里每一种关卡都显式写了 shooter 的权重，这个 weight 只是
+            // 「关卡类型查不到」时的兜底，量级对齐表里那个 0.4（表里是 ×10 的尺度）。
+            weight: 4, moveInterval: 60,
+            isShooter: true,
+            unlocksAtWave: ENEMY_SHOOTER_UNLOCK_FLOOR,
+            shootRange: ENEMY_SHOOTER_RANGE,
+            shootInterval: ENEMY_SHOOTER_INTERVAL,
+        },
         BOSS: {
             id: 'boss', label: 'BOSS', emoji: '👑',
             color: '#ff2255', eliteColor: '#ff0044',
@@ -267,18 +355,43 @@
     // 从「当前楼层已解锁」的词条里随机抽 n 个（不重复）。
     // opts 用对象而不是位置参数：现在有两个可选项，再加一个布尔读起来就分不清谁是谁。
     //   exclude  —— 想剔掉的 id 列表，用来排除对某个持有者没意义的词条（见 spawnBoss()）
-    //   bossOnly —— true 只抽 BOSS 专属的 8 个；false 只抽普通的 6 个（精英怪）；
-    //               'any' / 省略则不区分（调试生成与测试用）
+    //   bossOnly —— true 只抽 BOSS 专属的 8 个；'any' / 省略则不区分（调试生成与测试用）
+    //               v9.28: false 不再是「只有普通 6 个」，而是**精英共享池**——
+    //               14 个全在池里，bossOnly 的 8 个按 ELITE_BOSS_AFFIX_WEIGHT 半权。
+    // v9.28: 精英怪与 BOSS 词条「共享」的那半边——后 8 个 bossOnly 词条现在精英怪
+    // 也抽得到，但只算半权（普通 6 个 ×1，专属 8 个 ×0.5）。BOSS 自己的池子不受影响：
+    // 那边仍然一视同仁，专属词条还是 BOSS 的招牌（v9.25 的归属线只是变软，没撤销）。
+    const ELITE_BOSS_AFFIX_WEIGHT = 0.5;
+
     function pickAffixes(n, opts) {
         const o = opts || {};
         const skip = o.exclude || [];
         const wantBoss = o.bossOnly;
+        const isElite = wantBoss === false;
         const pool = AFFIXES.filter(a =>
             G.floor >= a.minWave
             && skip.indexOf(a.id) < 0
             && (wantBoss === true ? a.bossOnly === true
-                : wantBoss === false ? !a.bossOnly
                 : true));
+        if (isElite) {
+            // 加权不放回抽取。BOSS 池与调试池保持原来的均匀洗牌——那边不发生
+            // 「共享」，把两边的抽样方式分开写，9.25 那套 BOSS 分布才不会被顺手改掉。
+            const items = pool.map(a => ({ a, w: a.bossOnly ? ELITE_BOSS_AFFIX_WEIGHT : 1 }));
+            const picked = [];
+            for (let k = 0; k < n && items.length > 0; k++) {
+                let total = 0;
+                for (const it of items) total += it.w;
+                let r = Math.random() * total;
+                let idx = items.length - 1;
+                for (let i = 0; i < items.length; i++) {
+                    r -= items[i].w;
+                    if (r <= 0) { idx = i; break; }
+                }
+                picked.push(items[idx].a.id);
+                items.splice(idx, 1);
+            }
+            return picked;
+        }
         const shuffled = [...pool].sort(() => Math.random() - 0.5);
         return shuffled.slice(0, Math.min(n, shuffled.length)).map(a => a.id);
     }
@@ -428,13 +541,13 @@
 
     // ---------- v9.6 关卡类型（怪物分布多样化）----------
     const STAGE_TYPES = [
-        { id:'mixed',     label:'混编',     icon:'⚔️', desc:'标准怪物混合',  weights:{ basic:1, fast:1, tank:1, healer:0.6, splitter:0.4, scorcher:0.2, wraith:0.2 } },
-        { id:'fastRush',  label:'疾驰洪流', icon:'💨', desc:'疾速怪海战术',  weights:{ basic:0.3, fast:5, tank:0.1, healer:0.2, splitter:0.3, scorcher:0.2, wraith:0.3 } },
-        { id:'siege',     label:'重装攻城', icon:'🛡️', desc:'坦克+治疗组合', weights:{ basic:1, fast:0.2, tank:4, healer:2, splitter:0.3, scorcher:0.1, wraith:0.1 } },
-        { id:'fireStorm', label:'烈焰风暴', icon:'🔥', desc:'灼烧怪为主',    weights:{ basic:0.5, fast:0.5, tank:0.5, healer:0.3, splitter:0.3, scorcher:4, wraith:0.5 } },
-        { id:'ghostTown', label:'幽灵小镇', icon:'👻', desc:'虚灵免疫轨迹',  weights:{ basic:0.3, fast:0.3, tank:0.2, healer:0.2, splitter:0.2, scorcher:0.2, wraith:4 } },
-        { id:'eliteSquad',label:'精英小队', icon:'⭐', desc:'高精英率',      weights:{ basic:1, fast:1, tank:1, healer:1, splitter:1, scorcher:0.5, wraith:0.5 }, eliteMult:2.5 },
-        { id:'bossStage', label:'BOSS战',   icon:'👑', desc:'楼层BOSS',      weights:{ basic:0, fast:0, tank:0, healer:0, splitter:0, scorcher:0, wraith:0 }, isBoss:true },
+        { id:'mixed',     label:'混编',     icon:'⚔️', desc:'标准怪物混合',  weights:{ basic:1, fast:1, tank:1, healer:0.6, splitter:0.4, scorcher:0.2, wraith:0.2, shooter:0.4 } },
+        { id:'fastRush',  label:'疾驰洪流', icon:'💨', desc:'疾速怪海战术',  weights:{ basic:0.3, fast:5, tank:0.1, healer:0.2, splitter:0.3, scorcher:0.2, wraith:0.3, shooter:0.3 } },
+        { id:'siege',     label:'重装攻城', icon:'🛡️', desc:'坦克+治疗组合', weights:{ basic:1, fast:0.2, tank:4, healer:2, splitter:0.3, scorcher:0.1, wraith:0.1, shooter:0.3 } },
+        { id:'fireStorm', label:'烈焰风暴', icon:'🔥', desc:'灼烧怪为主',    weights:{ basic:0.5, fast:0.5, tank:0.5, healer:0.3, splitter:0.3, scorcher:4, wraith:0.5, shooter:0.3 } },
+        { id:'ghostTown', label:'幽灵小镇', icon:'👻', desc:'虚灵免疫轨迹',  weights:{ basic:0.3, fast:0.3, tank:0.2, healer:0.2, splitter:0.2, scorcher:0.2, wraith:4, shooter:0.5 } },
+        { id:'eliteSquad',label:'精英小队', icon:'⭐', desc:'高精英率',      weights:{ basic:1, fast:1, tank:1, healer:1, splitter:1, scorcher:0.5, wraith:0.5, shooter:0.5 }, eliteMult:2.5 },
+        { id:'bossStage', label:'BOSS战',   icon:'👑', desc:'楼层BOSS',      weights:{ basic:0, fast:0, tank:0, healer:0, splitter:0, scorcher:0, wraith:0, shooter:0 }, isBoss:true },
     ];
 
     // ---------- v9.6 轮椅组合 ----------
@@ -442,7 +555,9 @@
         { id:'trailRevenge', trigger:'T06', effect:'E10', name:'轨迹反噬', emoji:'🐾🔥', desc:'轨迹→反噬→全怪互伤', trailType:'fire', bonus(G){ G.buffs.trailDmg+=4; } },
         { id:'chainStorm', trigger:'T07', effect:'E12', name:'连锁风暴', emoji:'⚡🎯', desc:'射击→闪电链→清场', trailType:'lightning', bonus(G){ G.fireRate=Math.max(12,G.fireRate-8); } },   // v9.19: -2→-8，见 SURGE 的注释
         { id:'iceTrail', trigger:'T06', effect:'E13', name:'冰轨永冻', emoji:'❄️🐾', desc:'触轨→冰冻→罚站', trailType:'ice', bonus(G){ G.buffs.trailWidth+=4; G.buffs.slowAll=Math.min(0.7,G.buffs.slowAll+0.15); } },
-        { id:'trailExplosion', trigger:'T02', effect:'E07', name:'爆轨清场', emoji:'💣🐾', desc:'对敌群→引爆轨迹→AOE', trailType:'fire', bonus(G){ G.buffs.trailDmg+=5; } },
+        // v9.28: 触发板从 T02「对敌群」改成 T08「连环击杀」——T01/T02 删掉了，
+        // 这条轮椅的数值与轨迹外观一点没动，只是换了个还存在的触发条件。
+        { id:'trailExplosion', trigger:'T08', effect:'E07', name:'爆轨清场', emoji:'💣🐾', desc:'连环击杀→引爆轨迹→AOE', trailType:'fire', bonus(G){ G.buffs.trailDmg+=5; } },
         { id:'vampLord', trigger:'T08', effect:'E03', name:'吸血领主', emoji:'🩸💚', desc:'连杀→回血→永生', trailType:'basic', bonus(G){ G.fateBuffs.vampHeal+=16; } },
         { id:'bulletHell', trigger:'T07', effect:'E02', name:'弹幕地狱', emoji:'🎯💥', desc:'命中→倍率→指数增长', trailType:'lightning', bonus(G){ G.buffs.multUp+=0.5; } },
     ];
@@ -543,6 +658,13 @@
           desc: '核心获得20点额外HP上限', apply(G) { G.core.maxHp += 20; G.core.hp += 20; } },
         { id: 'berserkerTotem', name: '狂战图腾', emoji: '🗿', rarity: 'rare',
           desc: '护盾低于30%时攻击力翻倍', apply(G) { G.relicBuffs.lowHpBerserk = true; } },
+        // v9.28: 稀有藏品「唤魔之钥」。**不进随机池**——dropRelic() 会跳过 hidden，
+        // 它只能从唤魔者 BOSS 身上掉（05-update.js 的 BOSS 死亡分支）。
+        // 效果：总分 lg +1（即 score ×10）+ 已激活的每个密文版被动层数 +1，
+        // 见 07-ui.js 的 gainEvokerKey()。这里 apply() 留空——层数那半边
+        // 要遍历 G.passives，不适合塞进一个只接收 G 的纯函数里。
+        { id: 'evokerKey', name: '唤魔之钥', emoji: '🗝️', rarity: 'epic', hidden: true,
+          desc: '总分 lg +1，且已激活的密文版被动全部 +1 层', apply(G) {} },
     ];
 
     // v9.6: 旧波次变体和地图节点已移除，使用上方STAGE_TYPES和NODE_POOL

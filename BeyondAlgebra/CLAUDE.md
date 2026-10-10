@@ -96,9 +96,9 @@ node web/probe-9x.mjs 密文轨迹demo9.16.html         # 拿旧版本当对照�
 
 | 区域 | 位置（约） | 说明 |
 |------|-----------|------|
-| 词条数据定义 | 791-811 | `TRIGGERS` 7张触发板 + `EFFECTS` 10张效果板 |
-| 怪物类型定义 | 814-946 | `MONSTER_TYPES` 8种怪物（BASIC/FAST/TANK/HEALER/SPLITTER/SCORCHER/WRAITH/BOSS）|
-| 精英词缀 | 949-962 | `AFFIXES` 6种词缀（再生/荆棘/迅捷/巨人/吸血/爆裂）|
+| 词条数据定义 | 791-811 | `TRIGGERS` 7张触发板（T03/T06/T07/T08/T10/T12/T14）+ `EFFECTS` 10张效果板 + 3张稀有（E15/E16/E17）|
+| 怪物类型定义 | 814-946 | `MONSTER_TYPES` 9种怪物（BASIC/FAST/TANK/HEALER/SPLITTER/SCORCHER/WRAITH/SHOOTER/BOSS）|
+| 精英词缀 | 949-962 | `AFFIXES` 14种词缀（6 普通 + 8 BOSS 专属；v9.28 起精英也能抽到后者，但只算半权）|
 | 命运抉择 | 965-974 | `FATE_CHOICES` 8种永久buff |
 | 连杀爆发 | 977-989 | `KILL_BURSTS` 25/50/100连杀阈值 |
 | 关卡类型 | 996-1004 | `STAGE_TYPES` 7种关卡（混编/疾驰/攻城/烈焰/幽灵/精英/BOSS）|
@@ -106,7 +106,7 @@ node web/probe-9x.mjs 密文轨迹demo9.16.html         # 拿旧版本当对照�
 | 轨迹类型视觉 | 1017-1022 | `TRAIL_STYLES` 4种轨迹外观 |
 | 地图节点 | 1025-1035 | `NODE_POOL` 9种节点类型 |
 | 职业定义 | 1039-1084 | `CLASSES` 4种职业 |
-| 遗物定义 | 1087-1112 | `RELICS` 12种遗物 |
+| 遗物定义 | 1087-1112 | `RELICS` 12种遗物 + 1件隐藏藏品（`evokerKey`，`hidden: true` 不进随机池）|
 | 游戏状态 `G` | 1178-1210 | 全局游戏状态对象——**所有数值修改的核心** |
 | 难度公式 | 1237-1255 | `getDifficultyMultiplier()`, `getMonsterCount()`, `getEliteChance()`, `getSpawnInterval()` |
 | **怪物生成** | 1424-1539 | `spawnMonster()` — 包含怪物属性计算、精英词缀、关卡权重 |
@@ -132,10 +132,13 @@ node web/probe-9x.mjs 密文轨迹demo9.16.html         # 拿旧版本当对照�
 当你修改某个数值时，必须检查以下位置是否同步：
 
 - **怪物基础属性** (`MONSTER_TYPES`) → 同步 `spawnDebugMonster()` 中的属性赋值
-- **密文板效果数值** (`applyPassiveEffect`) → 同步 `removePassive()` 中的回退量
+- **密文板效果数值** (`applyPassiveEffect`) → 同步 `removePassive()` 中的回退量（**含 T03 的 `T03_EFFECT_MUL` ×1.2，两边都要乘**）
+- **射速类数值** → `G.buffs.fireRateMul` 有**两道闸门**：`p.shootCooldown`（`04-trail.js`）与 `G.fireCounter`（`05-update.js`），只改一处不生效；初值 1 要在 `resetGame()` 复位
+- **层数语义** → `PASSIVE_REPEAT_EFFECTS`（`02-combat.js`）决定「触发次数 ×n」还是「数值/时长 ×n」。往集合里加效果板要确认它的 case **没有**再乘 `layerCount`（两边都乘就是 n²）
 - **BOSS HP 基数** (`MONSTER_TYPES.BOSS.baseHp`) → 同步 `getBossHp()` 中的基数
 - **游戏状态初始化** (`resetGame()`) → 确保新字段有默认值
-- **怪物特殊属性**（如 `fireTrailLife`, `bulletResist`）→ 同步 `spawnMonster()` 和 `spawnDebugMonster()` 中的字段传递
+- **怪物特殊属性**（如 `fireTrailLife`, `bulletResist`）→ 同步 `spawnMonster()` 和 `spawnDebugMonster()` 中的字段传递。射击怪多了四个字段（`isShooter` / `shootRange` / `shootInterval` / `shootTimer`），`DEBUG_TYPE_KEYS` 里也加了 `'shooter'`
+- **射击怪 / 稀有卡 / 唤魔者**（v9.28 新增系统）→ 常量在 `00-data.js`（`ENEMY_SHOOTER_*` / `RARE_CARD_*` / `EVOKER_SUM_MUL` / `ELITE_BOSS_AFFIX_WEIGHT`），接入点见 [VALUES.md](VALUES.md) §16 检查清单最后 8 行
 - **README.md** 中的数值描述 → 如果改动大，同步更新策划案
 
 ### 2. 新增字段的添加位置

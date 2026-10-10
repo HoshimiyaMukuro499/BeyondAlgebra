@@ -259,6 +259,21 @@
             ctx.shadowBlur = 0;
         }
 
+        // v9.28: 射击小怪的弹道——一条快速淡出的紫色拖尾。
+        // 画在火焰轨迹之后、玩家之前，和其他「场地效果」同层。
+        for (const es of G.enemyShots) {
+            const alpha = Math.max(0, es.life / ENEMY_SHOT_LIFE);
+            ctx.beginPath();
+            ctx.moveTo(es.x1, es.y1);
+            ctx.lineTo(es.x2, es.y2);
+            ctx.strokeStyle = `rgba(204, 102, 221, ${alpha * 0.85})`;
+            ctx.lineWidth = 2.5;
+            ctx.shadowColor = `rgba(204, 102, 221, ${alpha * 0.5})`;
+            ctx.shadowBlur = 8;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
+
         // v9.19: 火焰伤害的转移粒子——从玩家飞向核心的护盾。
         // 画在玩家之后，且带拖尾，让「伤害被核心吸走了」这件事看得见。
         for (const df of G.damageFlows) {

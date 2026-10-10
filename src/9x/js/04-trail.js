@@ -108,7 +108,9 @@
         // v9.19: 闸门整体 ×4——只改 G.fireRate 不改这里的话，冷却会卡住射速，改动不生效
         // v9.25: 再整体 ÷1.2（开火频率 +20%）。地板和上限一起缩，否则后期会被
         // Math.max(24, …) 的地板吃掉，看着改了其实没生效。
-        p.shootCooldown = Math.max(24, 48 - G.floor * 0.32) / PLAYER_FIRE_RATE_MUL;
+        // v9.28: 再 ÷G.buffs.fireRateMul（稀有效果板 E17）。⚠️ 这是**两道闸门之一**，
+        // 另一道在 05-update.js 的 `G.fireCounter >= G.fireRate`——只改一边等于没改。
+        p.shootCooldown = Math.max(24, 48 - G.floor * 0.32) / PLAYER_FIRE_RATE_MUL / G.buffs.fireRateMul;
     }
 
     function getTrailDamage() {
@@ -125,14 +127,16 @@
         if (G.trails.length > 120) G.trails.shift();
     }
 
-    function explodeTrails(cx, cy, radius) {
+    // v9.28: dmgMul 是 E07 的层数倍率（多层时靠它加伤，而不是重复调用——
+    // 这个函数边跑边 splice 轨迹，第二遍就对着空数组跑了）。
+    function explodeTrails(cx, cy, radius, dmgMul) {
         let count = 0;
         for (let i = G.trails.length - 1; i >= 0; i--) {
             const t = G.trails[i];
             const mx = (t.x1 + t.x2) / 2,
                 my = (t.y1 + t.y2) / 2;
             if (dist({ x: mx, y: my }, { x: cx, y: cy }) < radius) {
-                const dmg = 30 + G.buffs.trailDmg * 4;
+                const dmg = (30 + G.buffs.trailDmg * 4) * (dmgMul || 1);
                 G.monsters.forEach(m => {
                     if (dist(m, { x: mx, y: my }) < 60) {
                         m.hp -= dmg;
@@ -393,9 +397,10 @@
             showNotification(`🦽 ${chairHit.name}！`, '#ff8844', 240);
             spawnParticles(G.player.x, G.player.y, '#ff8844', 30);
         }
-        if (triggerId === 'T01') { triggerPassive('T01'); }
-        if (triggerId === 'T02') { triggerPassive('T02'); }
+        // v9.28: T01/T02 删掉了，宣读那一刻的即时触发只剩 T10（残血）与 T14（唤魔者）。
+        // 唤魔者是全项目最重的一张牌——清场 + 招 BOSS 都在这一行里，见 triggerEvoker()。
         if (triggerId === 'T10' && G.player.hp < G.player.maxHp * 0.3) { triggerPassive('T10'); }
+        if (triggerId === 'T14') { triggerEvoker(); }
         setFeedback(msg, chairHit ? '#ff8844' : '#ffb347');
         Tutorial.emit('combine', { chair: chairHit ? chairHit.id : null });
         if (Tutorial.combos >= 2) Tutorial.emit('combine2');

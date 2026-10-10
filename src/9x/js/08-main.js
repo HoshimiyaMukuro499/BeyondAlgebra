@@ -8,7 +8,8 @@
         G.hand = []; G.triggerSlot = null; G.effectSlot = null;
         G.floor = 1; G.monstersToSpawn = 0; G.spawnTimer = 0;
         G.combineCooldown = false;
-        G.buffs = { atkUp: 0, multUp: 0, trailDmg: 1, trailWidth: 6, speedUp: 1, slowAll: 0 };
+        // v9.28: fireRateMul 一起复位——留着旧局的值会让新一局开局就是加速射速。
+        G.buffs = { atkUp: 0, multUp: 0, trailDmg: 1, trailWidth: 6, speedUp: 1, slowAll: 0, fireRateMul: 1 };
         G.passives = {};
         G.killCount = 0; G.killStreak = 0; G.lastKillFrame = 0; G.gameOver = false;
         G.fireCounter = 0; G.target = null;
@@ -17,6 +18,7 @@
         G.bossPending = false; G.bossSpawned = false;
         G.floatingTexts = [];
         G.fireTrails = []; G.damageFlows = []; G.ultimateGauge = 0; G.ultimateChargeMult = 1.0;
+        G.enemyShots = [];
         G.ultimateActive = false; G.ultimateTimer = 0; G.screenFlash = 0;
         G.notifications = []; G.chainCooldown = 0;
         G.paused = false; G.maxSlots = 4;

@@ -9,7 +9,10 @@
         floor: 1, stage: 1, monstersToSpawn: 0, spawnTimer: 0,
         combineCooldown: false,
         passives: {},
-        buffs: { atkUp: 0, multUp: 0, trailDmg: 1, trailWidth: 6, speedUp: 1, slowAll: 0 },
+        // v9.28: fireRateMul 是稀有效果板 E17「急速装填」的累加器（初值 1 = 不变）。
+        // ⚠️ 它和 G.fireRate 是**两道独立的闸门**，见 05-update.js 的开火闸与
+        //    04-trail.js 的 shootCooldown——两边都要除它，只改一处等于没改。
+        buffs: { atkUp: 0, multUp: 0, trailDmg: 1, trailWidth: 6, speedUp: 1, slowAll: 0, fireRateMul: 1 },
         keys: { w: false, a: false, s: false, d: false, shift: false }, mouse: { x: 390, y: 280 },
         // v9.19: fireRate 是「几帧打一发」。10 → 40（射速变成原来的 1/4），
         // 与 autoShoot() 里的 p.shootCooldown 是两道独立闸门，两处都得改才生效。
@@ -19,6 +22,7 @@
         selectingActive: false, selectionCards: [],
         bossPending: false, bossSpawned: false, floatingTexts: [], debug: false,
         fireTrails: [], damageFlows: [],   // v9.19: 火焰伤害「玩家→核心」的转移动画
+        enemyShots: [],                    // v9.28: 射击小怪的弹道拖尾（纯渲染，命中是即时的）
         // v9.22: 终结技不再靠「造成伤害」充能，改为固定时间回复。
         // 回满一槽需要 ULT_BASE_FRAMES / (1 + 层数/50) 帧，见 05-update.js 的 getUltimateChargeFrames()。
         // ultimateChargeMult 保留下来当「充能速度」乘数（命运·超载 ×2 / 奥术学者 ×1.5 / 第 40 层 ×1.5），

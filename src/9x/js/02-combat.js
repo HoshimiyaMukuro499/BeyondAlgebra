@@ -1,9 +1,29 @@
     // ---------- 被动系统 ----------
+
+    // v9.28: 层数语义只有两种，写在这里而不是散在 switch 里——
+    //   ①「多做 n 次」：留在 triggerPassive 的循环里跑 n 遍（下表这些）
+    //   ②「把数值/时长 ×n」：只跑 1 遍，但把 n 当乘数传进 applyPassiveEffect
+    // 两边都做就是 n²，所以一张效果板**只能**属于其中一边。
+    //
+    // 为什么 E06 / E11 / E12 也算「多做 n 次」：
+    //   E06 轨迹升级、E11 自速暴涨是纯累加，跑 n 遍和 ×n 结果一样，但 removePassive()
+    //   的回退按「每层贡献 × 层数」算，保持重复这一边最不容易走散；
+    //   E12 闪电链的 `G.chainCooldown <= 0` 闸门是唯一让重复变成空操作的东西——
+    //   把它挪到乘数那边、又不给伤害乘 n，看着没变，实际上随时会被后来的人乘错。
+    const PASSIVE_REPEAT_EFFECTS = new Set(['E02', 'E06', 'E10', 'E11', 'E12']);
+
+    // v9.28: T03「命中精英时」的生效数值倍率。applyPassiveEffect 与 removePassive
+    // 都从这里取——只有一个来源，两边不会走散。
+    function getPassiveValueMul(triggerId) {
+        return triggerId === 'T03' ? T03_EFFECT_MUL : 1;
+    }
+
     function addPassive(triggerId, effectId) {
         if (!G.passives[triggerId]) G.passives[triggerId] = [];
         const existing = G.passives[triggerId].find(p => p.effectId === effectId);
         if (existing) existing.count += 1;
         else G.passives[triggerId].push({ effectId: effectId, count: 1 });
+        // 组合那一刻只生效一层（不传 count → layers = 1），层数由后续触发累加。
         applyPassiveEffect(triggerId, effectId, true);
         updatePassiveUI();
         addScore(10);
@@ -12,12 +32,17 @@
     // v9.23: target 是「这次触发的生效目标」——T03/T06/T07/T08 传被命中的那只怪。
     // 只有需要范围效果的 E13/E14 用它（见下面的 effectAoeTargets()），其余效果忽略。
     // v9.24: 被「封印」词条压住的组合整条跳过——被动不删除，只是这 4 秒不生效。
+    // v9.28: 按 PASSIVE_REPEAT_EFFECTS 分流——见上面的说明。
     function triggerPassive(triggerId, target) {
         if (!G.passives[triggerId]) return;
         for (const p of G.passives[triggerId]) {
             if (isPassiveSealed(triggerId, p.effectId)) continue;
-            for (let i = 0; i < p.count; i++) {
-                applyPassiveEffect(triggerId, p.effectId, false, target);
+            if (PASSIVE_REPEAT_EFFECTS.has(p.effectId)) {
+                for (let i = 0; i < p.count; i++) {
+                    applyPassiveEffect(triggerId, p.effectId, false, target, 1);
+                }
+            } else {
+                applyPassiveEffect(triggerId, p.effectId, false, target, p.count);
             }
         }
     }
@@ -65,47 +90,57 @@
         return out;
     }
 
-    function applyPassiveEffect(triggerId, effectId, isInitial, target) {
+    // v9.28: 第五个参数 count = 这次结算要乘的层数。只有 PASSIVE_REPEAT_EFFECTS 之外的
+    // 效果会收到 >1 的值（那些已经在 triggerPassive 里跑 n 遍了，这里恒传 1）；
+    // addPassive 的 isInitial 调用不传，于是 layers 恒为 1。
+    // 每个 case 里的 `* layers * vmul` 就是这个意思：数值/时长 × 层数 × T03 倍率。
+    function applyPassiveEffect(triggerId, effectId, isInitial, target, count) {
         const p = G.player;
+        const layers = count || 1;
         const isHighFreq = (triggerId === 'T06' || triggerId === 'T07' || triggerId === 'T08');
+        const vmul = getPassiveValueMul(triggerId);
         switch (effectId) {
             case 'E01': {
-                const val = isHighFreq ? 5 : 12;
+                const val = (isHighFreq ? 5 : 12) * layers * vmul;
                 G.buffs.atkUp = Math.min(G.buffs.atkUp + val, 250);
                 if (!isInitial) spawnParticles(p.x, p.y, '#ff8844', 5);
-                setFeedback(`⚔️ 攻击+${val} (累计+${G.buffs.atkUp})`, '#ff8844');
+                setFeedback(`⚔️ 攻击+${val} (累计+${Math.round(G.buffs.atkUp)})`, '#ff8844');
                 break;
             }
-            case 'E02':
-                G.buffs.multUp = Math.min(G.buffs.multUp + 0.25, 49);
+            case 'E02': {
+                const val = 0.25 * vmul;   // 重复路径：layers 恒为 1，只乘 vmul
+                G.buffs.multUp = Math.min(G.buffs.multUp + val, 49);
                 if (!isInitial) spawnParticles(p.x, p.y, '#ffdd44', 5);
-                setFeedback(`💥 倍率+0.25 (累计x${(1 + G.buffs.multUp).toFixed(1)})`, '#ffdd44');
+                setFeedback(`💥 倍率+${val.toFixed(2)} (累计x${(1 + G.buffs.multUp).toFixed(1)})`, '#ffdd44');
                 break;
+            }
             case 'E03': {
-                const val = isHighFreq ? 5 : 20;
+                const val = (isHighFreq ? 5 : 20) * layers * vmul;
                 p.hp = Math.min(p.maxHp, p.hp + val);
                 spawnParticles(p.x, p.y, '#44ff88', 8);
-                showFloatingText(p.x, p.y - p.r, '+' + val, '#44ff88');
-                setFeedback(`💚 回复${val}生命`, '#44ff88');
+                showFloatingText(p.x, p.y - p.r, '+' + Math.round(val), '#44ff88');
+                setFeedback(`💚 回复${Math.round(val)}生命`, '#44ff88');
                 break;
             }
             // v9.23: E04「移速减慢」删除——和 E14「延缓」、轨迹迟缓三套减速重叠。
             // G.buffs.slowAll 字段本身保留（冰轨永冻 / 时间膨胀器还在写它）。
             case 'E06':
-                G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1, 100);
-                G.buffs.trailWidth = Math.min(G.buffs.trailWidth + 2, 150);
-                if (!isInitial) setFeedback(`⬆️ 轨迹伤害+1，宽度+2`, '#66ddff');
+                G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1 * vmul, 100);
+                G.buffs.trailWidth = Math.min(G.buffs.trailWidth + 2 * vmul, 150);
+                if (!isInitial) setFeedback(`⬆️ 轨迹伤害+${(1 * vmul).toFixed(1)}，宽度+${(2 * vmul).toFixed(1)}`, '#66ddff');
                 break;
             case 'E07':
                 if (!isInitial) {
-                    const count = explodeTrails(p.x, p.y, 200);
-                    setFeedback(`💣 引爆${count}段轨迹`, '#ff6633');
-                    if (count > 0) addScore(count * 2);
+                    // v9.28: 层数走**伤害倍率**而不是重复调用——explodeTrails() 会把
+                    // 半径内的轨迹一段段 splice 掉，第二遍就是对着空数组跑，白调用。
+                    const hit = explodeTrails(p.x, p.y, 200, layers * vmul);
+                    setFeedback(`💣 引爆${hit}段轨迹`, '#ff6633');
+                    if (hit > 0) addScore(hit * 2);
                 }
                 break;
             case 'E10':
                 if (!isInitial && G.monsters.length > 0) {
-                    const dmg = Math.floor(60 * (2 + getDifficultyMultiplier()) / 3);
+                    const dmg = Math.floor(60 * (2 + getDifficultyMultiplier()) / 3 * vmul);
                     G.monsters.forEach(m => {
                         m.hp = Math.max(0, m.hp - dmg);
                         spawnParticles(m.x, m.y, '#ff6644', 4);
@@ -115,14 +150,16 @@
                 }
                 break;
             case 'E11':
-                G.buffs.speedUp += 0.35;
-                if (!isInitial) setFeedback(`💨 移速+35% (累计x${G.buffs.speedUp.toFixed(1)})`, '#88ddff');
+                G.buffs.speedUp += 0.35 * vmul;
+                if (!isInitial) setFeedback(`💨 移速+${Math.round(0.35 * vmul * 100)}% (累计x${G.buffs.speedUp.toFixed(1)})`, '#88ddff');
                 break;
             case 'E12':
+                // ⚠️ 有意保留链冷却闸门：E12 不在用户的「时长 ×n」名单里，
+                // 一次触发仍然只放一条链（重复调用时第 2 遍起会被闸门挡掉）。
                 if (!isInitial && G.chainCooldown <= 0 && G.monsters.length > 0) {
                     G.chainCooldown = 30;
                     const origin = G.monsters.reduce((a, b) => dist(G.player, a) < dist(G.player, b) ? a : b);
-                    const chainDmg = Math.floor(20 + G.buffs.atkUp * 0.6 + G.floor * 2);
+                    const chainDmg = Math.floor((20 + G.buffs.atkUp * 0.6 + G.floor * 2) * vmul);
                     origin.hp -= chainDmg;
                     spawnParticles(origin.x, origin.y, '#88ccff', 8);
                     showFloatingText(origin.x, origin.y - origin.r, '-' + chainDmg, '#88ccff');
@@ -144,17 +181,25 @@
             case 'E13': {
                 if (!isInitial) {
                     // v9.19: 冰冻时长 −10%（20→18 / 60→54）
-                    const freezeDuration = isHighFreq ? 18 : 54;
+                    // v9.28: 再 × 层数 × T03 倍率；封顶改成 FREEZE_MAX_FRAMES（600），
+                    // 原来的 180 会让第 4 层起就叠不上去。
+                    const freezeDuration = (isHighFreq ? 18 : 54) * layers * vmul;
                     let frozenCount = 0;
-                    // v9.23: 作用对象 = 命中目标 + 周围 90px（原来是全场随机 65%）
+                    // v9.23: 作用对象 = 命中目标 + 周围 225px（原来是全场随机 65%）
                     for (const m of effectAoeTargets(target)) {
                         if (m.isBoss) continue;   // BOSS 仍然免疫冰冻
-                        m.frozen = Math.min((m.frozen || 0) + freezeDuration, 180);
+                        const before = m.frozen || 0;
+                        m.frozen = Math.min(before + freezeDuration, FREEZE_MAX_FRAMES);
+                        const added = m.frozen - before;
+                        // v9.28: n>1 的冰冻挂上持续伤害标记——被控期间每秒吃 100% 攻击力，
+                        // 见 05-update.js 的怪物循环。标记记的是**实际加进去的帧数**，
+                        // 所以它和 m.frozen 同步到期，不会出现「冻早化了还在掉血」。
+                        if (layers > 1 && added > 0) m.passiveFreeze = Math.max(m.passiveFreeze || 0, added);
                         spawnParticles(m.x, m.y, '#aaddff', 4);
                         frozenCount++;
                     }
                     if (frozenCount > 0) {
-                        setFeedback(`❄️ 冰冻${frozenCount}只怪物 ${Math.floor(freezeDuration / 60)}秒`, '#aaddff');
+                        setFeedback(`❄️ 冰冻${frozenCount}只怪物 ${(freezeDuration / 60).toFixed(1)}秒`, '#aaddff');
                     }
                 }
                 break;
@@ -162,17 +207,59 @@
             case 'E14': {
                 // v9.19「延缓」：降低怪物 20% 移动速度 1 秒。
                 // 减速是限时的，所以挂在怪物自己的 slowTimer 上，在速度公式里乘一次。
-                // v9.23: 作用对象 = 命中目标 + 周围 90px（原来是全场）。
+                // v9.23: 作用对象 = 命中目标 + 周围 225px（原来是全场）。
+                // v9.28: 时长 × 层数 × T03 倍率。**这条是新旧的分水岭**——旧写法是
+                // `Math.max(slowTimer, dur)`，n 层和 1 层一样长，层数在这块板上等于不存在。
                 if (!isInitial) {
-                    const slowDuration = isHighFreq ? 30 : 60;   // 0.5s / 1s
+                    const slowDuration = (isHighFreq ? 30 : 60) * layers * vmul;   // 0.5s / 1s 起
                     const targets = effectAoeTargets(target);
                     for (const m of targets) {
                         m.slowTimer = Math.max(m.slowTimer || 0, slowDuration);
+                        // v9.28: 同 E13——只有 n>1 的延缓才挂持续伤害标记。
+                        // 轨迹踩踏的迟缓（05-update.js 的 TRAIL_SLOW_FRAMES）绝不碰这个字段。
+                        if (layers > 1) m.passiveSlow = Math.max(m.passiveSlow || 0, slowDuration);
                     }
                     if (targets.length > 0) {
                         setFeedback(`⏳ 延缓${targets.length}只怪物 ${(slowDuration / 60).toFixed(1)}秒`, '#c9b3ff');
                         spawnParticles(targets[0].x, targets[0].y, '#c9b3ff', 14);
                     }
+                }
+                break;
+            }
+            // ---------- v9.28 稀有效果板 ----------
+            // 三张都是「永久属性 +一点」，和 E01/E06/E11 一样不带 isInitial 守卫——
+            // 组合那一刻就先生效一次。上限见 RARE_E15/16/17_CAP：它们是挂在
+            // T06 这种每帧都在发生的触发板上的，不封顶会滚到天文数字。
+            case 'E15': {
+                const before = G.turretHpBonus || 0;
+                G.turretHpBonus = Math.min(before + 3 * layers * vmul, RARE_E15_CAP);
+                const gained = G.turretHpBonus - before;
+                if (gained > 0) {
+                    for (const t of G.turrets) { t.maxHp += gained; t.hp += gained; }   // 已有的塔一起加厚
+                    if (!isInitial) spawnParticles(p.x, p.y, '#88aacc', 6);
+                    setFeedback(`🗿 图腾血量+${gained.toFixed(1)}（累计+${G.turretHpBonus.toFixed(1)}）`, '#88aacc');
+                }
+                break;
+            }
+            case 'E16': {
+                const before = p.maxHp;
+                p.maxHp = Math.min(before + 5 * layers * vmul, RARE_E16_CAP);
+                const gained = p.maxHp - before;
+                if (gained > 0) {
+                    p.hp = Math.min(p.maxHp, p.hp + gained);   // 上限涨了，当前护盾跟着补上
+                    if (!isInitial) spawnParticles(p.x, p.y, '#66ddff', 8);
+                    showFloatingText(p.x, p.y - p.r, '+' + Math.round(gained), '#66ddff');
+                    setFeedback(`🔰 护盾上限+${Math.round(gained)}（累计 ${Math.round(p.maxHp)}）`, '#66ddff');
+                }
+                break;
+            }
+            case 'E17': {
+                const before = G.buffs.fireRateMul;
+                G.buffs.fireRateMul = Math.min(before + 0.08 * layers * vmul, RARE_E17_CAP);
+                const gained = G.buffs.fireRateMul - before;
+                if (gained > 0) {
+                    if (!isInitial) spawnParticles(p.x, p.y, '#ffdd44', 6);
+                    setFeedback(`⏩ 射速+${Math.round(gained * 100)}%（累计 ×${G.buffs.fireRateMul.toFixed(2)}）`, '#ffdd44');
                 }
                 break;
             }
@@ -271,7 +358,8 @@
         const type = forced ? (MONSTER_TYPE_LIST.find(t => t.id === forced.key) || selectedType) : selectedType;
 
         // v9.1: 精英词缀分配（v9.24: 抽池逻辑挪到 00-data.js 的 pickAffixes()；
-        // v9.25: 只有 BOSS 专属的那 8 个不再从这里出——bossOnly: false 限定老 6 个）
+        // v9.28: bossOnly: false 现在指「精英共享池」——BOSS 专属的 8 个也进池，
+        // 只是按 ELITE_BOSS_AFFIX_WEIGHT 半权，见 pickAffixes()）
         let affixes = [];
         if (isElite) {
             // 教程钦定的精英一定带词缀，否则「精英带词缀」这句教学会落空
@@ -343,6 +431,13 @@
             fireTrailLife: type.fireTrailLife || 150,
             isWraith: type.isWraith || false,
             bulletResist: type.bulletResist || 0,
+            // v9.28: 射击小怪。非射击怪的 shootTimer 恒为 0（永不递减，因为只有
+            // isShooter 的分支会碰它），留着这两个字段是为了对象形状统一。
+            isShooter: type.isShooter || false,
+            shootRange: type.shootRange || 0,
+            shootInterval: type.shootInterval || 0,
+            // 出生错开半拍再开火，免得同波刷出来的几只同时吐弹
+            shootTimer: type.isShooter ? rand(0, ENEMY_SHOOTER_INTERVAL) : 0,
             moveInterval: type.moveInterval || 60,
             moveTimer: rand(0, (type.moveInterval || 60) * 2),
             isMoving: Math.random() < 0.5,
@@ -351,6 +446,12 @@
             frozen: 0,
             stunned: 0,
             slowTimer: 0,   // v9.19: E14「延缓」的剩余帧数，>0 时移速 ×0.8
+            // v9.28: 「被多层密文版控住」的剩余帧数。只有 n>1 的 E13 / E14 会写它们，
+            // >0 时该怪每秒吃 100% 玩家攻击力（见 05-update.js）。轨迹踩踏的迟缓
+            // 只写 slowTimer、冰轨永冻只写 frozen，都碰不到这两个字段。
+            passiveFreeze: 0,
+            passiveSlow: 0,
+            passiveDotTimer: 0,
             vx_prev: 0,
             vy_prev: 0,
             _fireCounter: 0,
@@ -364,7 +465,8 @@
     }
 
     // ---------- 调试生成 ----------
-    const DEBUG_TYPE_KEYS = ['basic', 'fast', 'tank', 'healer', 'splitter', 'scorcher', 'wraith', 'boss'];
+    // v9.28: 加了 shooting（射击）——调试生成会绕过 unlocksAtWave，所以在 25 层前也能刷出来验。
+    const DEBUG_TYPE_KEYS = ['basic', 'fast', 'tank', 'healer', 'splitter', 'scorcher', 'wraith', 'shooter', 'boss'];
     function spawnDebugMonster(typeKey) {
         if (typeKey === 'boss') {
             spawnBoss();
@@ -416,6 +518,12 @@
             frozen: 0,
             stunned: 0,
             slowTimer: 0,   // v9.19: E14「延缓」的剩余帧数，>0 时移速 ×0.8
+            // v9.28: 「被多层密文版控住」的剩余帧数。只有 n>1 的 E13 / E14 会写它们，
+            // >0 时该怪每秒吃 100% 玩家攻击力（见 05-update.js）。轨迹踩踏的迟缓
+            // 只写 slowTimer、冰轨永冻只写 frozen，都碰不到这两个字段。
+            passiveFreeze: 0,
+            passiveSlow: 0,
+            passiveDotTimer: 0,
             vx_prev: 0,
             vy_prev: 0,
             _fireCounter: 0,
@@ -468,7 +576,7 @@
                 alwaysMoving: G.floor >= 10 && Math.random() < Math.min(0.10 + 0.09 * (G.floor - 10), 1.0),
                 // v9.24: 子体不带词条（_zones 之类仍然给全套空值，tickAffixes 会逐只过）
                 affixes: [],
-                frozen: 0, stunned: 0, slowTimer: 0,
+                frozen: 0, stunned: 0, slowTimer: 0, passiveFreeze: 0, passiveSlow: 0, passiveDotTimer: 0,
                 vx_prev: 0, vy_prev: 0, _fireCounter: 0,
                 _affixTimer: 0, _dash: null, _swarmCount: 0, _affixZones: [],
             };
@@ -479,9 +587,27 @@
     }
 
     // ---------- BOSS ----------
-    function spawnBoss() {
+    // v9.28: 「该层 BOSS 的攻击」抽出来——这句原来只写在 spawnBoss() 里，
+    // 而唤魔者要拿它当 max 的一边（见 triggerEvoker）。抽成函数之后只有一个来源。
+    function getBossAtk() {
         const type = MONSTER_TYPES.BOSS;
-        const hp = getBossHp();
+        // v9.25: 攻击也吃前期减压系数（用户说的是「数值」，HP 与攻击都算）。
+        // v9.27: 12 倍安全阀撤掉，与普通怪同一处理（见 spawnMonster 的注释）。
+        return type.baseAtk * Math.pow(getDifficultyMultiplier(), 0.35) * bossEarlyMul();
+    }
+
+    // v9.28: opts 让「唤魔者招出来的 BOSS」复用同一份出场逻辑，而不是抄第二遍。
+    //   opts = { hp, atk, affixCount, isEvoker }
+    // 不传 = 就是「每 10 层那只」的老行为。落点、爪牙召唤器、横幅三块完全共用。
+    // ⚠️ 它**不碰** G.bossPending / G.bossSpawned——那是调用方（startFloor）的活，
+    //    唤魔者于是在楼层排程之外多出一只 BOSS，而排程不受影响。
+    function spawnBoss(opts) {
+        opts = opts || {};
+        const type = MONSTER_TYPES.BOSS;
+        const hp = opts.hp !== undefined ? opts.hp : getBossHp();
+        const atk = opts.atk !== undefined ? opts.atk : getBossAtk();
+        const affixCount = opts.affixCount || 2;
+        const isEvoker = !!opts.isEvoker;
         const w = G.canvasWidth || 780, h = G.canvasHeight || 560;
         const side = randInt(0, 3), pad = 50;
         let x, y;
@@ -495,38 +621,65 @@
             // 而下面的提示语印的是未钳的 hp，两个数对不上）。
             hp: Math.min(hp, HP_OVERFLOW_GUARD), maxHp: Math.min(hp, HP_OVERFLOW_GUARD),
             speed: type.baseSpeed * (1 - G.buffs.slowAll),
-            // v9.25: 攻击也吃前期减压系数（用户说的是「数值」，HP 与攻击都算）。
-            // v9.27: 12 倍安全阀撤掉，与普通怪同一处理（见 spawnMonster 的注释）。
             isElite: false,
-            atk: type.baseAtk * Math.pow(getDifficultyMultiplier(), 0.35) * bossEarlyMul(),
+            atk,
             hitCooldown: 0, trailDamageCooldown: 0,
             scoreValue: type.scoreValue * getDifficultyMultiplier(),
             type: type.id, typeLabel: type.label, typeEmoji: type.emoji,
             color: type.color, isHealer: false, healAmount: 0,
             isSplitter: false, canSplit: false,
             healCooldown: 0, isChild: false, isBoss: true,
+            // v9.28: 唤魔者标记。BOSS 死亡分支靠它决定要不要掉「唤魔之钥」，
+            // 以及要不要跳过 G.bossPending/bossSpawned 的复位。
+            isEvokerBoss: isEvoker,
             spawnTimer: bossSummonInterval(type.spawnInterval),   // v9.23: 召唤速率 +5%
             moveInterval: type.moveInterval, moveTimer: rand(0, 120),
             isMoving: true, alwaysMoving: true,
-            // v9.24: BOSS 从词条池里随机带 2 个。
+            // v9.24: BOSS 从词条池里随机带 2 个（唤魔者带 3 个）。
             // v9.25: 只有 BOSS 能抽到 bossOnly 的那 8 个（'any' = 14 个全池）。
             // 排除 dash 与 swarm——BOSS 已经是 alwaysMoving，本体也已经有专属的爪牙
-            // 召唤器，这两条对它属于「已经有的东西的弱化版」，白占 2 个槽位之一。
-            affixes: pickAffixes(2, { exclude: ['dash', 'swarm'], bossOnly: 'any' }),
+            // 召唤器，这两条对它属于「已经有的东西的弱化版」，白占槽位。
+            affixes: pickAffixes(affixCount, { exclude: ['dash', 'swarm'], bossOnly: 'any' }),
+            // v9.28: BOSS 也补上这组状态字段——原来它整个没有 frozen/stunned/slowTimer，
+            // E14 能生效只是各处读的时候都写了 `|| 0`。
+            frozen: 0, stunned: 0, slowTimer: 0, passiveFreeze: 0, passiveSlow: 0, passiveDotTimer: 0,
             _affixTimer: 0, _dash: null, _swarmCount: 0, _affixZones: [],
         };
         G.monsters.push(boss);
-        spawnParticles(x, y, '#ff2266', 35);
-        setFeedback(`👑 BOSS登场！HP ${Math.floor(hp)} · 第${G.floor}波`, '#ff3366');
+        spawnParticles(x, y, isEvoker ? '#a01f2e' : '#ff2266', 35);
+        setFeedback(`👑 ${isEvoker ? '唤魔者' : 'BOSS'}登场！HP ${Math.floor(hp)} · 第${G.floor}波`, '#ff3366');
         // v9.25: 战斗界面顶部横幅，把这一局抽到的词条直接念给玩家听。
         // 词条只在怪身上画一圈色环，战斗中根本读不出来。
         G.bossBanner = {
-            text: '👑 BOSS · ' + boss.affixes.map(id => {
+            text: '👑 ' + (isEvoker ? '唤魔者' : 'BOSS') + ' · ' + boss.affixes.map(id => {
                 const d = affixDef(id);
                 return d ? `${d.emoji}${d.label}` : id;
             }).join(' · '),
             life: 300, maxLife: 300,   // 5 秒
         };
+    }
+
+    // ---------- v9.28 唤魔者 ----------
+    // 宣读那一刻一次性结算，可反复宣读（每次一组新 BOSS + 一把钥匙）。
+    // ① 先算再清场：「清场前所有怪物的数值之和」用的是这些怪还活着的时候的数值。
+    // ② 数值 = max(该层 BOSS 值, 全场怪数值之和 × EVOKER_SUM_MUL)，HP 与攻击都取。
+    // ③ 清场**不走 registerKill()**——那会加击杀数、加分、断连杀、顺带触发 T08，
+    //    等于把「清场」变成白送一整套收益，而它本来就该有代价。
+    function triggerEvoker() {
+        let sumHp = 0, sumAtk = 0;
+        for (const m of G.monsters) { sumHp += m.hp; sumAtk += m.atk; }
+        const cleared = G.monsters.length;
+        const bossHp = Math.max(getBossHp(), sumHp * EVOKER_SUM_MUL);
+        const bossAtk = Math.max(getBossAtk(), sumAtk * EVOKER_SUM_MUL);
+        for (const m of G.monsters) {
+            spawnParticles(m.x, m.y, '#ff3355', 8);
+            showFloatingText(m.x, m.y - m.r, '☠', '#ff3355');
+        }
+        G.monsters.length = 0;
+        spawnBoss({ hp: bossHp, atk: bossAtk, affixCount: 3, isEvoker: true });
+        showNotification('👹 唤魔者降临！', '#a01f2e', 220);
+        setFeedback(`👹 唤魔者：清空全场 ${cleared} 只怪，招出 HP ${Math.floor(bossHp)} / ATK ${Math.floor(bossAtk)} 的三词条 BOSS`, '#a01f2e');
+        logEvent('evoker', { cleared, bossHp: Math.floor(bossHp), bossAtk: Math.floor(bossAtk) });
     }
 
     function spawnBossMinion(boss) {
@@ -553,7 +706,7 @@
             alwaysMoving: Math.random() < 0.5,
             // v9.24: 爪牙不带词条
             affixes: [],
-            frozen: 0, stunned: 0, slowTimer: 0,
+            frozen: 0, stunned: 0, slowTimer: 0, passiveFreeze: 0, passiveSlow: 0, passiveDotTimer: 0,
             vx_prev: 0, vy_prev: 0, _fireCounter: 0,
             _affixTimer: 0, _dash: null, _swarmCount: 0, _affixZones: [],
         };

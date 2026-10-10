@@ -1,6 +1,6 @@
 # 数值与公式总表 · 9.x（AI 拓展版）
 
-> 调试用速查。所有数值直接摘自 [`src/9x/js/`](../src/9x/js/)（v9.27 状态），每个条目都标了出处。
+> 调试用速查。所有数值直接摘自 [`src/9x/js/`](../src/9x/js/)（v9.28 状态），每个条目都标了出处。
 > 行号是**当时的锚点**，源码一改就会漂——对不上时按函数名/关键字在文件里搜，别按行号硬找。
 > 调数值请改 `src/9x/`，改完跑 `npm run build:game` 重新拼装根目录的单文件 HTML——
 > 根目录的 `密文轨迹demo9.XX.html` 是**产物**，直接编辑会被下次构建覆盖。
@@ -62,6 +62,14 @@
 | 难度系数显示 | `formatDiff(v)`：`< 1e4` 两位小数 / `< 1e6` 千分位 / 再往上 `e` 记数法 | `01-state.js` `formatDiff()` |
 | 图腾攻击力上限 | 玩家攻击力 × 1.0（按 `d×m/75` 分配，开火时现算） | `00-data.js` `TURRET_ATK_CEILING` / `TURRET_RATIO_NORM` |
 | 玩家开火频率乘子 | ×1.2 | `00-data.js` `PLAYER_FIRE_RATE_MUL` |
+| **永久射速乘子**（v9.28） | `G.buffs.fireRateMul` 初值 **1**，E17「急速装填」+0.08/次，封顶 **2.0**（`RARE_E17_CAP`） | `01-state.js` / `02-combat.js` |
+| 稀有卡概率（v9.28） | 第 40 层起 1%，每层 +0.1%，**第 80 层封顶 5%**；40 层前恒为 0 | `00-data.js` `rareChance()` |
+| 唤魔者召唤乘子（v9.28） | ×1.13（场上怪物 HP/攻击之和 × 它，与该层 BOSS 值取 **max**） | `00-data.js` `EVOKER_SUM_MUL` |
+| T03 效果乘子（v9.28） | ×1.2（`applyPassiveEffect` 与 `removePassive` **两边必须同步**） | `00-data.js` `T03_EFFECT_MUL` |
+| 稀有藏品「唤魔之钥」（v9.28） | 总分 lg +1（`G.score *= 10`）+ 每个已激活被动层数 +1；**不占**遗物上限 8 | `07-ui.js` `gainEvokerKey()` |
+| 稀有效果板上限（v9.28） | E15 图腾加固·极 +3/次（≤30）/ E16 护盾扩容 +5/次（≤300）/ E17 急速装填 +0.08/次（≤2.0） | `00-data.js` `RARE_E15_CAP` / `RARE_E16_CAP` / `RARE_E17_CAP` |
+| 精英抽 BOSS 专属词条的权重（v9.28） | ×0.5（`ELITE_BOSS_AFFIX_WEIGHT`）；**BOSS 池不受影响**，仍 12 条等权 | `00-data.js` `pickAffixes()` |
+| 射击小怪（v9.28） | 25 层起；射程 119px（中环基础炮台 140 × 0.85）；开火间隔 40 帧 | `00-data.js` `ENEMY_SHOOTER_*` |
 | 消除冷却 | 1800 帧（30 秒） | `00-data.js` `ELIMINATE_COOLDOWN` |
 | 开局补给密文版 | 6 张（正式开局选完职业；教程局不发） | `00-data.js` `START_CARDS` |
 | 击杀奖励密文版 | 每累计 20 杀，30% 得 1 张 | `00-data.js` `KILL_CARD_EVERY` / `KILL_CARD_CHANCE` |
@@ -143,21 +151,28 @@ getSpawnInterval() = max(6, 25 / 1.06^(f - 1))      // fastRush 关卡 ×0.4
 | f ≥ 25 | 2 个；20% 变 3 个 |
 
 BOSS 不按上表——`spawnBoss()` 固定 `pickAffixes(2, { exclude: ['dash','swarm'], bossOnly: 'any' })`，
-即**恰好 2 个**，排除突进与群生，但**可以**抽到 8 个 BOSS 专属词条（精英怪抽不到的那些）。
+即**恰好 2 个**，排除突进与群生，从 12 个里**等权**抽（唤魔者 BOSS 是 **3 个**）。
+
+> **v9.28：精英现在也抽得到那 8 个 BOSS 专属词条了，但只算半权**（见 §6）。
+> BOSS 池本身一点没动。
 
 ### 关卡类型权重
 
 `00-data.js:239-247`。每种怪在 `mixed` 下的基准权重见下（实际生效值 = `权重 × 10`，因为无定义时回落到 `MONSTER_TYPES[].weight`）：
 
-| 类型 | basic | fast | tank | healer | splitter | scorcher | wraith | eliteMult |
-|:--|:--|:--|:--|:--|:--|:--|:--|:--|
-| mixed 混编 ⚔️ | 1 | 1 | 1 | 0.6 | 0.4 | 0.2 | 0.2 | — |
-| fastRush 疾驰 💨 | 0.3 | 5 | 0.1 | 0.2 | 0.3 | 0.2 | 0.3 | — |
-| siege 攻城 🛡️ | 1 | 0.2 | 4 | 2 | 0.3 | 0.1 | 0.1 | — |
-| fireStorm 烈火 🔥 | 0.5 | 0.5 | 0.5 | 0.3 | 0.3 | 4 | 0.5 | — |
-| ghostTown 幽灵 👻 | 0.3 | 0.3 | 0.2 | 0.2 | 0.2 | 0.2 | 4 | — |
-| eliteSquad 精英 ⭐ | 1 | 1 | 1 | 1 | 1 | 0.5 | 0.5 | **2.5** |
-| bossStage BOSS 👑 | — | — | — | — | — | — | — | — |
+| 类型 | basic | fast | tank | healer | splitter | scorcher | wraith | **shooter** 🆕 | eliteMult |
+|:--|:--|:--|:--|:--|:--|:--|:--|:--|:--|
+| mixed 混编 ⚔️ | 1 | 1 | 1 | 0.6 | 0.4 | 0.2 | 0.2 | **0.4** | — |
+| fastRush 疾驰 💨 | 0.3 | 5 | 0.1 | 0.2 | 0.3 | 0.2 | 0.3 | **0.3** | — |
+| siege 攻城 🛡️ | 1 | 0.2 | 4 | 2 | 0.3 | 0.1 | 0.1 | **0.3** | — |
+| fireStorm 烈火 🔥 | 0.5 | 0.5 | 0.5 | 0.3 | 0.3 | 4 | 0.5 | **0.3** | — |
+| ghostTown 幽灵 👻 | 0.3 | 0.3 | 0.2 | 0.2 | 0.2 | 0.2 | 4 | **0.5** | — |
+| eliteSquad 精英 ⭐ | 1 | 1 | 1 | 1 | 1 | 0.5 | 0.5 | **0.5** | **2.5** |
+| bossStage BOSS 👑 | — | — | — | — | — | — | — | **0** | — |
+
+> **v9.28：`shooter` 列是七张表里都**显式**写的。`MONSTER_TYPES.SHOOTER.weight = 4`
+> 只是「关卡类型查不到」时的兜底（表里是 ×10 的尺度，对齐 mixed 的 0.4）——
+> 漏写一张表，射击怪在那张表里就会按 4 而不是 0.4 出，量级差十倍。
 
 额外修正（`02-combat.js:214-222`）：治疗怪 f<3 ×0.2；分裂怪 f<2 ×0.2；重装怪 f>10 ×1.3；疾速怪 f>8 ×1.2。重装关卡（`siege`）额外 `hpMult = 2`。
 
@@ -204,6 +219,25 @@ speed = player.speed × playerSpeedMult
 
 护盾（`G.player.hp`）先吃伤害，归零后才扣 `G.core.hp`。两者都画在**核心头顶**（`06-render.js:271-297`）。
 
+**v9.28：所有对玩家的伤害统一走 `damagePlayerSide(dmg, opts)`**（`05-update.js`）。
+它把这 8 处原本各写各的结算收敛到一个出口，**各处的飘字颜色与位置保持不变**
+（火圈橙、敌图腾橙、撞核心红——别被统一成一个色）。`opts` 可选：
+
+| 字段 | 作用 | 谁在用 |
+|:--|:--|:--|
+| `color` | 飘字 / 粒子配色 | 全部调用方 |
+| `shieldOnly` | **只作用于护盾**，护盾归零后停手、不咬核心 | **只有荆棘**（2 处） |
+| `silent` / `noText` / `particles` | 给逐帧来源（火焰轨迹、危险区）降噪 | 火焰轨迹、危险区、火圈、敌图腾 |
+
+> ⚠️ **荆棘和火圈是相反的**：用户点名荆棘只作用于护盾（`shieldOnly: true`），
+> 火圈那类才是「护盾破了继续咬核心」。全项目 `shieldOnly: true` 恰好 **2 处**。
+> 怪物撞核心那处额外的 `Tutorial.emit('hit')` 与 `breakKillStreak()` 留在调用点，
+> 不进 helper——它们不是血量结算。核心归零的死亡判定也不在这里，见 §13。
+
+**v9.28：伤害不跨池溢出**。一次伤害不会先扣完护盾再把多的部分扣到核心上——
+护盾 50 挨一记 60，结果是护盾 0、核心 100（第二记才扣核心）。这是原本手写规则就有的行为，
+收敛到 helper 时**原样保留**。
+
 ### 掉血来源汇总
 
 | 来源 | 公式 | 出处 |
@@ -214,9 +248,12 @@ speed = player.speed × playerSpeedMult
 | 🔥火焰圈（玩家） | 1 / 6 帧（≈0.167） | `05-update.js` `tickAffixZones` |
 | 🔥火焰圈（图腾） | `FIRE_TURRET_DMG_PER_FRAME × 6` / 6 帧 | 同上 |
 | 危险区 | 1.2 / 帧 | `05-update.js:521` |
-| 荆棘词缀反弹（子弹） | `bulletDmg × (0.08 + f × 0.002)` | `05-update.js:166` |
-| 荆棘词缀反弹（轨迹） | `td × (0.08 + f × 0.002)` | `05-update.js:262` |
-| 爆裂词缀爆炸 | `(20 + f × 4) × D × 0.3`（仅玩家在 80px 内） | `05-update.js:368,377` |
+| 荆棘词缀反弹（子弹） | `bulletDmg × (0.08 + f × 0.002)` — **`shieldOnly`** | `05-update.js` |
+| 荆棘词缀反弹（轨迹） | `td × (0.08 + f × 0.002)` — **`shieldOnly`** | `05-update.js` |
+| 爆裂词缀爆炸 | `(20 + f × 4) × D × 0.3`（仅玩家在 80px 内） | `05-update.js` |
+| 🔫 射击小怪远程（打核心） | `atk × 0.35 × damageTakenMul` — 与「怪物撞击」**逐字相同** | `05-update.js` `fireEnemyShot()` |
+
+上表除**荆棘两行**外，全部走 `damagePlayerSide()` 的「盾 → 核心」通道。
 
 ---
 
@@ -370,9 +407,35 @@ getTrailDamage() = (buffs.trailDmg + log2(f + 1) × 0.5) × fateBuffs.trailDmgMu
 | 分裂 | 🧬 | 68 | 25 | 0.25 | 0.0109375 | 5 | 0.9 | 14 | 18 | 9 | 24 | 10 | 70 |
 | 灼烧 | 🔥 | 33 | 12 | 0.25 | 0.011 | 5 | 0.85 | 12 | 16 | 7 | 20 | 12 | 55 |
 | 虚灵 | 👻 | 21 | 7.5 | 0.28 | 0.015 | 3 | 0.7 | 11 | 15 | 8 | 22 | 10 | 45 |
+| 射击 🆕 | 🔫 | 30 | 13 | 0.1875 | 0.008 | 6 | 1.2 | 12 | 16 | 11 | 26 | 4 | 60 |
 | BOSS | 👑 | 100000 | 0 | 0.1 | 0 | 45 | 0 | 30 | 35 | 3000 | 3000 | 0 | 60 |
 
-解锁门槛：灼烧怪 **第 8 层**起，虚灵怪 **第 12 层**起。
+解锁门槛：灼烧怪 **第 8 层**起，虚灵怪 **第 12 层**起，**射击怪第 25 层起**（v9.28）。
+
+### 🔫 射击小怪（v9.28 新增，第 9 种）
+
+| 项 | 值 | 出处 |
+|:--|:--|:--|
+| 射程 | **119px** = 中环基础炮台 🗼 的 140 × 0.85 | `ENEMY_SHOOTER_RANGE` |
+| 开火间隔 | **40 帧** = 主人公初始射速 `G.fireRate` | `ENEMY_SHOOTER_INTERVAL` |
+| 首个开火计时 | 生成时随机 `rand(0, 40)`，不是所有人同时开火 | `02-combat.js` |
+| 弹道残留 | 8 帧（纯渲染，命中是即时的） | `ENEMY_SHOT_LIFE` |
+| 弹道上限 | 60 条（超出丢最老的） | `05-update.js` |
+| 关卡权重 | mixed 0.4 / fastRush 0.3 / siege 0.3 / fireStorm 0.3 / ghostTown 0.5 / eliteSquad 0.5 / bossStage 0 | `00-data.js` `STAGE_TYPES` |
+
+行为是**索敌 → 向他移动 → 到射程内停下开火**，只不过攻击方式是远程：
+
+- **场上只要有炮台就无条件锁炮台**——不管炮台比核心远多少（这是全项目唯一这样的怪，
+  其余都取「炮台与核心中更近的那一个」）。一座塔都没有时才改锁核心。
+- 停下来之后 `shooterHolds` 成立，**不再走移动分支**；停的距离是
+  `射程 + 目标半径`（打塔 = 119 + 14 = 133，打核心 = 119 + 30 = 149）。
+- **伤害口径与近战逐字相同**：打炮台 `max(1, atk × 0.05)`（掉塔血、不经过核心护盾），
+  打核心 `atk × 0.35 × damageTakenMul` 走 `damagePlayerSide()`（盾 → 核心）。
+  打核心时同样 `Tutorial.emit('hit')` + `breakKillStreak()` + `onAffixCoreHit(m)`。
+- 停住之后进不了下面的近战分支（近战判定是 `target.r + m.r`，最大 44，远小于 119），
+  不需要额外排除。
+- 每个 `STAGE_TYPES` 权重表都**显式**写了 `shooter` 键——回退路径会让它按类型权重 14
+  刷出来（`mixed` 里约 24%），远超设计意图。
 
 ### 生成公式
 
@@ -422,7 +485,10 @@ spd = m.speed × (1 - slowAll) × (slowTimer > 0 ? 0.8 : 1) × 1.33
 
 ### 索敌
 
-`05-update.js:197-200`：在**最近的图腾**与**核心**之间挑更近的那个（`nearestTurret`，`04-trail.js:215-222`）。
+在**最近的图腾**与**核心**之间挑更近的那个（`nearestTurret`，`04-trail.js`）。
+
+> **v9.28：🔫 射击怪是唯一的例外**——它**无条件优先炮台**（场上只要有塔就锁塔，不管塔
+> 比核心远多少），一座塔都没有时才改锁核心。其余所有怪（含 BOSS 与爪牙）规则不变。
 
 ### 状态字段
 
@@ -474,6 +540,30 @@ bossEarlyMul() = 0.35 + 0.65 × clamp((f - 1) / 19, 0, 1)   // 1 层 ×0.35 → 
 - 爪牙数值：r ×0.8，hp 50%，speed ×1.2，atk ×0.5，分值 ×0.3
 - 每 10 层出现（`f % 10 === 0`）；节点地图上 BOSS 节点只在 `f % 10 === 9` 可选
 
+#### 👹 唤魔者 BOSS（v9.28，稀有触发板 T14 召唤）
+
+不是排程怪，是**宣读 T14 那一刻**招出来的：先把场上所有怪清空，再招一只三词条 BOSS。
+
+```
+bossHp  = max( getBossHp(),  Σ(场上怪 hp)  × EVOKER_SUM_MUL )   // 1.13
+bossAtk = max( getBossAtk(), Σ(场上怪 atk) × EVOKER_SUM_MUL )
+```
+
+| 项 | 说明 |
+|:--|:--|
+| `getBossAtk()` | v9.28 **新抽出**的函数，就是原来只写在 `spawnBoss()` 里的那句 `45 × D^0.35 × bossEarlyMul()`——抽出来保证「该层 BOSS 的攻击」只有一个来源 |
+| `spawnBoss(opts)` | 改成带默认值的形式（`hp` / `atk` / `affixCount` / `isEvoker`），默认值即今日行为；唤魔者传 `affixCount: 3, isEvoker: true` |
+| 词条数 | **3 条**（普通 BOSS 是 2 条），横幅会按 `affixCount` 把三条都念出来 |
+| 清场 | **不走 `registerKill()`**——那会加击杀数、加分、断连杀、触发 T08，等于白送一整套收益。只放粒子和 ☠ 飘字 |
+| 掉落 | 照常吃普通 BOSS 的掉落（精华、遗物、卡牌、T08、连杀分），**额外**再掉唤魔之钥 |
+| 排程 | `spawnBoss()` 本来就**不碰** `G.bossPending` / `G.bossSpawned`（那是调用方的活），所以唤魔者顶不掉「每 10 层一只」；BOSS 死亡分支里那两个标志也补了 `!m.isEvokerBoss` 守卫 |
+| 可反复 | 每次宣读都是新的一组 BOSS + 一把钥匙，**叠起来很凶** |
+| 代价 | 算的是**清场前**场上怪的数值之和（先算再清）；杀不掉就一直挂着 |
+
+**🗝️ 唤魔之钥**：`RELICS` 里 `hidden: true`，`dropRelic()` 直接跳过——只能从唤魔者
+BOSS 身上掉，不进随机池。效果：总分 **lg +1**（`G.score = floor(G.score × 10)`）
++ 每个已激活被动层数 +1。**不占**遗物上限 8（`gainEvokerKey()` 直接 push）。
+
 ### 击杀掉落
 
 `05-update.js:336-408`
@@ -501,12 +591,17 @@ bossEarlyMul() = 0.35 + 0.65 × clamp((f - 1) / 19, 0, 1)   // 1 层 ×0.35 → 
 
 | 调用点 | 传参 | 抽到的池子 |
 |:--|:--|:--|
-| `spawnMonster()`（精英怪） | `{ bossOnly: false }` | **只有老 6 个** |
-| `spawnBoss()` | `{ exclude: ['dash','swarm'], bossOnly: 'any' }` | 14 个里排除突进/群生 = **12 个** |
+| `spawnMonster()`（精英怪） | `{ bossOnly: false }` | **14 个全进池**，其中 8 个只算半权（v9.28） |
+| `spawnBoss()` | `{ exclude: ['dash','swarm'], bossOnly: 'any' }` | 14 个里排除突进/群生 = **12 个**，**等权** |
 | `spawnDebugMonster()`（调试） | `{ bossOnly: 'any' }` | 全部 14 个 |
 
-> **v9.25：后 8 个标了 `bossOnly: true`，精英怪永远抽不到。** 它们改的是"玩家的走法"，
-> 挂在随时刷新的小怪身上只是零散骚扰；只有 BOSS 这种"打一场记一场"的对手才配得上。
+> **v9.25：后 8 个标了 `bossOnly: true`，精英怪抽不到。**
+> **v9.28 反过来：精英与 BOSS「共享」词条**——精英也抽得到那 8 个，但只算
+> **半权**（`ELITE_BOSS_AFFIX_WEIGHT = 0.5`）；**BOSS 池一点没动**，仍是 12 条等权。
+> 实现上 `pickAffixes()` 分了岔：`isElite` 走加权抽样，其余（BOSS / 调试）走原来那条
+> `[...pool].sort(() => Math.random() - 0.5)`——那条洗牌**是有偏的**（低索引容易留在
+> 前面），但 v9.25 的 BOSS 分布就是照它测的，**故意不动**。所以别拿频率去测 BOSS 池的
+> 「均匀」，要测走结构断言。
 
 **精英词条（6 个）——强化怪物自身**（老词条，内联写法）：
 
@@ -778,21 +873,30 @@ KILL_STREAK_WINDOW = 180 帧（3 秒）
 
 | id | 名称 | 触发时机 | 抽取权重 |
 |:--|:--|:--|:--|
-| T01 | 对自身 🧍 | 宣读时立即触发一次 | 1 |
-| T02 | 对敌群 👾 | 宣读时立即触发一次 | 1 |
-| T03 | 对精英生效 ⭐ | 子弹/轨迹命中精英或 BOSS | 1 |
+| T03 | 命中精英时 ⭐ | 子弹/轨迹命中精英或 BOSS（**效果数值/时长 ×1.2**） | 1 |
 | T06 | 怪触轨 🐾 | 怪物踩到轨迹（**高频**） | 1 |
 | T07 | 射击命中 🎯 | 子弹命中（**高频**） | 1 |
 | T08 | 连环击杀 🔥 | 连杀 ≥ 2 时（**高频**） | **0.7** |
 | T10 | 残血触发 ❤️‍🔥 | 护盾 < 30%（每 30 帧检查一次），或宣读时已在残血 | 1 |
 | T12 | 闭环触发 ⭕ | 闭环召唤图腾时 | 1 |
+| **T14** | **唤魔者 👹** 🆕 | **宣读那一刻立即触发一次**（宣读时清场 + 招 BOSS） | **稀有池**（40 层起） |
 
 > **v9.25 移除了 T13「消除」**——它从手牌里拿掉，改成玩家的固定技能（见下）。
-> 触发板重新变成等权抽取，`randomTrigger()` 里那条「T13 权重 0.5」的分支已经删掉。
+> **v9.28 移除了 T01「对自身」与 T02「对敌群」**——它们本来就是同一件事的两种说法
+> （都是「宣读时立即触发一次」，差别只在 E13/E14 的空放兜底取谁当靶心）。同时
+> `T03` 从「对精英生效」**改名**成「命中精英时」并拿到一个 ×1.2——**只改 label，
+> id 保持 `T03`**，因为 `05-update.js` 里有两处按字符串引用它。
 >
 > 「高频」= `isHighFreq`，用于 E01/E03 的数值分档。
 > 抽取必须走 `randomTrigger()`；T08 的 0.7 是 v9.23 加的「出率 -30%」——权重是相对值，
 > 压低 T08 之后其他板的相对占比会跟着涨一点点，这是加权抽取的固有行为。
+
+### 稀有触发板 T14：唤魔者（v9.28）
+
+手牌上唯一的**红卡**（`cardColor: '#a01f2e'`，由 `renderHandUI()` 读出来写成 inline 样式）。
+触发时机是 `doCombine()` 里**宣读那一刻**，与旧 T13「消除」同一位置；效果见 §5 的
+「唤魔者 BOSS」。掉落走 `randomTrigger()` 的稀有池，40 层前 `rareChance()` 返回 0 ——
+玩家在第 1 层不可能见到它（图鉴也按同一条件过滤）。**可反复宣读、反复叠**。
 
 ### 效果板 `EFFECTS`
 
@@ -809,11 +913,25 @@ KILL_STREAK_WINDOW = 180 帧（3 秒）
 | E11 | 自速暴涨 💨 | `buffs.speedUp += 0.35` | — | — | — | **0.7** |
 | E12 | 闪电链 ⚡ | 见下 | — | — | — | 1 |
 | E13 | 冰冻 ❄️ | 见下 | — | — | — | 1 |
-| E14 | 延缓 ⏳ | `m.slowTimer = max(, d)` | **30 帧** | **60 帧** | — | 1 |
+| E14 | 延缓 ⏳ | `m.slowTimer = max(, d × n)` | **30 帧** | **60 帧** | — | 1 |
+| **E15** | **图腾加固·极 🗿** 🆕 | `G.turretHpBonus += 3` | — | — | **30** | **稀有池** |
+| **E16** | **护盾扩容 🔰** 🆕 | `G.player.maxHp += 5; G.player.hp += 5` | — | — | **300** | **稀有池** |
+| **E17** | **急速装填 ⏩** 🆕 | `G.buffs.fireRateMul += 0.08` | — | — | **2.0** | **稀有池** |
 
 > v9.23 删除了 **E04「移速减慢」**（权重表里已经没有这一行）。`G.buffs.slowAll`
 > 字段本身保留——冰轨永冻（`+0.15`）和时间膨胀器（`+0.2`）还在写它。
-> 效果板的抽取同样必须走 `randomEffect()`（`00-data.js:44-50`）。
+> 效果板的抽取同样必须走 `randomEffect()`（`00-data.js`）。
+
+**三张稀有效果板（v9.28）**：数值刻意压低——对照物分别是商店「图腾加固」（+1）、
+基础护盾 100、轮椅「连锁风暴」（`fireRate −8`）。三张都是「每次触发涨一点」的永久属性，
+而触发板里就有 `T06 怪触轨` 这种每帧都在发生的条件，**不封顶会滚成天文数字**，
+所以各自 `Math.min` 到 `RARE_E15_CAP / RARE_E16_CAP / RARE_E17_CAP`。
+三张都走 `isInitial` 分支（组合那一刻就生效，与 E01/E06/E11 一致）。
+
+> ⚠️ **E17 是全项目第二个「两道闸门」效果**，必须同时改两处，否则改了不生效：
+> `04-trail.js` 的 `p.shootCooldown = Math.max(24, …) / PLAYER_FIRE_RATE_MUL / G.buffs.fireRateMul`
+> 与 `05-update.js` 的 `if (G.fireCounter >= G.fireRate / G.buffs.fireRateMul)`。
+> `G.buffs.fireRateMul` 初值 1，在 `resetGame()` 里一并复位。
 
 **E07 引爆**：对半径 200 内每段轨迹，炸 60px 内的怪，每段 `30 + trailDmg × 4` 伤害；每引爆一段 +2 分。
 
@@ -821,22 +939,53 @@ KILL_STREAK_WINDOW = 180 帧（3 秒）
 
 **E12 闪电链**：冷却 30 帧。`chainDmg = floor(20 + atkUp × 0.6 + f × 2)`；主目标吃满伤害，随后 180px 内最多 **4 只** 依次吃 `chainDmg × (1 - i × 0.25)`（即 100% / 75% / 50% / 25%）。
 
-**E13 冰冻**：对作用范围内的每只非 BOSS 怪 `frozen += d`（18 / 54 帧），上限 180 帧。
+**E13 冰冻**：对作用范围内的每只非 BOSS 怪 `frozen += d × n`（18 / 54 帧），
+**上限 `180 × n` 帧**（v9.28 起封顶跟着层数走，旧行为是死值 180，n 大就被截断）。
 
-**E14 延缓**：对作用范围内的每只怪 `m.slowTimer = max(m.slowTimer, d)`（30 / 60 帧）。
+**E14 延缓**：对作用范围内的每只怪 `m.slowTimer = max(m.slowTimer, d × n)`（30 / 60 帧）。
+**v9.28 之前是 `max(, d)`——n 层和 1 层一样长**，这是新旧行为的分水岭。
 
 **E13 / E14 的作用范围（v9.23 引入，v9.24 放大到 225px）**：
 
 ```
 作用对象 = 命中目标 + 它周围 225px 内的怪（EFFECT_AOE_RADIUS，02-combat.js:42）
-没有目标的触发器（T01 对自身 / T02 对敌群 / T10 残血 / T12 闭环）
+没有目标的触发器（T10 残血 / T12 闭环 / T14 唤魔者）
   → 就近兜底：取离玩家最近的那只怪当靶心
   场上无怪 → 空数组，效果空放
 ```
 
 触发器把「被命中的那只怪」透传给 `triggerPassive(tid, target)`——T03 / T06 / T07 / T08
-是带目标的（`05-update.js:170,171,263,264,346,398`）。改之前 E13 是「全场 65% 概率
-逐只掷骰」、E14 是「全场」，两者都不看命中目标。
+是带目标的。改之前 E13 是「全场 65% 概率逐只掷骰」、E14 是「全场」，两者都不看命中目标。
+
+### 层数语义（v9.28 起按类别写死）
+
+同一组「触发板 + 效果板」可以叠 n 层（`G.passives[tid]` 里每条的 `count`）。
+**v9.28 之前**的语义是「`triggerPassive` 把整个 switch 重跑 n 遍」，于是有的叠得动、
+有的叠不动、有的叠一半被截断。现在按类别写死：
+
+```js
+const PASSIVE_REPEAT_EFFECTS = new Set(['E02', 'E06', 'E10', 'E11', 'E12']);  // 触发次数 ×n
+// 其余全部：一次结算，数值 / 时长 ×n
+```
+
+| 类别 | 效果板 | 语义 |
+|:--|:--|:--|
+| 触发次数 × n | E02 连环击 · E06 轨迹升级 · E10 怪物反噬 · E11 自速暴涨 · E12 闪电链 | 真跑 n 遍 |
+| 数值 / 时长 × n | E01 攻击增幅 · E03 生命回复 · E07 轨迹爆伤 · E13 冰冻 · E14 延缓 · E15 / E16 / E17 | 跑 1 遍，拿到 `layerCount` 乘进去 |
+
+- `applyPassiveEffect(triggerId, effectId, isInitial, target, layerCount)` 第五个参数
+  默认 1；`addPassive()` 传 1 —— **组合那一刻只生效一层**，层数由后续触发累加。
+- **两边都乘就是 n²**：留在循环里 + 在 case 里再乘一遍，是这条改造最容易踩的坑。
+- `E06` 的 `trailDmg ≤ 100` / `trailWidth ≤ 150`、`E12` 的 `G.chainCooldown <= 0` 闸门
+  都保留；`E12` 维持「一次触发一条链」是**有意保留**，不是漏改。
+- **`E13 / E14` 且 `layerCount > 1` 时给命中的怪打标记 `m._layerCCTick`**，
+  它每秒额外吃 **100% 玩家攻击力**（`G.frame % 60 === 0` 结算一次）。
+  标记**只能**由 E13/E14 且 `layerCount > 1` 设置——轨迹接触造成的 `slowTimer`
+  **绝不能**碰它，否则平A 铺轨就白送 DoT。结算挂在计时器递减紧后面、移动块之前：
+  冰冻中的怪跳过错开了移动块但**仍然会跑轨迹伤害块**，挂在后面就成了「冰冻中打得更多」。
+  脱控（`!frozen && !slowTimer`）即清标记。
+- **T03 的 ×1.2 与 `removePassive` 的回退必须同步**（`T03_EFFECT_MUL`）——
+  加了 ×1.2 但忘了回退，表现是移除被动后 `G.buffs.atkUp` 变成负数或留下残值。
 
 ### 🧹 消除（v9.25 起是技能，不是卡牌）
 
@@ -936,7 +1085,7 @@ rollBossCardCount(): r < 0.50 → 1 ; < 0.70 → 2 ; < 0.90 → 3 ; else → 4
 | `trailRevenge` | T06+E10 | 轨迹反噬 🐾🔥 | `trailDmg += 4` | fire |
 | `chainStorm` | T07+E12 | 连锁风暴 ⚡🎯 | `fireRate = max(12, fireRate - 8)` | lightning |
 | `iceTrail` | T06+E13 | 冰轨永冻 ❄️🐾 | `trailWidth += 4`，`slowAll = min(0.7, +0.15)` | ice |
-| `trailExplosion` | T02+E07 | 爆轨清场 💣🐾 | `trailDmg += 5` | fire |
+| `trailExplosion` | **T08+E07** | 爆轨清场 💣🔥 | `trailDmg += 5` | fire |
 | `vampLord` | T08+E03 | 吸血领主 🩸💚 | `fateBuffs.vampHeal += 16` | basic |
 | `bulletHell` | T07+E02 | 弹幕地狱 🎯💥 | `buffs.multUp += 0.5` | lightning |
 
@@ -951,9 +1100,9 @@ rollBossCardCount(): r < 0.50 → 1 ; < 0.70 → 2 ; < 0.90 → 3 ; else → 4
 | `guardian` | 堡垒守卫 🛡️ | `player.maxHp +80`、`core.maxHp +40`、`atkUp +8`、移速 **×0.75**、`fireRate ×1.25` |
 | `arcaneScholar` | 奥术学者 🔮 | `maxSlots +1`、`ultimateChargeMult ×1.5`、`essenceBonus = 0.5` |
 
-### 遗物（12 种）
+### 遗物（12 种 + 1 件隐藏藏品）
 
-`00-data.js:330-355`。稀有度权重：epic **15** / rare **35** / common **50**（`07-ui.js:154`）。
+`00-data.js`。稀有度权重：epic **15** / rare **35** / common **50**（`07-ui.js`）。
 
 | 名称 | 稀有度 | 效果 |
 |:--|:--|:--|
@@ -969,6 +1118,7 @@ rollBossCardCount(): r < 0.50 → 1 ; < 0.70 → 2 ; < 0.90 → 3 ; else → 4
 | 👢 疾风之靴 | common | `speedMul ×1.25` |
 | 🔰 核心护盾发生器 | rare | 核心 `maxHp +20` |
 | 🗿 狂战图腾 | rare | 护盾 < 30% 时攻击翻倍 |
+| 🗝️ 唤魔之钥 🆕 | epic | **`hidden: true`**——只掉自唤魔者 BOSS，不进随机池；总分 lg +1（`score × 10`）+ 每个已激活被动层数 +1；**不占**遗物上限 8 |
 
 ### 命运抉择（8 选 2）
 
@@ -1134,10 +1284,14 @@ r = 55，life = 600 帧（10 秒）
 | 2 | 图腾生成 | — | 60 | basic ×4 | 2 杀→T07，4 杀→E01 |
 | 3 | 密文版 | — | 70 | basic ×3 | 3 杀→T07，6 杀→E12 |
 | 4 | 敌人 | — | 70 | basic ×4 + 脚本召唤 fast ×2 / healer ×2 / tank ×2 / scorcher ×2 / wraith ×1 / 精英 basic ×1 | 杀精英→T10、E03 |
-| 5 | 核心 | — | 60 | basic ×4 + fast ×2 | 2 杀→T02，4 杀→E07 |
+| 5 | 核心 | — | 60 | basic ×4 + fast ×2 | 2 杀→**T08**，4 杀→E07 |
 
 第 3 层预设手牌 `[T06, E10]`；第 5 层 `ultFull = true`（终极技直接充满）。
 第 5 层结束 → 节点地图 → `TUTORIAL_OUTRO` 收尾（4 步）→ 清空重开。
+
+> ⚠️ 第 5 层的脚本掉落 v9.28 从 `T02` 改成 **`T08`**（T02 已删）。
+> `dropScriptedCard()` 在 id 找不到时**静默 no-op**，不会报错——所以漏改的表现是
+> 「那一步永远等不到牌」，不是崩溃。改这张表时务必核对 `TRIGGERS` 里真的有这个 id。
 
 > **为什么闭环图腾（第 2 块）排在密文版（第 3 块）前面**：判环只看轨迹本身
 > （`04-trail.js` 的 `checkTrailLoop`），一张牌都没填时 `turType` 默认 `'basic'`
@@ -1202,6 +1356,15 @@ r = 55，life = 600 帧（10 秒）
 | T13「消除」 | `00-data.js` `TRIGGERS` / `07-ui.js` / `10-sim.js` | 从手牌改成玩家技能（`R` / 手机端 🧹），见 §10 |
 | 塔实例的 `damage`（快照）字段 | `04-trail.js` | 伤害改为开火时现算（`getTurretAttackPower(t)`），快照不再需要；类型表的 `d` 保留但语义从「伤害」变成「相对权重」，见 §7 |
 
+### v9.28 已清掉的（这一批删的）
+
+| 项 | 原位置 | 删的理由 |
+|:--|:--|:--|
+| T01「对自身」 | `00-data.js` `TRIGGERS` | 与 T02 是同一件事的两种说法（都是「宣读时立即触发一次」，差别只在 E13/E14 空放时取谁当靶心），留一个够用 |
+| T02「对敌群」 | `00-data.js` `TRIGGERS` | 同上。轮椅组合「爆轨清场」改绑 `T08+E07`，教程第 5 层掉落与 `10-sim.js` 配对表同步换 |
+| `doCombine()` 里的 T01/T02 immediate trigger | `04-trail.js` | 只剩 T10 + 新增的 T14 |
+| 8 处手写的「只扣护盾」结算 | `05-update.js` | 收敛到 `damagePlayerSide()`——**只有荆棘是例外**（`shieldOnly: true`，用户点名） |
+
 ### 仍然存在的
 
 | 项 | 位置 | 状态 |
@@ -1240,6 +1403,16 @@ r = 55，life = 600 帧（10 秒）
 | `FIRE_ZONE_TICK` / `FIRE_ZONE_DMG_PER_TICK` | 与玩家护盾上限（100）、火圈半径是一组——换算要按「穿过半秒 vs 站满 6 秒」两档实测算账 |
 | `bossEarlyMul()` / `BOSS_EARLY_MUL_START` / `BOSS_EARLY_RAMP_END` | 与 `BOSS_HP_MUL` **叠乘**；同时作用于 `getBossHp()` 与 `spawnBoss()` 的 `atk`，改一处不要漏另一处。注意 BOSS 攻击**不吃** `EARLY_NORMAL_MUL`，−30% 全由 `BOSS_EARLY_MUL_START` 承担 |
 | `EARLY_NORMAL_MUL`（0.7） | 与 `MONSTER_STAT_MUL` 叠乘（0.56），且只在 `f < DIFF_KNEE` 且**非精英**时生效——三个条件写在 `spawnMonster()` 的同一行 `earlyMul` 里，改生效范围就是改那一行 |
+| **`G.buffs.fireRateMul`**（v9.28） | **两道闸门**：`p.shootCooldown`（`04-trail.js`）**和** `G.fireCounter >= G.fireRate / G.buffs.fireRateMul`（`05-update.js`）。只在 `resetGame()` 里复位 |
+| **`T03_EFFECT_MUL`（1.2）**（v9.28） | `applyPassiveEffect()` 里每个写数值/时长的 case **和** `removePassive()`（`07-ui.js`）的四处回退**必须同步**——只在一边加会出现负值或残值 |
+| **`PASSIVE_REPEAT_EFFECTS`**（v9.28） | 层数语义的分水岭。往集合里加一个 id 要确认它的 case **没有**再乘 `layerCount`（两边都乘就是 n²）；`E13` 的封顶是 `180 × n`，改基数要连带看这条 |
+| **`ELITE_BOSS_AFFIX_WEIGHT`（0.5）**（v9.28） | 只作用于 `pickAffixes()` 的 `isElite` 分支；BOSS / 调试那条路径走的是旧的有偏洗牌，**故意不动**——别顺手「统一」过去，否则 v9.25 的 BOSS 分布会漂 |
+| **`ENEMY_SHOOTER_RANGE`（119）**（v9.28） | 由 `TURRET_MID_RANGE (140) × ENEMY_SHOOTER_RANGE_MUL (0.85)` 算出。改中环基础炮台的 `rg` 要连带看这三个常量 |
+| **`ENEMY_SHOOTER_INTERVAL`（40）**（v9.28） | 设计口径是「等于主人公初始射速」= `G.fireRate` 的初值。改 `G.fireRate` 初值就与这条脱钩了，要一起改 |
+| **射击怪的关卡权重**（v9.28） | `STAGE_TYPES` 里 **7 张表都要显式写 `shooter` 键**（bossStage 写 0）。漏一张，回退路径会按类型权重 14 刷出来（`mixed` 里约 24%） |
+| **`rareChance()` / `RARE_CARD_*`**（v9.28） | 落点在 `randomTrigger()` / `randomEffect()` 内部。`renderLibrary()` 的过滤也要跟着改，否则图鉴会提前剧透未解锁的卡 |
+| **唤魔者相关的三个数**（v9.28） | `EVOKER_SUM_MUL`（1.13）、`affixCount: 3`、`gainEvokerKey()` 的两条效果——任一处改动都要同步 `spawnBoss(opts)` 的默认值与探针第 21 节 |
+| **`hidden` 遗物**（v9.28） | `dropRelic()` 必须过滤 `!r.hidden`（现在只有 `evokerKey` 一件）——新加隐藏遗物时只需带上 `hidden: true`，掉落路径不用再动 |
 | `HP_OVERFLOW_GUARD` / `ATK_OVERFLOW_GUARD` | **改 `DIFF_BASE` 就要重算这两道闸门的适用楼层**——它们只是防溢出，定低了会把曲线拦腰截断（v9.26 的 ×12 / 1e9 / 1e8 就是这么来的） |
 | `ENEMY_TOTEM_RANGE`（120） | 图腾索敌半径（`05-update.js`）——它决定敌人的塔能不能隔着半个屏幕压着玩家图腾打 |
 | 词缀分组（`bossOnly`） | 本表 §6 的两张表 + 图鉴 `CODEX_PAGES`（`07-ui.js`）+ 教程第 5 层字幕（`03-tutorial.js`）——三处文案要一起改 |
