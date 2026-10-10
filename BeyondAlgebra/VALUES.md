@@ -1,6 +1,6 @@
 # 数值与公式总表 · 9.x（AI 拓展版）
 
-> 调试用速查。所有数值直接摘自 [`src/9x/js/`](../src/9x/js/)（v9.26 状态），每个条目都标了出处。
+> 调试用速查。所有数值直接摘自 [`src/9x/js/`](../src/9x/js/)（v9.27 状态），每个条目都标了出处。
 > 行号是**当时的锚点**，源码一改就会漂——对不上时按函数名/关键字在文件里搜，别按行号硬找。
 > 调数值请改 `src/9x/`，改完跑 `npm run build:game` 重新拼装根目录的单文件 HTML——
 > 根目录的 `密文轨迹demo9.XX.html` 是**产物**，直接编辑会被下次构建覆盖。
@@ -45,6 +45,8 @@
 | 火焰烧图腾 | 0.012 / 帧（≈0.72 血/秒） | `05-update.js:9` |
 | E13/E14 范围半径 | 225px | `02-combat.js:42` |
 | 普通怪 HP / 攻击乘子 | ×0.8（移速不动） | `02-combat.js:280` |
+| **前期普通怪再 −30%**（v9.27） | ×0.7，仅 `< DIFF_KNEE (30)` 层，**只削普通怪**（精英/BOSS 都不吃）；与上一行叠乘 0.56 | `00-data.js` `EARLY_NORMAL_MUL` |
+| **防溢出天花板**（v9.27） | 普通怪/BOSS HP `1e15`、怪物攻击 `1e9`——只防溢出，曲线不再被截断 | `00-data.js` `HP_OVERFLOW_GUARD` / `ATK_OVERFLOW_GUARD` |
 | BOSS 血量乘子 | ×0.9 | `00-data.js:229` |
 | BOSS 召唤速率乘子 | ×1.1025（间隔 ÷1.1025） | `00-data.js:232` |
 | 封印时长 | 240 帧（4 秒） | `05-update.js:237` |
@@ -56,7 +58,8 @@
 | 圈层半径放大 | ×1.5（削减区 100→150、减速区/火焰区 90→135） | `00-data.js` `AFFIX_ZONE_R_MUL` |
 | 圈层同屏上限 | 同属性 3 个 | `00-data.js` `AFFIX_ZONE_MAX_PER_KIND` |
 | 火焰圈结算 | 每 6 帧 1 点（≈0.167/帧） | `05-update.js` `FIRE_ZONE_TICK` / `FIRE_ZONE_DMG_PER_TICK` |
-| BOSS 前期减压 | 1 层 ×0.5 → 20 层 ×1.0（HP 与攻击同乘） | `00-data.js` `bossEarlyMul()` |
+| BOSS 前期减压 | **v9.27 起 `BOSS_EARLY_MUL_START = 0.35`**：1 层 ×0.35 → 20 层 ×1.0（HP 与攻击同乘；v9.25/9.26 起点是 0.5） | `00-data.js` `bossEarlyMul()` |
+| 难度系数显示 | `formatDiff(v)`：`< 1e4` 两位小数 / `< 1e6` 千分位 / 再往上 `e` 记数法 | `01-state.js` `formatDiff()` |
 | 图腾攻击力上限 | 玩家攻击力 × 1.0（按 `d×m/75` 分配，开火时现算） | `00-data.js` `TURRET_ATK_CEILING` / `TURRET_RATIO_NORM` |
 | 玩家开火频率乘子 | ×1.2 | `00-data.js` `PLAYER_FIRE_RATE_MUL` |
 | 消除冷却 | 1800 帧（30 秒） | `00-data.js` `ELIMINATE_COOLDOWN` |
@@ -75,18 +78,26 @@
 
 ### 难度系数（全局乘子）
 
-`01-state.js:144-150`
+`01-state.js` `DIFF_BASE` / `getDifficultyMultiplier()` / `formatDiff()`
 
 ```
-DIFF_KNEE = 30        // 拐点：30 层前纯指数，之后转多项式
-DIFF_TAIL = 1.6
-
-D(f) = 1.16 ^ (min(f, 30) - 1)  ×  max(1, f / 30) ^ 1.6
+v9.27（当前）   D(f) = 1.56 ^ (f - 1)                 ← 全程单条指数，无拐点
+v9.15–9.26      D(f) = 1.16 ^ (min(f,30)-1) × max(1, f/30) ^ 1.6
 ```
 
-- 30 层前与原公式完全一致：10 层 ×3.80，20 层 ×14.5，30 层 ×55.1
-- 118 层：旧曲线 ×34,800,440 → 新曲线 ×687
-- UI 上以 `×D` 的两位小数显示（右下角 + 面板 `diffDisplay`）
+- **底数 1.56 = 1.16 + 0.4**（用户口径「提高 40%」按绝对 +0.4 计）。`DIFF_TAIL` 已删除。
+- `DIFF_KNEE = 30` **不再是难度曲线的拐点**，只是「前期 / 后期」分界——精华上限
+  （`getEssenceCap`）与清层卡数（`getFloorClearCards`）仍按它分档。
+- 取值：1 层 ×1.00 / 10 层 ×54.7 / 20 层 ×4,671 / 30 层 ×3.99e5 / 50 层 ×2.90e9 / 100 层 ×1.32e19。
+- 显示走 `formatDiff()`：`< 1e4` 两位小数、`< 1e6` 千分位、再往上 `e` 记数法
+  （`toFixed(2)` 到后期会印出二十几位数字，撑破侧栏）。HUD `diffDisplay`、结算界面、
+  模拟报告三处都用它。
+- **两处数值字段故意不走 `formatDiff`**：`snapshotStats().difficulty`（`01-state.js:131`）
+  与 `10-sim.js` 的 `finalDifficulty` 是给分析管线读的 number，写成 `+…toFixed(2)` 转回数字。
+- 新旧对比（血最厚的普通怪 152 HP / 9.5 攻、BOSS 逐个楼层对过）见
+  [`EDITION.md` v9.27 §5](EDITION.md)。要点：**「前期 −30%」只在第 1 层成立**，
+  第 4 层被底数抬高抹平、第 5 层起反超；BOSS 血量的 −30% 是干净的（1 层 ×0.70 线性回
+  到 20 层 ×1.00，20–30 层与旧值完全相同）。
 
 ### 每层怪物数
 
@@ -366,18 +377,31 @@ getTrailDamage() = (buffs.trailDmg + log2(f + 1) × 0.5) × fateBuffs.trailDmgMu
 ### 生成公式
 
 ```
-hp  = (baseHp + hpScale)        × D × hpMult × 0.8  // 精英：(baseHp + hpScale × 1.5)
-spd = (baseSpeed + speedScale)  × min(D, 3.0)       // 精英：speedScale × 1.2（不乘 0.8）
-atk = (baseAtk + atkScale)      × min(D^0.35, 12) × 0.8   // 精英：atkScale × 1.3
+v9.27:
+hp  = (baseHp + hpScale)  × D × hpMult × 0.8 × early   // 精英：(baseHp + hpScale × 1.5)，early = 1
+spd = (baseSpeed + speedScale) × min(D, 3.0)           // 精英：speedScale × 1.2（不乘 0.8）
+atk = (baseAtk + atkScale) × D^0.35 × 0.8 × early      // 精英：atkScale × 1.3，early = 1
+
+early = (普通怪 && f < 30) ? EARLY_NORMAL_MUL (0.7) : 1
 ```
 
-硬钳：`hp ≤ 1e9`、`speed ≤ 6.0`、`atk ≤ 120`。
+硬钳：`hp ≤ 1e15`、`speed ≤ 6.0`、`atk ≤ 1e9`（v9.27 起只剩防溢出，见下）。
 
 > **v9.24 起普通怪 HP 与攻击各 ×0.8**（`MONSTER_STAT_MUL`），**移速不动**——
 > 出怪变密之后再削移速只会变成「又慢又肉又没威胁」，纯拖时间。
 > 作用域仅 `spawnMonster()`；`spawnBoss()` / `spawnBossMinion()`（已 0.5×）/
 > `spawnDebugMonster()` 与分裂子体、群生残影都**不**再乘一次
 > （子体的数值从母体派生，母体已经吃过这一刀）。
+>
+> **v9.27 再叠一层 `EARLY_NORMAL_MUL = 0.7`**（`f < DIFF_KNEE` 且**非精英**）：
+> 0.8 × 0.7 = 0.56。只削普通怪——精英与 BOSS 都不吃，移速同样不动。
+> 与 §1 同一条代价：底数抬高对整条曲线生效，第 4 层就把这 0.7 抹平了。
+>
+> **v9.27 的三道闸门改动**：旧写法是 `hp ≤ 1e9`、`atk ≤ 120`（`D^0.35` 的乘数即
+> `min(D^0.35, 12)`），外加 BOSS HP 的 `1e8`。它们是照 v9.15 的多项式曲线调的，新指数
+> 曲线在第 17 / 37 / 44 层就会撞上，撞上后怪不再变强——所以换成
+> `HP_OVERFLOW_GUARD = 1e15`（第 68 层）与 `ATK_OVERFLOW_GUARD = 1e9`（第 124 层），
+> `min(D^0.35, 12)` 的 12 也撤掉。`spawnDebugMonster()` 的 `1e4 / 80` 不动（调试专用）。
 
 `hpMult`：重装关卡 ×2；教程 `hpMul`（第 1 层 0.6）。
 
@@ -429,16 +453,23 @@ spd = m.speed × (1 - slowAll) × (slowTimer > 0 ? 0.8 : 1) × 1.33
 `00-data.js:249-257`、`02-combat.js:424-481`
 
 ```
-getBossHp() = floor(0.9 × 100000 × 1.7^(min(floor(f/10), 3) - 1) × max(1, f/30)^1.6 × bossEarlyMul())
-上限 1e8
-bossEarlyMul() = 0.5 + 0.5 × clamp((f - 1) / 19, 0, 1)     // 1 层 ×0.5 → 20 层 ×1.0，之后恒 1.0
+v9.27:
+getBossHp() = floor(0.9 × 100000 × 1.7^(min(floor(f/10), 3) - 1) × 1.56^max(0, f - 30) × bossEarlyMul())
+上限 1e15（HP_OVERFLOW_GUARD；旧值 1e8）
+bossEarlyMul() = 0.35 + 0.65 × clamp((f - 1) / 19, 0, 1)   // 1 层 ×0.35 → 20 层 ×1.0，之后恒 1.0
 ```
 
 - v9.23 起整体 ×0.9（`BOSS_HP_MUL`）
-- **v9.25 起再乘 `bossEarlyMul()`（`BOSS_EARLY_RAMP_END = 20`）**：第 1 层 ×0.5、
-  第 10 层 ×0.7368 → 血 66300、第 20 层起恢复 ×1.0 → 血 153000。线性爬坡而非断崖，
-  否则第 19/20 层两只 BOSS 血量差一倍
-- `atk = 45 × min(D^0.35, 12) × bossEarlyMul()`（用户说的「数值」涵盖 HP 与攻击）
+- **v9.27 起 `BOSS_EARLY_MUL_START = 0.35`**（v9.25/9.26 是 0.5）：第 1 层正好 −30%，
+  第 10 层 ×0.65789 → 血 **59,211**（v9.26 是 66,312）、第 20 层起恢复 ×1.0 → 血 153,000。
+  线性爬坡而非断崖，否则第 19/20 层两只 BOSS 血量差一倍
+- **BOSS 血量的尾巴换成同一底数的指数**：`1.16^… × (f/30)^1.6` → `1.56^max(0, f-30)`。
+  第 20–30 层与旧值完全相同（×1.7 那两段「每 10 层跳一档、30 层封顶」没动），
+  第 31 层起才拉开：31 层 ×1.48、40 层 ×53.9、60 层 ×2.05e5
+- `atk = 45 × D^0.35 × bossEarlyMul()`（用户说的「数值」涵盖 HP 与攻击）。
+  注意 BOSS 攻击没有普通怪那层 `EARLY_NORMAL_MUL`——用户的 −30% 由 `bossEarlyMul()` 承担。
+  **但攻击这条被底数抬高抵消得更早**：第 4 层就反超旧值（×1.07），第 20 层 ×7.17、
+  第 30 层 ×20.2
 - 爪牙：间隔 `round(max(50, 150 - f × 2) / 1.1025)` 帧（v9.24 累计 +10.25%），首次 91 帧；数量 `1 + floor(f / 15)`，只出 basic/fast/tank
 - 爪牙数值：r ×0.8，hp 50%，speed ×1.2，atk ×0.5，分值 ×0.3
 - 每 10 层出现（`f % 10 === 0`）；节点地图上 BOSS 节点只在 `f % 10 === 9` 可选
@@ -1191,7 +1222,8 @@ r = 55，life = 600 帧（10 秒）
 | `G.fireRate`（射速） | `p.shootCooldown`（`04-trail.js` `autoShoot()`）——两道独立闸门，只改一处不动 |
 | 怪物基础血量 | 图腾血量（`04-trail.js:172`）与「图腾加固」的 +1（`00-data.js:394`）——塔血 ≈ 能挨几下，靠的是 `max(1, atk×0.05)` 的下限 1 |
 | `trailWidth` / 轨迹宽度类数值 | 踩踏判定（`05-update.js:235`）、围剿采样（`05-update.js:640`）两处都读同一个 `getTrailWidth()` |
-| `DIFF_KNEE` | `getEssenceCap()`（`01-state.js:174`）也用它当「后期」的分界，两者会一起变 |
+| `DIFF_BASE`（1.56） | 整条难度曲线就是 `DIFF_BASE^(f-1)`，**牵一发动全身**：怪 HP/攻击、BOSS HP/攻击、三道防溢出上限的适用楼层全都跟着动。改之前先按 `EDITION.md` v9.27 §5 那张新旧对比表重算一遍 |
+| `DIFF_KNEE` | **不再是难度拐点**（v9.27 起曲线全程无拐点）。它现在只是「前期/后期」分界：`getEssenceCap()`（`01-state.js`）、清层卡数修正、以及 `EARLY_NORMAL_MUL` 的生效范围三处共用 |
 | 图腾分档血量 | 教程第 4 层字幕（`03-tutorial.js:111`）与图鉴（`03-tutorial.js:253`）、`BeyondAlgebra/README.md` |
 | 图腾上限 | HUD 计数（`06-render.js:536`）、图鉴（`03-tutorial.js:252`）、`01-state.js:42`、`08-main.js:33`、`TURRET_SLOT_CHOICE` 的兜底 `(G.maxTurrets \|\| 10)`（`00-data.js:382`） |
 | 火焰烧塔速率 | `FIRE_TURRET_DMG_PER_FRAME`（`05-update.js:9`）——它和塔血量（`04-trail.js:172`）是一对，塔血变厚时要一起看 |
@@ -1206,7 +1238,9 @@ r = 55，life = 600 帧（10 秒）
 | `PLAYER_FIRE_RATE_MUL`（1.2） | `p.shootCooldown` 的**整条**表达式（含 `Math.max(24, …)` 地板）都要除以它，只除一半会出现地板倒挂 |
 | `AFFIX_ZONE_R_MUL` / `AFFIX_ZONE_MAX_PER_KIND` | `AFFIXES` 里三条 zone 的 `r` 是**基数**，实际半径靠乘子放大；改基数要连带看 `spawnRange`（落点下界用 `r × 1.2`） |
 | `FIRE_ZONE_TICK` / `FIRE_ZONE_DMG_PER_TICK` | 与玩家护盾上限（100）、火圈半径是一组——换算要按「穿过半秒 vs 站满 6 秒」两档实测算账 |
-| `bossEarlyMul()` / `BOSS_EARLY_RAMP_END` | 与 `BOSS_HP_MUL` **叠乘**；同时作用于 `getBossHp()` 与 `spawnBoss()` 的 `atk`，改一处不要漏另一处 |
+| `bossEarlyMul()` / `BOSS_EARLY_MUL_START` / `BOSS_EARLY_RAMP_END` | 与 `BOSS_HP_MUL` **叠乘**；同时作用于 `getBossHp()` 与 `spawnBoss()` 的 `atk`，改一处不要漏另一处。注意 BOSS 攻击**不吃** `EARLY_NORMAL_MUL`，−30% 全由 `BOSS_EARLY_MUL_START` 承担 |
+| `EARLY_NORMAL_MUL`（0.7） | 与 `MONSTER_STAT_MUL` 叠乘（0.56），且只在 `f < DIFF_KNEE` 且**非精英**时生效——三个条件写在 `spawnMonster()` 的同一行 `earlyMul` 里，改生效范围就是改那一行 |
+| `HP_OVERFLOW_GUARD` / `ATK_OVERFLOW_GUARD` | **改 `DIFF_BASE` 就要重算这两道闸门的适用楼层**——它们只是防溢出，定低了会把曲线拦腰截断（v9.26 的 ×12 / 1e9 / 1e8 就是这么来的） |
 | `ENEMY_TOTEM_RANGE`（120） | 图腾索敌半径（`05-update.js`）——它决定敌人的塔能不能隔着半个屏幕压着玩家图腾打 |
 | 词缀分组（`bossOnly`） | 本表 §6 的两张表 + 图鉴 `CODEX_PAGES`（`07-ui.js`）+ 教程第 5 层字幕（`03-tutorial.js`）——三处文案要一起改 |
 | `ELIMINATE_COOLDOWN` | HUD 倒计时（`06-render.js`）、手机端 🧹 圆钮、桌面端 `<kbd>R</kbd>` 提示（`body.html`） |

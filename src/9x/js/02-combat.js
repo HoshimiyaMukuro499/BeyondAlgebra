@@ -282,20 +282,26 @@
         let hpMult = 1;
         if (G.stageType === 'siege') hpMult = 2;
         if (forced && forced.hpMul) hpMult *= forced.hpMul; // 教程：压低前几层的血量
+        // v9.27: 前期（< DIFF_KNEE 层）普通怪再 −30%。**只削普通怪**——精英与 BOSS
+        // 都不吃这一项，所以它不能并进 MONSTER_STAT_MUL（那个是连精英一起乘的）。
+        const earlyMul = (!isElite && G.floor < DIFF_KNEE) ? EARLY_NORMAL_MUL : 1;
         // v9.24: 最后再乘一次 MONSTER_STAT_MUL（HP 与攻击各 −20%）。
         // 放在这里而不是打进各分档里，是为了让「−20%」在代码里只有一个出处。
         let hp = (isElite ?
             (type.baseHp + type.hpScale * 1.5) * diff :
-            (type.baseHp + type.hpScale) * diff) * hpMult * MONSTER_STAT_MUL;
+            (type.baseHp + type.hpScale) * diff) * hpMult * MONSTER_STAT_MUL * earlyMul;
         let spd = isElite ?
             (type.baseSpeed + type.speedScale * 1.2) * Math.min(diff, 3.0) :
             (type.baseSpeed + type.speedScale) * Math.min(diff, 3.0);
         // v9.15: 攻击不再第 10 层就冻结。旧写法 ×Math.min(diff,4.0) 让怪物伤害
         // 永远停在 24 点，配合玩家的 100 点护盾，等于「永远不会死」。
         // 改成随难度缓涨（0.35 次幂）并留 12 倍安全阀。
+        // v9.27: 12 倍安全阀撤掉——新曲线第 17 层就会撞上它，等于把攻击封死。
+        // 0.35 次幂保留：它只是让攻击涨得比血量慢，本身仍然是指数
+        // （1.56^(0.35×层)），不再另设闸门。
         let atk = (isElite ?
-            (type.baseAtk + type.atkScale * 1.3) * Math.min(Math.pow(diff, 0.35), 12) :
-            (type.baseAtk + type.atkScale) * Math.min(Math.pow(diff, 0.35), 12)) * MONSTER_STAT_MUL;
+            (type.baseAtk + type.atkScale * 1.3) * Math.pow(diff, 0.35) :
+            (type.baseAtk + type.atkScale) * Math.pow(diff, 0.35)) * MONSTER_STAT_MUL * earlyMul;
         let radius = isElite ? type.eliteRadius : type.radius;
 
         // 巨人词缀：HP和体型翻倍
@@ -310,12 +316,14 @@
             r: radius,
             // v9.15: 去掉血量上限。旧写法 Math.min(hp, 10000) 让普通怪在第 37 层
             // 就撞顶，之后每层的怪一模一样——游戏在那之后其实已经结束了，
-            // 只是分数还在按难度指数往上乘。留 1e9 纯防溢出。
-            hp: Math.min(hp, 1e9),
-            maxHp: Math.min(hp, 1e9),
+            // 只是分数还在按难度指数往上乘。
+            // v9.27: 1e9 / 120 这两道闸门换成 HP_OVERFLOW_GUARD / ATK_OVERFLOW_GUARD，
+            // 位置远在「一局能打到的层数」之外，不再截断曲线（见 00-data.js 注释）。
+            hp: Math.min(hp, HP_OVERFLOW_GUARD),
+            maxHp: Math.min(hp, HP_OVERFLOW_GUARD),
             speed: Math.min(spd * (1 - G.buffs.slowAll), 6.0),
             isElite,
-            atk: Math.min(atk, 120),
+            atk: Math.min(atk, ATK_OVERFLOW_GUARD),
             hitCooldown: 0,
             trailDamageCooldown: 0,
             scoreValue: isElite ? type.eliteScoreValue * diff : type.scoreValue * diff,
@@ -485,11 +493,12 @@
             x, y, r: type.radius,
             // v9.15: 上限从 120 万大幅提高（旧上限第 60 层就撞顶，
             // 而下面的提示语印的是未钳的 hp，两个数对不上）。
-            hp: Math.min(hp, 1e8), maxHp: Math.min(hp, 1e8),
+            hp: Math.min(hp, HP_OVERFLOW_GUARD), maxHp: Math.min(hp, HP_OVERFLOW_GUARD),
             speed: type.baseSpeed * (1 - G.buffs.slowAll),
             // v9.25: 攻击也吃前期减压系数（用户说的是「数值」，HP 与攻击都算）。
+            // v9.27: 12 倍安全阀撤掉，与普通怪同一处理（见 spawnMonster 的注释）。
             isElite: false,
-            atk: type.baseAtk * Math.min(Math.pow(getDifficultyMultiplier(), 0.35), 12) * bossEarlyMul(),
+            atk: type.baseAtk * Math.pow(getDifficultyMultiplier(), 0.35) * bossEarlyMul(),
             hitCooldown: 0, trailDamageCooldown: 0,
             scoreValue: type.scoreValue * getDifficultyMultiplier(),
             type: type.id, typeLabel: type.label, typeEmoji: type.emoji,

@@ -10,7 +10,8 @@
         document.getElementById('monsterCount').textContent = G.monsters.length + (G.monstersToSpawn > 0 ? ` (+${G.monstersToSpawn})` : '');
         document.getElementById('killDisplay').textContent = G.killCount;
         document.getElementById('essenceDisplay').textContent = G.essence;
-        document.getElementById('diffDisplay').textContent = `×${getDifficultyMultiplier().toFixed(2)}`;
+        // v9.27: 用 formatDiff——指数曲线下这个数能到 1e19，toFixed(2) 会撑破侧栏
+        document.getElementById('diffDisplay').textContent = `×${formatDiff(getDifficultyMultiplier())}`;
         updateHandCount();
         renderHandUI();
         renderSlotsUI();

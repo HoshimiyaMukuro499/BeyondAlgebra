@@ -10,7 +10,10 @@
         const clsName = G.playerClass ? G.playerClass.name : '未选择';
         report.push(`职业: ${clsName}    最终楼层: ${G.floor}    得分: ${fmtScore(G.score)}`);
         report.push(`击杀: ${G.killCount}    遗物: ${G.relics.map(r=>r.name).join(', ') || '无'}`);
-        report.push(`被动层数: ${sumPassiveLayers()}    难度: ×${getDifficultyMultiplier().toFixed(2)}`);
+        // v9.27: 走 formatDiff——难度系数现在能到 1e19，toFixed(2) 会印出二十几位。
+        // （下面 summary 里的 finalDifficulty 另说：那一个是给分析管线读的 number，
+        //   不是给人看的字符串，故意保持原样。）
+        report.push(`被动层数: ${sumPassiveLayers()}    难度: ×${formatDiff(getDifficultyMultiplier())}`);
         report.push('');
 
         let lastFloor = 0;

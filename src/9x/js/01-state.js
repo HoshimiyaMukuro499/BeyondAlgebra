@@ -180,12 +180,27 @@
     // 之后转多项式——仍然一直变难，但不再涨成天文数字。
     // 旧曲线到 118 层是 ×34,800,440，新曲线 ×687；配合解开怪物血量上限，
     // 「变难」终于体现在战斗里，而不是只体现在右上角的数字上。
+    // v9.27: 拐点与多项式尾巴一起撤掉，改成**第 1 层起的单条指数曲线**，
+    // 底数同时抬高（1.16 → 1.56，绝对 +0.4）。用户要的是「后期难度指数上升
+    // 而非多项式」。代价见 EDITION：三道「撞顶就封顶」的闸门（怪物攻击
+    // diff^0.35 的 ×12、普通怪 HP 1e9、BOSS HP 1e8）是照旧曲线调的，新曲线在
+    // 第 17 / 40 / 38 层就会撞上，撞上之后怪不再变强——所以那三道闸门在 v9.27
+    // 一并抬到只防溢出的位置，否则「指数」只是 HUD 上的数字。
+    const DIFF_BASE = 1.56;
+    // DIFF_KNEE 不再是难度曲线的拐点。它现在只是「前期 / 后期」的分界，
+    // 精华上限（getEssenceCap）与清层卡数（getFloorClearCards）还按它分档。
     const DIFF_KNEE = 30;
-    const DIFF_TAIL = 1.6;
     function getDifficultyMultiplier() {
-        const f = G.floor;
-        return Math.pow(1.16, Math.min(f, DIFF_KNEE) - 1)
-             * Math.pow(Math.max(1, f / DIFF_KNEE), DIFF_TAIL);
+        return Math.pow(DIFF_BASE, G.floor - 1);
+    }
+
+    // v9.27: 难度系数不再是「几百」——第 100 层就是 1.3e19。HUD 与结算界面上
+    // 原来统一 toFixed(2)，现在会印出二十几位数字把版面撑破，所以按量级分档显示。
+    function formatDiff(v) {
+        if (!isFinite(v)) return '∞';
+        if (v < 10000) return v.toFixed(2);
+        if (v < 1e6) return Math.round(v).toLocaleString();
+        return v.toExponential(2).replace('e+', 'e');
     }
 
     function getMonsterCount() {

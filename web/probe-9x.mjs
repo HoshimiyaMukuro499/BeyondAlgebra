@@ -169,6 +169,14 @@ const factory = new Function(
   ' canvas: (typeof canvas !== "undefined") ? canvas : null,' +
   ' showNodeMap: (typeof showNodeMap !== "undefined") ? showNodeMap : null,' +
   ' TUTORIAL_NODEMAP: (typeof TUTORIAL_NODEMAP !== "undefined") ? TUTORIAL_NODEMAP : null,' +
+  // v9.27 难度曲线改回全程指数 + 抬高三道撞顶闸门 + 前期普通怪再 −30%
+  ' DIFF_BASE: (typeof DIFF_BASE !== "undefined") ? DIFF_BASE : null,' +
+  ' DIFF_TAIL: (typeof DIFF_TAIL !== "undefined") ? DIFF_TAIL : null,' +
+  ' EARLY_NORMAL_MUL: (typeof EARLY_NORMAL_MUL !== "undefined") ? EARLY_NORMAL_MUL : null,' +
+  ' HP_OVERFLOW_GUARD: (typeof HP_OVERFLOW_GUARD !== "undefined") ? HP_OVERFLOW_GUARD : null,' +
+  ' ATK_OVERFLOW_GUARD: (typeof ATK_OVERFLOW_GUARD !== "undefined") ? ATK_OVERFLOW_GUARD : null,' +
+  ' BOSS_EARLY_MUL_START: (typeof BOSS_EARLY_MUL_START !== "undefined") ? BOSS_EARLY_MUL_START : null,' +
+  ' formatDiff: (typeof formatDiff !== "undefined") ? formatDiff : null,' +
   // 已删符号的存在性探针——拿 KILL_BURSTS/MAP_NODES 这类名字去断言「确实删干净了」
   ' deletedSymbols: { KILL_BURSTS: typeof KILL_BURSTS !== "undefined",' +
   '  MAP_NODES: typeof MAP_NODES !== "undefined",' +
@@ -216,12 +224,21 @@ const { AFFIX_ZONE_R_MUL, AFFIX_ZONE_MAX_PER_KIND, bossEarlyMul, BOSS_EARLY_RAMP
         START_CARDS, KILL_CARD_EVERY, KILL_CARD_CHANCE, BOSS_CARD_STEP,
         rollBossCardCount, grantCards, dropBalancedCard, registerKill,
         tickBossCardMilestones,
-        setCanvasPointer, showNodeMap, TUTORIAL_NODEMAP } = api;
+        setCanvasPointer, showNodeMap, TUTORIAL_NODEMAP,
+        DIFF_BASE, DIFF_TAIL, EARLY_NORMAL_MUL, HP_OVERFLOW_GUARD, ATK_OVERFLOW_GUARD,
+        BOSS_EARLY_MUL_START, formatDiff } = api;
 const HAS_V925 = !!(bossEarlyMul && spawnAffixZone && tickAffixZones && tryEliminate
                     && getPlayerAttackPower && setStickFromTouch);
 // v9.26：pointer-events 收敛到 setCanvasPointer() 这一个入口。
 // 探针也要能跑在 9.25 及更早的产物上做对照，所以新断言全部挂在这个开关下。
 const HAS_V926 = !!(setCanvasPointer && api.canvas);
+// v9.27：难度曲线改回全程指数（底数 1.56），并抬高三道撞顶闸门。
+// 判据用「新符号存在 + 多项式尾巴已删」两条一起——只看 DIFF_BASE 的话，
+// 万一哪天有人把尾巴加回来，这个开关还是会亮。
+// 注意 DIFF_TAIL 在工厂里被映射成 null（符号不存在时），所以这里判 !DIFF_TAIL
+// 而不是 typeof ——对 null 做 typeof 得到的是 'object'，那个开关永远不亮。
+const HAS_V927 = !!(DIFF_BASE && !DIFF_TAIL && EARLY_NORMAL_MUL
+                    && HP_OVERFLOW_GUARD && ATK_OVERFLOW_GUARD && formatDiff);
 
 let pass = 0, fail = 0;
 const ok = (cond, label, extra = '') => {
@@ -1458,7 +1475,7 @@ if (!HAS_V924) {
     '排除列表里的词条不会被抽中', picked.join(','));
   ok(picked.every(id => !!affixDef(id)), '抽出来的都是真实词条 id', picked.join(','));
 
-  // 18c 普通怪 HP 与攻击 ×0.8
+  // 18c 普通怪 HP 与攻击 ×0.8（v9.27 起，前期还要再乘 EARLY_NORMAL_MUL）
   ok(MONSTER_STAT_MUL === 0.8, 'MONSTER_STAT_MUL = 0.8', `got ${MONSTER_STAT_MUL}`);
   fresh();
   G.floor = 5;
@@ -1467,12 +1484,18 @@ if (!HAS_V924) {
   const mm = G.monsters[0];
   const bType = MONSTER_TYPES.BASIC;
   const diff5 = getDifficultyMultiplier();
-  const wantHp = (bType.baseHp + bType.hpScale) * diff5 * MONSTER_STAT_MUL;
+  const early5 = HAS_V927 ? EARLY_NORMAL_MUL : 1;   // 第 5 层 < 30，普通怪吃这一项
+  const wantHp = (bType.baseHp + bType.hpScale) * diff5 * MONSTER_STAT_MUL * early5;
   ok(mm && Math.abs(mm.hp - wantHp) < 1e-6,
-    '普通怪 HP = (base + scale) × 难度 × 0.8', `got ${mm && mm.hp}，期望 ${wantHp}`);
-  const wantAtk = (bType.baseAtk + bType.atkScale) * Math.min(Math.pow(diff5, 0.35), 12) * MONSTER_STAT_MUL;
-  ok(mm && Math.abs(mm.atk - Math.min(wantAtk, 120)) < 1e-6,
-    '普通怪攻击同样 ×0.8', `got ${mm && mm.atk}，期望 ${wantAtk}`);
+    `普通怪 HP = (base + scale) × 难度 × 0.8${HAS_V927 ? ' × 0.7' : ''}`,
+    `got ${mm && mm.hp}，期望 ${wantHp}`);
+  // v9.27: 攻击的 12 倍安全阀撤掉了（第 17 层就会撞上它）；老版本仍在。
+  const atkGate = HAS_V927 ? Infinity : 12;
+  const wantAtk = (bType.baseAtk + bType.atkScale)
+                * Math.min(Math.pow(diff5, 0.35), atkGate) * MONSTER_STAT_MUL * early5;
+  const wantAtkFinal = HAS_V927 ? wantAtk : Math.min(wantAtk, 120);
+  ok(mm && Math.abs(mm.atk - wantAtkFinal) < 1e-6,
+    `普通怪攻击同样 ×0.8${HAS_V927 ? ' × 0.7' : ''}`, `got ${mm && mm.atk}，期望 ${wantAtkFinal}`);
 
   // 18d BOSS 恰好带 2 个词条，且不抽「对它无意义」的突进 / 群生
   let bossBad = 0, bossCounts = {};
@@ -1756,25 +1779,26 @@ if (!HAS_V925) {
   }
   ok(sawBoth.old && sawBoth.neu, 'bossOnly: "any" 两组都能抽到', JSON.stringify(sawBoth));
 
-  // 19c BOSS 前期数值：1 层 ×0.5 线性爬到 20 层 ×1.0，之后恒 ×1.0
+  // 19c BOSS 前期数值：1 层起线性爬到 20 层 ×1.0，之后恒 ×1.0。
+  // v9.27 把起点从 ×0.5 压到 ×0.35（第 1 层正好 −30%，第 20 层归零）。
+  const rampStart = HAS_V927 ? BOSS_EARLY_MUL_START : 0.5;
+  const rampAt = (f) => { G.floor = f; return bossEarlyMul(); };
   fresh();
-  G.floor = 1;
-  ok(Math.abs(bossEarlyMul() - 0.5) < 1e-12, '第 1 层 ×0.5', `got ${bossEarlyMul()}`);
-  G.floor = 10;
-  ok(Math.abs(bossEarlyMul() - (0.5 + 0.5 * 9 / 19)) < 1e-9,
-    '第 10 层 ≈ ×0.7368（线性，不是断崖）', `got ${bossEarlyMul().toFixed(4)}`);
-  G.floor = 20;
-  ok(Math.abs(bossEarlyMul() - 1) < 1e-12, '第 20 层 ×1.0',
-    `got ${bossEarlyMul()}`);
-  G.floor = 30;
-  ok(Math.abs(bossEarlyMul() - 1) < 1e-12, '第 30 层仍是 ×1.0（20 层封顶）', `got ${bossEarlyMul()}`);
+  ok(Math.abs(rampAt(1) - rampStart) < 1e-12,
+    `第 1 层 ×${rampStart}`, `got ${rampAt(1)}`);
+  ok(Math.abs(rampAt(10) - (rampStart + (1 - rampStart) * 9 / 19)) < 1e-9,
+    HAS_V927 ? '第 10 层 ≈ ×0.6579（线性，不是断崖）' : '第 10 层 ≈ ×0.7368（线性，不是断崖）',
+    `got ${rampAt(10).toFixed(4)}`);
+  ok(Math.abs(rampAt(20) - 1) < 1e-12, '第 20 层 ×1.0', `got ${rampAt(20)}`);
+  ok(Math.abs(rampAt(30) - 1) < 1e-12, '第 30 层仍是 ×1.0（20 层封顶）', `got ${rampAt(30)}`);
   ok(BOSS_EARLY_RAMP_END === 20, '爬坡到第 20 层结束', `got ${BOSS_EARLY_RAMP_END}`);
 
-  // 19d 落地到 getBossHp()：第 10 层原本 9 万（v9.23 定的值），乘 0.7368 ≈ 6.6 万
+  // 19d 落地到 getBossHp()：第 10 层底数 9 万（v9.23 定的值），再乘前期减压系数
   G.floor = 10;
   const hp10 = getBossHp();
   ok(Math.abs(hp10 - 90000 * bossEarlyMul()) <= 1,
-    '第 10 层 BOSS 血量 = 9万 × 0.7368 ≈ 66300', `got ${Math.round(hp10)}`);
+    `第 10 层 BOSS 血量 = 9万 × ${bossEarlyMul().toFixed(4)} ≈ ${Math.round(90000 * bossEarlyMul())}`,
+    `got ${Math.round(hp10)}`);
   G.floor = 1;
   const hp1 = getBossHp();
   G.floor = 30;
@@ -2275,6 +2299,138 @@ if (!HAS_V925) {
     ok(/G\.drawerOpen \|\| G\.selectingActive\) return;/.test(html),
       '摇杆的 touchstart 在 selectingActive 期间直接 return（不抢浮层的点击）');
   }
+}
+
+// ============================================================
+//  20. v9.27 难度曲线改回全程指数 · 抬高三道撞顶闸门 · 前期普通怪 −30%
+// ============================================================
+if (!HAS_V927) {
+  section('20. v9.27 难度曲线（跳过：这是 9.26 及更早的产物）');
+} else {
+  section('20. v9.27 难度曲线改回全程指数 + 抬高三道撞顶闸门 + 前期普通怪 −30%');
+
+  // 20a 曲线本体：底数 1.56，从第 1 层起就是单条指数，没有拐点、没有多项式尾巴
+  ok(DIFF_BASE === 1.56, 'DIFF_BASE = 1.56（1.16 + 0.4）', `got ${DIFF_BASE}`);
+  ok(!DIFF_TAIL, 'DIFF_TAIL 已删除（多项式尾巴撤掉了）', `got ${DIFF_TAIL}`);
+  fresh();
+  const diffs = [1, 2, 5, 10, 30, 31, 100].map(f => { G.floor = f; return getDifficultyMultiplier(); });
+  ok(Math.abs(diffs[0] - 1) < 1e-12, '第 1 层 ×1.00', `got ${diffs[0]}`);
+  ok(Math.abs(diffs[1] - 1.56) < 1e-12, '第 2 层 ×1.56', `got ${diffs[1]}`);
+  ok(Math.abs(diffs[3] - Math.pow(1.56, 9)) < 1e-6, '第 10 层 ×1.56^9 ≈ 54.7',
+    `got ${diffs[3].toFixed(2)}`);
+  // 关键：拐点前后是**同一条**曲线。若尾巴又回来了，这里的比值会掉下来。
+  G.floor = 30; const d30 = getDifficultyMultiplier();
+  G.floor = 31; const d31 = getDifficultyMultiplier();
+  ok(Math.abs(d31 / d30 - 1.56) < 1e-9,
+    '第 30 → 31 层的比值仍是 1.56（拐点处不断档 = 没有多项式尾巴）',
+    `got ${(d31 / d30).toFixed(6)}`);
+  // 全程单调且始终按同一底数
+  let ratioOk = true, prev = null;
+  for (let f = 2; f <= 120; f++) {
+    G.floor = f;
+    const d = getDifficultyMultiplier();
+    if (prev !== null && Math.abs(d / prev - 1.56) > 1e-9) ratioOk = false;
+    prev = d;
+  }
+  ok(ratioOk, '第 2 ~ 120 层每一层的比值都恰好是 1.56（真·全程指数）');
+
+  // 20b 三道撞顶闸门都抬到了「一局打不到」的位置
+  ok(HP_OVERFLOW_GUARD === 1e15 && ATK_OVERFLOW_GUARD === 1e9,
+    'HP / 攻击的天花板 = 1e15 / 1e9',
+    `got ${HP_OVERFLOW_GUARD} / ${ATK_OVERFLOW_GUARD}`);
+  fresh();
+  G.floor = 60;                       // 远在「攻击 ~22 层封顶」的实战范围之外
+  G.monsters = [];
+  spawnMonsterProbe({ key: 'basic' });
+  const m60 = G.monsters[0];
+  const diff60 = getDifficultyMultiplier();
+  const rawAtk60 = (MONSTER_TYPES.BASIC.baseAtk + MONSTER_TYPES.BASIC.atkScale)
+                 * Math.pow(diff60, 0.35) * MONSTER_STAT_MUL;
+  ok(m60 && Math.abs(m60.atk - rawAtk60) < 1e-6 && m60.atk < ATK_OVERFLOW_GUARD,
+    '第 60 层攻击没有被 12 倍安全阀截断（= 用了新闸门）',
+    `got ${m60 && m60.atk}，未截断值 ${rawAtk60}`);
+  // 结构上确认那两个老常数在生成路径里已经消失
+  ok(!/Math\.min\(Math\.pow\(diff, 0\.35\), 12\)/.test(html),
+    '源码里不再有 Math.min(Math.pow(diff, 0.35), 12) 这道闸门');
+  ok(!/Math\.min\(hp, 1e9\)/.test(html) && !/Math\.min\(hp, 1e8\)/.test(html),
+    '源码里不再有 Math.min(hp, 1e9) / 1e8 这两道血量闸门');
+  ok(!/Math\.min\(atk, 120\)/.test(html), '源码里不再有 Math.min(atk, 120)');
+
+  // 20c 前期普通怪 −30%：只削普通怪，精英与 30 层之后都不吃
+  ok(EARLY_NORMAL_MUL === 0.7, 'EARLY_NORMAL_MUL = 0.7', `got ${EARLY_NORMAL_MUL}`);
+  const bT = MONSTER_TYPES.BASIC;
+  fresh();
+  G.floor = 5;
+  G.monsters = [];
+  spawnMonsterProbe({ key: 'basic' });
+  const norm5 = G.monsters[0];
+  const d5 = getDifficultyMultiplier();
+  const norm5Want = (bT.baseHp + bT.hpScale) * d5 * MONSTER_STAT_MUL * EARLY_NORMAL_MUL;
+  ok(Math.abs(norm5.hp - norm5Want) < 1e-6, '第 5 层普通怪 HP 吃了 ×0.7',
+    `got ${norm5.hp}，期望 ${norm5Want}`);
+  // 精英不吃这一项。注意 elite 的 hp 公式是 (baseHp + hpScale×1.5)×diff×0.8
+  // ——MONSTER_STAT_MUL 是**连精英一起乘**的（它写在赋值行上），所以期望值里留着它。
+  // 巨人词缀会让 HP 翻倍，抽到就重抽，否则这条断言会随机红。
+  let elite5 = null;
+  for (let i = 0; i < 60 && !elite5; i++) {
+    G.floor = 5;
+    G.monsters = [];
+    spawnMonsterProbe({ key: 'basic', elite: true });
+    const e = G.monsters.find(m => m.isElite);
+    if (e && !(e.affixes || []).includes('giant')) elite5 = e;
+  }
+  const elite5Want = (bT.baseHp + bT.hpScale * 1.5) * d5 * MONSTER_STAT_MUL;
+  ok(elite5 && Math.abs(elite5.hp - elite5Want) < 1e-6,
+    '第 5 层精英不吃这 −30%（只削普通怪）',
+    `got ${elite5 && elite5.hp}，期望 ${elite5Want}`);
+  // 第 30 层（DIFF_KNEE）起普通怪恢复原倍率
+  fresh();
+  G.floor = 30;
+  G.monsters = [];
+  spawnMonsterProbe({ key: 'basic' });
+  const norm30 = G.monsters[0];
+  const d30b = getDifficultyMultiplier();
+  const norm30Want = (bT.baseHp + bT.hpScale) * d30b * MONSTER_STAT_MUL;
+  ok(Math.abs(norm30.hp - norm30Want) < 1e-6,
+    '第 30 层（DIFF_KNEE）普通怪不再吃 ×0.7',
+    `got ${norm30.hp}，期望 ${norm30Want}`);
+
+  // 20d BOSS 尾巴：多项式 → 同一底数的指数；30 层那道档位本身不动
+  fresh();
+  G.floor = 30;
+  const bhp30 = getBossHp();
+  G.floor = 31;
+  const bhp31 = getBossHp();
+  ok(Math.abs(bhp31 / bhp30 - 1.56) < 0.01,
+    '第 30 → 31 层 BOSS 血量比值 ≈ 1.56（尾巴已换成指数）',
+    `got ${(bhp31 / bhp30).toFixed(4)}`);
+  G.floor = 60;
+  const bhp60 = getBossHp();
+  ok(bhp60 > bhp30 * 1e5,
+    '第 60 层 BOSS 血量比第 30 层高 5 个数量级（指数，不是多项式）',
+    `${Math.round(bhp30)} → ${bhp60.toExponential(2)}`);
+
+  // 20e HUD：难度系数不再 toFixed(2)（否则第 100 层会印出 20 位数字）
+  ok(formatDiff(1) === '1.00', 'formatDiff(1) = "1.00"', `got ${formatDiff(1)}`);
+  ok(formatDiff(508.123) === '508.12', 'formatDiff(508.123) = "508.12"', `got ${formatDiff(508.123)}`);
+  ok(formatDiff(398670) === Math.round(398670).toLocaleString(),
+    'formatDiff(398670) 走千分位', `got ${formatDiff(398670)}`);
+  ok(/e19/.test(formatDiff(1.3e19)), 'formatDiff(1.3e19) 走指数写法', `got ${formatDiff(1.3e19)}`);
+  const diffDisplayCtx = html.match(/diffDisplay[\s\S]{0,140}/);
+  ok(!!diffDisplayCtx && !/\.toFixed\(2\)/.test(diffDisplayCtx[0]),
+    'HUD 的 diffDisplay 不再直接 toFixed(2)');
+  // 允许留下的 toFixed(2) 只有两处，且都是**数值字段**不是显示：
+  //   snapshotStats().difficulty（写进对局事件日志，给分析管线读）
+  //   sim summary 的 finalDifficulty（simRunner / analyzeSim 读）
+  // 这两个前面都有 `+` 强制转回 number，说明作者要的就是数、不是字符串。
+  const diffFixedLeft = (html.match(/\+getDifficultyMultiplier\(\)\.toFixed\(2\)/g) || []).length;
+  ok(diffFixedLeft === 2,
+    '难度系数的 toFixed(2) 只剩两个「转回 number」的数值字段（有意保留）',
+    `got ${diffFixedLeft}`);
+  ok(!/(?<!\+)getDifficultyMultiplier\(\)\.toFixed\(2\)/.test(html),
+    '没有任何一处把它当字符串显示（显示路径全走 formatDiff）');
+  const fmtCalls = (html.match(/formatDiff\(getDifficultyMultiplier\(\)\)/g) || []).length;
+  ok(fmtCalls === 3, 'HUD / 结算界面 / 模拟报告三处都走 formatDiff()', `got ${fmtCalls}`);
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);

@@ -661,7 +661,7 @@
             ctx.fillText(`职业: ${clsName}  |  遗物: ${G.relics.length}个`, w / 2, h / 2 + 80);
             ctx.font = '16px sans-serif';
             ctx.fillStyle = '#ff8844';
-            ctx.fillText(`最终难度系数: ×${getDifficultyMultiplier().toFixed(2)}`, w / 2, h / 2 + 110);
+            ctx.fillText(`最终难度系数: ×${formatDiff(getDifficultyMultiplier())}`, w / 2, h / 2 + 110);
         }
 
         // v9.1: 终极技能冲击波
