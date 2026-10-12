@@ -9,6 +9,8 @@
 ```
 BeyondAlgebra/
 ├── README.md              # 游戏策划案（精简版），描述核心规则、怪物、公式、密文板
+├── VALUES_REFERENCE.md    # 数值参考手册——查数的地方（公式、常量表、取值表、出处）
+├── VALUES_DESIGN.md       # 数值设计笔记——理解的地方（问题 → 现在的设计 → 陷阱）
 ├── EDITION.md             # 版本记录，每个版本的改动说明
 ├── CLAUDE.md              # 本文件——项目结构与更新指南
 ├── 欢迎.md                # （空/占位）
@@ -131,6 +133,8 @@ node web/probe-9x.mjs 密文轨迹demo9.16.html         # 拿旧版本当对照�
 
 当你修改某个数值时，必须检查以下位置是否同步：
 
+- **难度曲线系数** (`DIFF_C1` / `DIFF_C2` / `DIFF_C3`，`01-state.js`) → 这是一条「牵一发动全身」的轴：八个消费方（`spawnMonster` / `spawnDebugMonster` / `getBossAtk` / `spawnBossMinion` / E10 反噬 / 终结技 / `activateEliminate` / 爆裂词缀）、`getBossHp()` 的 `tail`、以及三道防溢出闸门的适用楼层全都跟着动。**别单独改 `diffScaleAt()` 的 `x = f − 1` 偏移**，那是「第 1 层 ×1.00」的唯一来源
+- **玩家数值上限** (`playerCap()`) → E06 轨伤 / E06 轨宽 / E11 移速 / 商店轨迹淬炼共用。**但攻击力与倍率不在其中**（v9.32 起无上限），改 `playerCap` 前先确认那三条不是你要找的
 - **怪物基础属性** (`MONSTER_TYPES`) → 同步 `spawnDebugMonster()` 中的属性赋值
 - **密文板效果数值** (`applyPassiveEffect`) → 同步 `removePassive()` 中的回退量（**含 T03 的 `T03_EFFECT_MUL` ×1.2，两边都要乘**）
 - **射速类数值** → `G.buffs.fireRateMul` 有**两道闸门**：`p.shootCooldown`（`04-trail.js`）与 `G.fireCounter`（`05-update.js`），只改一处不生效；初值 1 要在 `resetGame()` 复位
@@ -138,7 +142,7 @@ node web/probe-9x.mjs 密文轨迹demo9.16.html         # 拿旧版本当对照�
 - **BOSS HP 基数** (`MONSTER_TYPES.BOSS.baseHp`) → 同步 `getBossHp()` 中的基数
 - **游戏状态初始化** (`resetGame()`) → 确保新字段有默认值
 - **怪物特殊属性**（如 `fireTrailLife`, `bulletResist`）→ 同步 `spawnMonster()` 和 `spawnDebugMonster()` 中的字段传递。射击怪多了四个字段（`isShooter` / `shootRange` / `shootInterval` / `shootTimer`），`DEBUG_TYPE_KEYS` 里也加了 `'shooter'`
-- **射击怪 / 稀有卡 / 唤魔者**（v9.28 新增系统）→ 常量在 `00-data.js`（`ENEMY_SHOOTER_*` / `RARE_CARD_*` / `EVOKER_SUM_MUL` / `ELITE_BOSS_AFFIX_WEIGHT`），接入点见 [VALUES.md](VALUES.md) §16 检查清单最后 8 行
+- **射击怪 / 稀有卡 / 唤魔者**（v9.28 新增系统）→ 常量在 `00-data.js`（`ENEMY_SHOOTER_*` / `RARE_CARD_*` / `EVOKER_SUM_MUL` / `ELITE_BOSS_AFFIX_WEIGHT`），接入点见 [VALUES_REFERENCE.md](VALUES_REFERENCE.md) 的调参联动检查清单
 - **README.md** 中的数值描述 → 如果改动大，同步更新策划案
 
 ### 2. 新增字段的添加位置
@@ -166,15 +170,21 @@ node web/probe-9x.mjs 密文轨迹demo9.16.html         # 拿旧版本当对照�
 
 | 参数 | 位置 |
 |------|------|
-| 难度系数 `D = 1.16^(W-1)` | `getDifficultyMultiplier()` |
-| 怪物数量 | `getMonsterCount()` |
-| 精英概率 | `getEliteChance()` |
-| 生成间隔 | `getSpawnInterval()` |
-| 怪物 HP 上限 | `spawnMonster()` 中的 `Math.min(hp, 5000)` |
-| 怪物攻击上限 | `spawnMonster()` 中的 `Math.min(atk, 80)` |
-| 怪物速度上限 | `spawnMonster()` 中的 `Math.min(spd, 5.0)` |
+| 难度曲线 `D(f) = 1 + 0.3365x + 0.0566x² + 0.0063x³`（`x = 层 − 1`） | `01-state.js` `diffScaleAt()` / `DIFF_C1`–`DIFF_C3` |
+| 怪物强度标尺（**= 难度**，只是个别名） | `01-state.js` `getMonsterScale()` |
+| 玩家数值软上限 `playerCap(base) = base × (1 + 层 × 0.015)` | `00-data.js` `PLAYER_CAP_RATE` |
+| 轨迹宽度上限（E06 与商店共用，只增不减） | `00-data.js` `getTrailWidthCap()` |
+| 攻击力 / 倍率 | **没有上限**（`02-combat.js` E01 / E02、`00-data.js` `STAT_CHOICES.atkUp`） |
+| 怪物数量 | `01-state.js` `getMonsterCount()` |
+| 精英概率 | `01-state.js` `getEliteChance()` |
+| 生成间隔 | `01-state.js` `getSpawnInterval()` |
+| 防溢出天花板（纯兜底） | `00-data.js` `HP_OVERFLOW_GUARD`(1e15) / `ATK_OVERFLOW_GUARD`(1e9) |
+| BOSS 血量 | `00-data.js` `getBossHp()`（`tail = f ≤ 30 ? 1 : diffScaleAt(f)/diffScaleAt(DIFF_KNEE)`） |
 | 密文板掉落率 | 怪物死亡逻辑中的概率判断 |
-| BOSS HP 上限 | `spawnBoss()` 中的 `Math.min(hp, 800000)` |
+
+> 完整的公式、取值表与出处见 [VALUES_REFERENCE.md](VALUES_REFERENCE.md)；
+> 「为什么是这样、当初踩过什么坑」见 [VALUES_DESIGN.md](VALUES_DESIGN.md)。
+> 改数值前先读后者的对应小节——那里记的都是**会静默出错**的联动。
 
 ### 5. 命名注意
 

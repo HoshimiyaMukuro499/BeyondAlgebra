@@ -102,14 +102,17 @@
         switch (effectId) {
             case 'E01': {
                 const val = (isHighFreq ? 5 : 12) * layers * vmul;
-                G.buffs.atkUp = Math.min(G.buffs.atkUp + val, playerCap(250));
+                // v9.32: 攻击力不再封顶（原 playerCap(250)）——上限这个概念整个删掉。
+                // 玩家数值现在一路涨，与三次曲线同台竞争。
+                G.buffs.atkUp += val;
                 if (!isInitial) spawnParticles(p.x, p.y, '#ff8844', 5);
                 setFeedback(`⚔️ 攻击+${val} (累计+${Math.round(G.buffs.atkUp)})`, '#ff8844');
                 break;
             }
             case 'E02': {
                 const val = 0.25 * vmul;   // 重复路径：layers 恒为 1，只乘 vmul
-                G.buffs.multUp = Math.min(G.buffs.multUp + val, playerCap(49));
+                // v9.32: 倍率同样不封顶（原 playerCap(49)）。
+                G.buffs.multUp += val;
                 if (!isInitial) spawnParticles(p.x, p.y, '#ffdd44', 5);
                 setFeedback(`💥 倍率+${val.toFixed(2)} (累计x${(1 + G.buffs.multUp).toFixed(1)})`, '#ffdd44');
                 break;
@@ -392,8 +395,8 @@
         // 永远停在 24 点，配合玩家的 100 点护盾，等于「永远不会死」。
         // 改成随难度缓涨（0.35 次幂）并留 12 倍安全阀。
         // v9.27: 12 倍安全阀撤掉——新曲线第 17 层就会撞上它，等于把攻击封死。
-        // 0.35 次幂保留：它只是让攻击涨得比血量慢，本身仍然是指数
-        // （1.56^(0.35×层)），不再另设闸门。
+        // 0.35 次幂保留：它只是让攻击涨得比血量慢（0.35 次幂 vs 血量的一次方），
+        // 不再是任何意义上的闸门。v9.32 起底数换成三次曲线，量级进一步收窄。
         let atk = (isElite ?
             (type.baseAtk + type.atkScale * 1.3) * Math.pow(diff, 0.35) :
             (type.baseAtk + type.atkScale) * Math.pow(diff, 0.35)) * MONSTER_STAT_MUL * earlyMul;

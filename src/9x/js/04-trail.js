@@ -50,11 +50,14 @@
     }
 
     // v9.25：玩家图腾的单发伤害。t.ratio = d × m（召唤时算好存下）。
-    // 「大环闪电」ratio = 75 = TURRET_RATIO_NORM，正好顶到玩家攻击力的 0.6 倍，
+    // 「大环闪电」ratio = 75 = TURRET_RATIO_NORM，正好是玩家攻击力的 1.00 倍，
     // 其余类型/尺寸按旧比例在它下面排开。开火时现算，不吃召唤时的快照。
-    // 圈层（🟥 削减圈）在外面再乘一次，只会往下削，不会突破这个上限。
+    // 圈层（🟥 削减圈）在外面再乘一次，只削不涨。
+    //
+    // v9.32: 这里原来还乘一个 TURRET_ATK_CEILING = 1.0。删掉它数值上没有任何变化，
+    // 只是「塔的伤害上限」这个说法不再存在——塔的强度天然由玩家攻击力的比例决定。
     function getTurretAttackPower(t) {
-        return getPlayerAttackPower() * TURRET_ATK_CEILING * t.ratio / TURRET_RATIO_NORM;
+        return getPlayerAttackPower() * t.ratio / TURRET_RATIO_NORM;
     }
 
     function autoShoot() {
@@ -230,7 +233,7 @@
             }
         }
         // v9.25: d 是**相对权重**（不再是绝对伤害）。单发伤害在开火时由
-        // playerAtk × TURRET_ATK_CEILING × (d × m) / TURRET_RATIO_NORM 现算，
+        // playerAtk × (d × m) / TURRET_RATIO_NORM 现算，
         // 所以 d 只决定「同一玩家攻击力下，这座塔比别的塔强多少」。最大 d = 50（闪电），
         // TURRET_RATIO_NORM 就是 `50 × 1.5`——改这里的数值必须同步改那个常量。
         const T = { basic: { e: '🗼', c: '#88aacc', fr: 25, rg: 140, d: 30 }, rapid: { e: '🎯', c: '#ff8844', fr: 8, rg: 120, d: 18 }, lightning: { e: '⚡', c: '#ffdd44', fr: 40, rg: 180, d: 50 }, frost: { e: '❄️', c: '#88ccff', fr: 20, rg: 120, d: 10 }, trail: { e: '🐾', c: '#66dd88', fr: 15, rg: 160, d: 35 } };

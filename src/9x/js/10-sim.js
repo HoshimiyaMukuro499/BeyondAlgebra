@@ -57,13 +57,11 @@
     }
 
     // 曲线回放要用「那一层的难度」——G.floor 是当前值，读历史某层就得自己算。
-    // 与 getDifficultyMultiplier / getMonsterScale 是同一条公式，只是把层数参数化了。
-    function getDiffAtFloor(f) { return Math.pow(DIFF_BASE, f - 1); }
-    function getMonsterScaleAtFloor(f) {
-        if (f <= MONSTER_SOFT_KNEE) return Math.pow(DIFF_BASE, f - 1);
-        const knee = Math.pow(DIFF_BASE, MONSTER_SOFT_KNEE - 1);
-        return knee * (1 + (f - MONSTER_SOFT_KNEE) * MONSTER_SOFT_RATE);
-    }
+    // v9.32: 难度与怪物数值现在是同一条三次曲线，这两个函数退化成 diffScaleAt(f)
+    // 的别名。保留名字是因为报告里「diff」「ms」两列还在分别取它们（对局记录格式
+    // 不变），将来若再分家，改这里而不动报告代码。
+    function getDiffAtFloor(f) { return diffScaleAt(f); }
+    function getMonsterScaleAtFloor(f) { return diffScaleAt(f); }
 
     function exportGameLog() {
         if (G.gameLog.length === 0) { setFeedback('📋 暂无对局记录', '#8aa3c0'); return; }

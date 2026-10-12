@@ -231,6 +231,13 @@ const factory = new Function(
   ' MONSTER_SOFT_RATE: (typeof MONSTER_SOFT_RATE !== "undefined") ? MONSTER_SOFT_RATE : null,' +
   ' spawnBossMinion: (typeof spawnBossMinion !== "undefined") ? spawnBossMinion : null,' +
   ' logEvent: (typeof logEvent !== "undefined") ? logEvent : null,' +
+  // v9.32 —— 三次难度曲线
+  ' diffScaleAt: (typeof diffScaleAt !== "undefined") ? diffScaleAt : null,' +
+  ' DIFF_C1: (typeof DIFF_C1 !== "undefined") ? DIFF_C1 : null,' +
+  ' DIFF_C2: (typeof DIFF_C2 !== "undefined") ? DIFF_C2 : null,' +
+  ' DIFF_C3: (typeof DIFF_C3 !== "undefined") ? DIFF_C3 : null,' +
+  ' DIFF_KNEE: (typeof DIFF_KNEE !== "undefined") ? DIFF_KNEE : null,' +
+  ' getDiffAtFloor: (typeof getDiffAtFloor !== "undefined") ? getDiffAtFloor : null,' +
   ' STAGE_TYPES: (typeof STAGE_TYPES !== "undefined") ? STAGE_TYPES : null,' +
   ' CHAIR_COMBOS: (typeof CHAIR_COMBOS !== "undefined") ? CHAIR_COMBOS : null,' +
   ' dropRelic: (typeof dropRelic !== "undefined") ? dropRelic : null,' +
@@ -305,11 +312,14 @@ const HAS_V925 = !!(bossEarlyMul && spawnAffixZone && tickAffixZones && tryElimi
 // 探针也要能跑在 9.25 及更早的产物上做对照，所以新断言全部挂在这个开关下。
 const HAS_V926 = !!(setCanvasPointer && api.canvas);
 // v9.27：难度曲线改回全程指数（底数 1.56），并抬高三道撞顶闸门。
-// 判据用「新符号存在 + 多项式尾巴已删」两条一起——只看 DIFF_BASE 的话，
+// 判据用「新符号存在 + 多项式尾巴已删」两条一起——只看底数的话，
 // 万一哪天有人把尾巴加回来，这个开关还是会亮。
 // 注意 DIFF_TAIL 在工厂里被映射成 null（符号不存在时），所以这里判 !DIFF_TAIL
 // 而不是 typeof ——对 null 做 typeof 得到的是 'object'，那个开关永远不亮。
-const HAS_V927 = !!(DIFF_BASE && !DIFF_TAIL && EARLY_NORMAL_MUL
+// v9.32：DIFF_BASE 本身被删掉了（曲线换成三次多项式，没有底数），所以这里不能
+// 再拿它当判据——改用「前期减压三项还在」来认这条线。底数存在与否单独由
+// 第 25 节的 v9.32 断言去管。
+const HAS_V927 = !!(!DIFF_TAIL && EARLY_NORMAL_MUL
                     && HP_OVERFLOW_GUARD && ATK_OVERFLOW_GUARD && formatDiff);
 // v9.28：稀有密文版 + 唤魔者 + 伤害通道统一 + 射击小怪。
 // 判据取「新符号齐了」+「被删的 T01/T02 确实不在了」两条一起。
@@ -322,9 +332,20 @@ const HAS_V928 = !!(TRIG_ && EFFECTS && rareChance && triggerEvoker && gainEvoke
 const { playerCap, getTrailWidthCap, getMonsterScale, getMonsterScaleAtFloor, getTrailWidth,
         findAutoUpgrade, tryAutoUpgrade, buildGameLogJSONL, LOG_FORMAT_VERSION,
         PLAYER_CAP_RATE, MONSTER_SOFT_KNEE, MONSTER_SOFT_RATE,
+        diffScaleAt, DIFF_C1, DIFF_C2, DIFF_C3, DIFF_KNEE, getDiffAtFloor,
         spawnBossMinion, sumPassiveLayers, logEvent } = api;
+// v9.31 的核心符号都在（playerCap / getTrailWidthCap / getMonsterScale / tryAutoUpgrade /
+// 记录格式）。**不**再要求 MONSTER_SOFT_KNEE——v9.32 把它删了（两条标尺合并），
+// 那一节里与软上限有关的分支改用下面的 HAS_V932 分岔。
 const HAS_V931 = !!(playerCap && getTrailWidthCap && getMonsterScale && tryAutoUpgrade
-                    && buildGameLogJSONL && LOG_FORMAT_VERSION && MONSTER_SOFT_KNEE);
+                    && buildGameLogJSONL && LOG_FORMAT_VERSION);
+// v9.32：一条三次曲线管到底 + 取消玩家攻击力上限。
+// 判据 = 「三次曲线的符号齐了」+「两条被删的东西确实不在了」。
+// MONSTER_SOFT_KNEE / MONSTER_SOFT_RATE 在工厂里映射成 null（符号不存在时），
+// 所以判 === null 而不是 typeof。
+const HAS_V932 = !!(diffScaleAt && DIFF_C1 && DIFF_C2 && DIFF_C3 && DIFF_KNEE
+                    && MONSTER_SOFT_KNEE === null && MONSTER_SOFT_RATE === null
+                    && DIFF_BASE === null);
 
 let pass = 0, fail = 0;
 const ok = (cond, label, extra = '') => {
@@ -2022,9 +2043,18 @@ if (!HAS_V925) {
   tw.x = 760; tw.y = 540;
   ok(getTurretAtkZoneMul(tw) === 1 && getTurretRateZoneMul(tw) === 1, '图腾挪出圈外就恢复正常');
 
-  // 19k 图腾攻击力：上限 = 玩家攻击力 × 1.0，按旧 d×m 比例分配
-  ok(Math.abs(TURRET_ATK_CEILING - 1.0) < 1e-12, 'TURRET_ATK_CEILING = 1.0',
-    `got ${TURRET_ATK_CEILING}`);
+  // 19k 图腾攻击力：大环闪电 = 玩家攻击力 × 1.00，按旧 d×m 比例分配
+  // v9.32 把这个乘子（TURRET_ATK_CEILING = 1.0）删了——它本来就是 1.0，
+  // 删掉数值不变，只是「塔的伤害上限」这个概念不再存在。
+  if (HAS_V932) {
+    ok(TURRET_ATK_CEILING === null, 'TURRET_ATK_CEILING 已删除（上限这个概念去掉）',
+      `got ${TURRET_ATK_CEILING}`);
+    ok(!/TURRET_ATK_CEILING\s*\*/.test(html.replace(/\/\/[^\n]*/g, '')),
+      '没有任何代码再乘 TURRET_ATK_CEILING（只剩注释里的考古记录）');
+  } else {
+    ok(Math.abs(TURRET_ATK_CEILING - 1.0) < 1e-12, 'TURRET_ATK_CEILING = 1.0',
+      `got ${TURRET_ATK_CEILING}`);
+  }
   ok(TURRET_RATIO_NORM === 75, 'TURRET_RATIO_NORM = 50 × 1.5 = 75', `got ${TURRET_RATIO_NORM}`);
   fresh();
   api.simAutoSelectClass();
@@ -2427,30 +2457,67 @@ if (!HAS_V927) {
 } else {
   section('20. v9.27 难度曲线改回全程指数 + 抬高三道撞顶闸门 + 前期普通怪 −30%');
 
-  // 20a 曲线本体：底数 1.56，从第 1 层起就是单条指数，没有拐点、没有多项式尾巴
-  ok(DIFF_BASE === 1.56, 'DIFF_BASE = 1.56（1.16 + 0.4）', `got ${DIFF_BASE}`);
-  ok(!DIFF_TAIL, 'DIFF_TAIL 已删除（多项式尾巴撤掉了）', `got ${DIFF_TAIL}`);
-  fresh();
-  const diffs = [1, 2, 5, 10, 30, 31, 100].map(f => { G.floor = f; return getDifficultyMultiplier(); });
-  ok(Math.abs(diffs[0] - 1) < 1e-12, '第 1 层 ×1.00', `got ${diffs[0]}`);
-  ok(Math.abs(diffs[1] - 1.56) < 1e-12, '第 2 层 ×1.56', `got ${diffs[1]}`);
-  ok(Math.abs(diffs[3] - Math.pow(1.56, 9)) < 1e-6, '第 10 层 ×1.56^9 ≈ 54.7',
-    `got ${diffs[3].toFixed(2)}`);
-  // 关键：拐点前后是**同一条**曲线。若尾巴又回来了，这里的比值会掉下来。
-  G.floor = 30; const d30 = getDifficultyMultiplier();
-  G.floor = 31; const d31 = getDifficultyMultiplier();
-  ok(Math.abs(d31 / d30 - 1.56) < 1e-9,
-    '第 30 → 31 层的比值仍是 1.56（拐点处不断档 = 没有多项式尾巴）',
-    `got ${(d31 / d30).toFixed(6)}`);
-  // 全程单调且始终按同一底数
-  let ratioOk = true, prev = null;
-  for (let f = 2; f <= 120; f++) {
-    G.floor = f;
-    const d = getDifficultyMultiplier();
-    if (prev !== null && Math.abs(d / prev - 1.56) > 1e-9) ratioOk = false;
-    prev = d;
+  // 20a 曲线本体。v9.32 把底数指数换成了三次多项式，所以这一段分岔：
+  //   9.27 ~ 9.31 → 单条 1.56 的指数
+  //   9.32 起     → 1 + 0.3365x + 0.0566x² + 0.0063x³（x = 层数 − 1）
+  // 两侧都断言「没有分段、没有断档」——这才是这节真正要看的东西。
+  if (HAS_V932) {
+    ok(DIFF_BASE === null, 'DIFF_BASE 已删除（三次曲线没有底数）', `got ${DIFF_BASE}`);
+    ok(!DIFF_TAIL, 'DIFF_TAIL 仍然不存在（尾巴没有回来）', `got ${DIFF_TAIL}`);
+    fresh();
+    const diffs = [1, 2, 5, 10, 30, 31, 100].map(f => { G.floor = f; return getDifficultyMultiplier(); });
+    ok(Math.abs(diffs[0] - 1) < 1e-12, '第 1 层 ×1.00（x = 0，常数项）', `got ${diffs[0]}`);
+    ok(Math.abs(diffs[1] - (1 + DIFF_C1 + DIFF_C2 + DIFF_C3)) < 1e-9,
+      '第 2 层 = 1 + c1 + c2 + c3 ≈ 1.40', `got ${diffs[1]}`);
+    ok(Math.abs(diffs[3] - 13.21) < 0.02, '第 10 层 ×13.21', `got ${diffs[3].toFixed(2)}`);
+    ok(Math.abs(diffs[4] - 212.0) < 0.5, '第 30 层 ×212.0', `got ${diffs[4].toFixed(1)}`);
+    // 关键：DIFF_KNEE 不是拐点。它只用来分「前期/后期」的档，曲线本身必须一路平滑。
+    // 三次曲线在 30 层的环比是 1.095，不是常数——这正是「全层数生效」的证据。
+    G.floor = 30; const dc30 = getDifficultyMultiplier();
+    G.floor = 31; const dc31 = getDifficultyMultiplier();
+    ok(Math.abs(dc31 / dc30 - 1.095) < 0.01,
+      '第 30 → 31 层比值 ≈1.095（DIFF_KNEE 处不断档 = 真的全层数生效）',
+      `got ${(dc31 / dc30).toFixed(4)}`);
+    // 全程单调递增、且每一层的环比都 = diffScaleAt(f+1)/diffScaleAt(f)（同一公式）
+    let mono = true, sameFormula = true, prevD = null;
+    for (let f = 2; f <= 211; f++) {
+      G.floor = f;
+      const d = getDifficultyMultiplier();
+      if (d <= 0) mono = false;
+      if (prevD !== null && d <= prevD) mono = false;
+      if (Math.abs(d - diffScaleAt(f)) > 1e-6) sameFormula = false;
+      prevD = d;
+    }
+    ok(mono, '第 2 ~ 211 层全程单调递增（三次项系数为正，不会掉头）');
+    ok(sameFormula, '第 2 ~ 211 层每一层都等于 diffScaleAt(层数)（没有第二条标尺插进来）');
+    ok(Math.abs(diffScaleAt(211) - 6.09e4) / 6.09e4 < 0.01,
+      '第 211 层 ≈ ×6.09e4（旧指数式是 ×3.6e40）', `got ${diffScaleAt(211).toExponential(3)}`);
+    ok(Math.abs(diffScaleAt(50) - 894.6) < 1, '第 50 层 ≈ ×894.6', `got ${diffScaleAt(50).toFixed(1)}`);
+  } else {
+    ok(DIFF_BASE === 1.56, 'DIFF_BASE = 1.56（1.16 + 0.4）', `got ${DIFF_BASE}`);
+    ok(!DIFF_TAIL, 'DIFF_TAIL 已删除（多项式尾巴撤掉了）', `got ${DIFF_TAIL}`);
+    fresh();
+    const diffs = [1, 2, 5, 10, 30, 31, 100].map(f => { G.floor = f; return getDifficultyMultiplier(); });
+    ok(Math.abs(diffs[0] - 1) < 1e-12, '第 1 层 ×1.00', `got ${diffs[0]}`);
+    ok(Math.abs(diffs[1] - 1.56) < 1e-12, '第 2 层 ×1.56', `got ${diffs[1]}`);
+    ok(Math.abs(diffs[3] - Math.pow(1.56, 9)) < 1e-6, '第 10 层 ×1.56^9 ≈ 54.7',
+      `got ${diffs[3].toFixed(2)}`);
+    // 关键：拐点前后是**同一条**曲线。若尾巴又回来了，这里的比值会掉下来。
+    G.floor = 30; const d30 = getDifficultyMultiplier();
+    G.floor = 31; const d31 = getDifficultyMultiplier();
+    ok(Math.abs(d31 / d30 - 1.56) < 1e-9,
+      '第 30 → 31 层的比值仍是 1.56（拐点处不断档 = 没有多项式尾巴）',
+      `got ${(d31 / d30).toFixed(6)}`);
+    // 全程单调且始终按同一底数
+    let ratioOk = true, prev = null;
+    for (let f = 2; f <= 120; f++) {
+      G.floor = f;
+      const d = getDifficultyMultiplier();
+      if (prev !== null && Math.abs(d / prev - 1.56) > 1e-9) ratioOk = false;
+      prev = d;
+    }
+    ok(ratioOk, '第 2 ~ 120 层每一层的比值都恰好是 1.56（真·全程指数）');
   }
-  ok(ratioOk, '第 2 ~ 120 层每一层的比值都恰好是 1.56（真·全程指数）');
 
   // 20b 三道撞顶闸门都抬到了「一局打不到」的位置
   ok(HP_OVERFLOW_GUARD === 1e15 && ATK_OVERFLOW_GUARD === 1e9,
@@ -2513,20 +2580,34 @@ if (!HAS_V927) {
     '第 30 层（DIFF_KNEE）普通怪不再吃 ×0.7',
     `got ${norm30.hp}，期望 ${norm30Want}`);
 
-  // 20d BOSS 尾巴：多项式 → 同一底数的指数；30 层那道档位本身不动
+  // 20d BOSS 尾巴：30 层那道档位本身不动，之后跟当前那条曲线走。
   fresh();
   G.floor = 30;
   const bhp30 = getBossHp();
   G.floor = 31;
   const bhp31 = getBossHp();
-  ok(Math.abs(bhp31 / bhp30 - 1.56) < 0.01,
-    '第 30 → 31 层 BOSS 血量比值 ≈ 1.56（尾巴已换成指数）',
-    `got ${(bhp31 / bhp30).toFixed(4)}`);
   G.floor = 60;
   const bhp60 = getBossHp();
-  ok(bhp60 > bhp30 * 1e5,
-    '第 60 层 BOSS 血量比第 30 层高 5 个数量级（指数，不是多项式）',
-    `${Math.round(bhp30)} → ${bhp60.toExponential(2)}`);
+  if (HAS_V932) {
+    // 第 30 层 tail 钳成 1；第 31 层起 tail = diffScaleAt(f)/diffScaleAt(30)。
+    // 容差放到 1e-4：getBossHp() 末尾有 Math.floor，比值上会带一点量化误差。
+    ok(Math.abs(bhp31 / bhp30 - diffScaleAt(31) / diffScaleAt(30)) < 1e-4,
+      '第 30 → 31 层 BOSS 血量比值 = diffScaleAt(31)/diffScaleAt(30) ≈ 1.095',
+      `got ${(bhp31 / bhp30).toFixed(4)}`);
+    ok(Math.abs(bhp60 / bhp30 - diffScaleAt(60) / diffScaleAt(30)) < 1e-4,
+      '第 60 层 BOSS 血量 = 第 30 层 × diffScaleAt(60)/diffScaleAt(30) ≈ ×7.13',
+      `got ×${(bhp60 / bhp30).toFixed(3)}`);
+    ok(bhp60 < 1e7,
+      '第 60 层 BOSS 血量停在百万量级（旧指数式是 1e20 以上）',
+      `got ${bhp60}`);
+  } else {
+    ok(Math.abs(bhp31 / bhp30 - 1.56) < 0.01,
+      '第 30 → 31 层 BOSS 血量比值 ≈ 1.56（尾巴已换成指数）',
+      `got ${(bhp31 / bhp30).toFixed(4)}`);
+    ok(bhp60 > bhp30 * 1e5,
+      '第 60 层 BOSS 血量比第 30 层高 5 个数量级（指数，不是多项式）',
+      `${Math.round(bhp30)} → ${bhp60.toExponential(2)}`);
+  }
 
   // 20e HUD：难度系数不再 toFixed(2)（否则第 100 层会印出 20 位数字）
   ok(formatDiff(1) === '1.00', 'formatDiff(1) = "1.00"', `got ${formatDiff(1)}`);
@@ -3191,40 +3272,79 @@ if (!HAS_V931) {
     'getTrailWidthCap() 与 playerCap(150) 同口径（第 86 层 = 343.5）',
     `got ${getTrailWidthCap()}`);
 
-  // ---------- 24b 怪物数值软上限：60 层前逐字节等于难度，之后线性 ----------
-  ok(MONSTER_SOFT_KNEE === 60 && MONSTER_SOFT_RATE === 0.02,
-    '拐点 60 层 / 之后每层 +2%', `${MONSTER_SOFT_KNEE} / ${MONSTER_SOFT_RATE}`);
+  // ---------- 24b 怪物数值标尺 ----------
+  // v9.31：60 层前逐字节等于难度，之后改线性。
+  // v9.32：两条标尺合并，**每一层**都等于难度。
   for (const f of [1, 5, 30, 59, 60]) {
     G.floor = f;
     ok(Math.abs(getMonsterScale() - getDifficultyMultiplier()) < 1e-6,
-      `第 ${f} 层：怪物标尺与难度**完全一致**（拐点前不改玩法）`,
+      `第 ${f} 层：怪物标尺与难度**完全一致**`,
       `${getMonsterScale()} vs ${getDifficultyMultiplier()}`);
   }
-  G.floor = 60; const kneeVal = getMonsterScale();
-  G.floor = 61;
-  ok(Math.abs(getMonsterScale() / kneeVal - 1.02) < 1e-9,
-    '第 61 层 = 拐点值 ×1.02（线性，不是 ×1.56）', `got ×${getMonsterScale() / kneeVal}`);
-  G.floor = 211;
-  ok(getMonsterScale() > 9.0e11 && getMonsterScale() < 1.1e12,
-    '第 211 层怪物标尺 ≈ 1.0e12（旧写法是 3.6e40）', `got ${getMonsterScale()}`);
-  ok(getDifficultyMultiplier() > 1e40,
-    '哨兵：难度标尺本身没动（HUD 与记录里的「难度」还是 1.56^层）',
-    `got ${getDifficultyMultiplier()}`);
+  if (HAS_V932) {
+    for (const f of [61, 100, 211]) {
+      G.floor = f;
+      ok(getMonsterScale() === getDifficultyMultiplier(),
+        `第 ${f} 层：两条标尺**同值**（v9.32 起一合并到底，记录里 diff 与 ms 相等）`,
+        `${getMonsterScale()} vs ${getDifficultyMultiplier()}`);
+    }
+    G.floor = 211;
+    ok(Math.abs(getMonsterScale() - 6.09e4) / 6.09e4 < 0.01,
+      '第 211 层标尺 ≈ 6.09e4（v9.31 的线性收口是 1.0e12）', `got ${getMonsterScale()}`);
+  } else {
+    ok(MONSTER_SOFT_KNEE === 60 && MONSTER_SOFT_RATE === 0.02,
+      '拐点 60 层 / 之后每层 +2%', `${MONSTER_SOFT_KNEE} / ${MONSTER_SOFT_RATE}`);
+    G.floor = 60; const kneeVal = getMonsterScale();
+    G.floor = 61;
+    ok(Math.abs(getMonsterScale() / kneeVal - 1.02) < 1e-9,
+      '第 61 层 = 拐点值 ×1.02（线性，不是 ×1.56）', `got ×${getMonsterScale() / kneeVal}`);
+    G.floor = 211;
+    ok(getMonsterScale() > 9.0e11 && getMonsterScale() < 1.1e12,
+      '第 211 层怪物标尺 ≈ 1.0e12（旧写法是 3.6e40）', `got ${getMonsterScale()}`);
+    ok(getDifficultyMultiplier() > 1e40,
+      '哨兵：难度标尺本身没动（HUD 与记录里的「难度」还是 1.56^层）',
+      `got ${getDifficultyMultiplier()}`);
+  }
   ok(getMonsterScaleAtFloor(211) === getMonsterScale() || Math.abs(getMonsterScaleAtFloor(211) - getMonsterScale()) < 1e-6,
     'getMonsterScaleAtFloor(211) 与 getMonsterScale() 同值（曲线回放用的那条）');
   ok(getMonsterScaleAtFloor(1) === 1, 'getMonsterScaleAtFloor(1) = 1');
   G.floor = 60;
   ok(Math.abs(getMonsterScaleAtFloor(60) - getMonsterScale()) < 1e-6,
     'getMonsterScaleAtFloor(60) 与当前难度的第 60 层同值');
+  if (HAS_V932) {
+    ok(getDiffAtFloor(50) === getMonsterScaleAtFloor(50),
+      'getDiffAtFloor(50) 与 getMonsterScaleAtFloor(50) 同值（两个别名指向同一条曲线）');
+    // 记录里那两列现在恒等——但**列本身保留**（对局记录格式不动）
+    ok(html.includes('diff: +getDiffAtFloor(f).toPrecision(4)')
+       && html.includes('ms: +getMonsterScaleAtFloor(f).toPrecision(4)'),
+      '记录报告仍然分别取 diff / ms 两列（格式没变，只是值相等）');
+  }
 
   // 真的生成一只怪：血量不再被 1e15 闸门啃掉（旧写法第 33 层起就钉在 1e15）
   fresh();
   G.floor = 211;
   spawnMonsterProbe();
   const m211 = G.monsters[G.monsters.length - 1];
-  ok(!!m211 && m211.hp > 1e11 && m211.hp < HP_OVERFLOW_GUARD,
-    '第 211 层普通怪血量落在 1e11~1e15（不再是「180 层一模一样」）',
+  ok(!!m211 && m211.hp < HP_OVERFLOW_GUARD,
+    '第 211 层普通怪血量没有被 1e15 闸门钉死（不再是「180 层一模一样」）',
     m211 && `hp=${m211.hp}`);
+  if (HAS_V932) {
+    // 三次曲线下第 211 层标尺 6.09e4，基础怪血量落在百万量级（旧指数式是 1e41 量级）。
+    ok(!!m211 && m211.hp > 1e5 && m211.hp < 1e7,
+      '第 211 层普通怪血量落在 1e5~1e7（跟三次曲线走，不是 1e41）',
+      m211 && `hp=${m211.hp}`);
+    // 血量确实跟当前标尺成正比：同层两只怪（人工调标尺）比值 = 标尺比
+    fresh(); G.floor = 211; spawnMonsterProbe({ key: 'basic' });
+    const hpA = G.monsters[0].hp;
+    fresh(); G.floor = 100; spawnMonsterProbe({ key: 'basic' });
+    const hpB = G.monsters[0].hp;
+    ok(Math.abs(hpA / hpB - diffScaleAt(211) / diffScaleAt(100)) < 1e-6,
+      '第 211 层 / 第 100 层普通怪血量比 = 标尺比（HP 直接吃这条曲线）',
+      `got ${(hpA / hpB).toFixed(2)}，标尺比 ${(diffScaleAt(211) / diffScaleAt(100)).toFixed(2)}`);
+  } else {
+    ok(!!m211 && m211.hp > 1e11,
+      '第 211 层普通怪血量落在 1e11~1e15', m211 && `hp=${m211.hp}`);
+  }
 
   // BOSS 血量：30 层以下必须原封不动（旧式那道 Math.max(0, 层-DIFF_KNEE) 的钳子），
   // 60 层之后跟普通怪一起改走线性。
@@ -3237,9 +3357,15 @@ if (!HAS_V931) {
     '第 10 层 BOSS 血量仍按 9 万底数走（没被尾巴的钳子误伤）', `got ${getBossHp()}`);
   G.floor = 60; const boss60 = getBossHp();
   G.floor = 61;
-  ok(Math.abs(getBossHp() / boss60 - 1.02) < 1e-9,
-    '第 61 层 BOSS 血量 = 第 60 层 ×1.02（BOSS 也收口了，不再 ×1.56）',
-    `got ×${(getBossHp() / boss60).toFixed(4)}`);
+  if (HAS_V932) {
+    ok(Math.abs(getBossHp() / boss60 - diffScaleAt(61) / diffScaleAt(60)) < 1e-4,
+      '第 61 层 BOSS 血量 = 第 60 层 × diffScaleAt(61)/diffScaleAt(60) ≈ ×1.049',
+      `got ×${(getBossHp() / boss60).toFixed(4)}`);
+  } else {
+    ok(Math.abs(getBossHp() / boss60 - 1.02) < 1e-9,
+      '第 61 层 BOSS 血量 = 第 60 层 ×1.02（BOSS 也收口了，不再 ×1.56）',
+      `got ×${(getBossHp() / boss60).toFixed(4)}`);
+  }
 
   // ---------- 24c 八个「跟着难度涨」的消费方全部换标尺 ----------
   // 只剩两处 getDifficultyMultiplier() 的赋值：startFloor 的提示文案、06-render 的 HUD。
@@ -3402,9 +3528,14 @@ if (!HAS_V931) {
     '文本报告改读 cardsRewarded（210/211 层的「获undefined牌」修掉）');
   ok(html.includes("cardsRewarded: n,") && html.includes('cardsRewarded: 0,'),
     'floor_clear 的两个分支都带上了 cardsRewarded（清层 n / 普通层 0）');
-  const metaV = JSON.parse(fs.readFileSync(path.join(ROOT, 'src/9x/meta.json'), 'utf8')).version;
-  ok(LOG_FORMAT_VERSION === metaV,
-    `LOG_FORMAT_VERSION 等于 meta.json 的版本（${metaV}）`, `got ${LOG_FORMAT_VERSION}`);
+  // 这一条要测的是「记录头的版本号跟着构建走，不是另写死的」。
+  // 对照物必须取**这个 HTML 自己的版本**（标题里的），不能取当前 meta.json——
+  // 否则拿新版探针去跑旧产物时，会因为 meta.json 已经升级而误报（跨版本对照就废了）。
+  const htmlV = (html.match(/<title>[^<]*?(\d+\.\d+)<\/title>/) || [])[1];
+  ok(!!htmlV && LOG_FORMAT_VERSION === htmlV,
+    `LOG_FORMAT_VERSION 等于本产物的版本（${htmlV}）`, `got ${LOG_FORMAT_VERSION}`);
+  // 与当前 meta.json 是否一致由 `bundle-game.mjs --check` 保证，这里不重复断言。
+  ok(LOG_FORMAT_VERSION !== '9.10', '不再是那个硬编码的 9.10', `got ${LOG_FORMAT_VERSION}`);
   ok(!html.includes("version: '9.10'"), "硬编码的 version: '9.10' 已消失");
   ok(html.includes('const LOG_FORMAT_VERSION'), '源码里用的是构建期占位符替换出来的常量');
 
@@ -3430,8 +3561,10 @@ if (!HAS_V931) {
     'floor 行合并了同层 floor_clear 的 kills / cardsRewarded / cards',
     JSON.stringify(floorRow || {}));
   ok(!!floorRow && typeof floorRow.ms === 'number' && typeof floorRow.diff === 'number'
-     && floorRow.ms < floorRow.diff,
-    'floor 行同时给出难度 diff 与怪物标尺 ms（两条曲线能直接画）',
+     && (HAS_V932 ? floorRow.ms === floorRow.diff : floorRow.ms < floorRow.diff),
+    HAS_V932
+      ? 'floor 行的 diff 与 ms 相等（v9.32 两条标尺合并，列本身保留）'
+      : 'floor 行同时给出难度 diff 与怪物标尺 ms（两条曲线能直接画）',
     `diff=${floorRow && floorRow.diff} ms=${floorRow && floorRow.ms}`);
   const evRow = parsed.find(r => r.t === 'ev' && r.e === 'card_drop');
   ok(!!evRow && evRow.f === 86 && evRow.d.card === 'T06',
@@ -3449,6 +3582,132 @@ if (!HAS_V931) {
   ok(typeof RARE_E16_CAP !== 'undefined' && RARE_E16_CAP === 300
      && typeof RARE_E17_CAP !== 'undefined' && RARE_E17_CAP === 2.0,
     '哨兵：稀有卡的 maxHp / 射速上限仍是 300 / 2.0（没被 ×4 波及）');
+}
+
+// ============================================================
+//  25. v9.32 三次曲线全层数生效 · 取消玩家攻击力上限
+// ============================================================
+if (!HAS_V932) {
+  section('25. v9.32（跳过：这是 9.31 及更早的产物）');
+} else {
+  section('25. v9.32 三次曲线 + 取消玩家攻击力上限');
+
+  // 「代码正文」= 去掉 HTML 注释（版本说明那一段）与 JS 行注释之后的产物。
+  // 这一节里大多数是「某个旧写法确实删干净了」的断言，必须只看代码；
+  // 版本说明里会引用被删符号的名字来解释改了什么，那是文档，不是引用。
+  const code = html.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\/[^\n]*/g, '');
+
+  // ---------- 25a 曲线本体与常量 ----------
+  ok(DIFF_C1 === 0.3365 && DIFF_C2 === 0.0566 && DIFF_C3 === 0.0063,
+    '三个系数 = 0.3365 / 0.0566 / 0.0063', `${DIFF_C1} / ${DIFF_C2} / ${DIFF_C3}`);
+  ok(DIFF_KNEE === 30, 'DIFF_KNEE 仍是 30（它现在只当「前期/后期」分档用，不是拐点）',
+    `got ${DIFF_KNEE}`);
+  const c = f => diffScaleAt(f);
+  ok(Math.abs(c(1) - 1) < 1e-12, '第 1 层 ×1.00（x = 层数 − 1）', `got ${c(1)}`);
+  ok(Math.abs(c(2) - 1.3994) < 0.001, '第 2 层 ×1.3994', `got ${c(2).toFixed(4)}`);
+  ok(Math.abs(c(10) - 13.21) < 0.02, '第 10 层 ×13.21', `got ${c(10).toFixed(2)}`);
+  ok(Math.abs(c(30) - 212.0) < 0.5, '第 30 层 ×212.0', `got ${c(30).toFixed(1)}`);
+  ok(Math.abs(c(50) - 894.6) < 1, '第 50 层 ×894.6', `got ${c(50).toFixed(1)}`);
+  ok(Math.abs(c(100) - 6701.9) < 5, '第 100 层 ×6.70e3', `got ${c(100).toFixed(0)}`);
+  ok(Math.abs(c(211) - 60912) / 60912 < 0.001, '第 211 层 ×6.09e4',
+    `got ${c(211).toFixed(0)}`);
+  // 每次调用都不依赖 G.floor（是纯函数）——对局记录回放靠这个
+  const keepFloor = G.floor;
+  G.floor = 77;
+  ok(c(50) === diffScaleAt(50), 'diffScaleAt() 不读 G.floor（纯函数，回放时才安全）');
+  G.floor = keepFloor;
+
+  // ---------- 25b 两条标尺合并：MONSTER_SOFT_* 与 DIFF_BASE 全删 ----------
+  ok(MONSTER_SOFT_KNEE === null && MONSTER_SOFT_RATE === null,
+    'MONSTER_SOFT_KNEE / MONSTER_SOFT_RATE 已删除（两把尺子合并成一把）',
+    `${MONSTER_SOFT_KNEE} / ${MONSTER_SOFT_RATE}`);
+  ok(DIFF_BASE === null, 'DIFF_BASE 已删除（三次曲线没有底数）', `got ${DIFF_BASE}`);
+  ok(!/MONSTER_SOFT_KNEE|MONSTER_SOFT_RATE/.test(code),
+    '源码里不再有任何 MONSTER_SOFT_* 的引用（注释里的考古记录不算）');
+  ok(!/DIFF_BASE/.test(code),
+    '源码里不再有任何 DIFF_BASE 的引用');
+  // 八个消费方不用改：getMonsterScale 仍在，只是退化成别名
+  ok(/function getMonsterScale\(\)\s*\{\s*return getDifficultyMultiplier\(\);/.test(html),
+    'getMonsterScale() 现在就是 getDifficultyMultiplier() 的别名（八个消费方零改动）');
+  for (const f of [1, 17, 30, 31, 60, 100, 211]) {
+    G.floor = f;
+    ok(getMonsterScale() === getDifficultyMultiplier(),
+      `第 ${f} 层两条标尺逐字节相等`, `${getMonsterScale()} vs ${getDifficultyMultiplier()}`);
+  }
+
+  // ---------- 25c 取消玩家攻击力上限 ----------
+  // 三条路径现在都是无上限累加：E01（密文板）、E02（倍率）、商店「攻击强化」。
+  ok(!/playerCap\(250\)/.test(code), 'E01 不再走 playerCap(250)');
+  ok(!/playerCap\(49\)/.test(code), 'E02 不再走 playerCap(49)');
+  ok(!/playerCap\(2000\)/.test(code), '商店「攻击强化」不再走 playerCap(2000)');
+  ok(/G\.buffs\.atkUp \+= val;/.test(html), 'E01 改成 atkUp += val（无上限累加）');
+  ok(/G\.buffs\.multUp \+= val;/.test(html), 'E02 改成 multUp += val（无上限累加）');
+  ok(/apply\(\) \{ G\.buffs\.atkUp \+= 3;/.test(html), '商店攻击强化改成 atkUp += 3');
+  // 真的跑一遍：远超旧上限之后仍然继续涨
+  fresh();
+  G.floor = 211;
+  G.buffs.atkUp = 250; G.buffs.multUp = 49;      // 正好停在两条旧上限上
+  applyPassiveEffect('T04', 'E01', false, null, 1);
+  ok(G.buffs.atkUp > 250, '越过旧上限 250 之后 E01 仍然加得动',
+    `got ${G.buffs.atkUp}`);
+  applyPassiveEffect('T04', 'E02', false, null, 1);
+  ok(G.buffs.multUp > 49, '越过旧上限 49 之后 E02 仍然加得动',
+    `got ${G.buffs.multUp}`);
+  G.buffs.atkUp = 2000;
+  STAT_CHOICES.find(x => x.id === 'atkUp').apply();
+  ok(G.buffs.atkUp === 2003, '越过旧上限 2000 之后商店仍然加得动',
+    `got ${G.buffs.atkUp}`);
+  // 攻击力真的能一路涨上去（旧版在 211 层也只能到 250 出头）
+  fresh();
+  G.floor = 211;
+  G.buffs.atkUp = 0; G.buffs.multUp = 0;
+  for (let i = 0; i < 400; i++) applyPassiveEffect('T04', 'E01', false, null, 1);
+  ok(G.buffs.atkUp > 4000, '400 次 E01 后攻击加成 > 4000（旧版封在 250）',
+    `got ${G.buffs.atkUp}`);
+
+  // ---------- 25d 图腾攻击力上限这个概念去掉 ----------
+  ok(TURRET_ATK_CEILING === null, 'TURRET_ATK_CEILING 已删除', `got ${TURRET_ATK_CEILING}`);
+  ok(/return getPlayerAttackPower\(\) \* t\.ratio \/ TURRET_RATIO_NORM;/.test(html),
+    'getTurretAttackPower() 只剩「玩家攻击力 × ratio / NORM」');
+  fresh();
+  api.simAutoSelectClass();
+  G.player.atk = 100; G.buffs.atkUp = 0; G.buffs.multUp = 0;
+  G.fateBuffs.atkMul = 1; G.fateBuffs.bulletDmgMul = 1;
+  const large = { ratio: 75 };                    // 大环闪电：d 50 × m 1.5
+  const pAtk = getPlayerAttackPower();
+  ok(Math.abs(getTurretAttackPower(large) - pAtk) < 1e-9,
+    '大环闪电 = 玩家攻击力的 1.00 倍（数值与删之前完全一致）',
+    `got ${getTurretAttackPower(large)} vs ${pAtk}`);
+  // 玩家攻击力涨上去，塔跟着涨（现算，不是快照）
+  G.buffs.atkUp = 5000;
+  ok(getTurretAttackPower(large) > pAtk * 2,
+    '玩家攻击力涨 10 倍量级后塔也涨（开火时现算，不吃召唤快照）',
+    `got ${getTurretAttackPower(large)}`);
+
+  // ---------- 25e 其余软上限原地不动（这次只放开了攻击力这一条轴） ----------
+  G.floor = 200;
+  ok(Math.abs(playerCap(100) - 400) < 1e-9, 'E06 轨迹伤害上限仍是 playerCap(100)（200 层 = 400）',
+    `got ${playerCap(100)}`);
+  ok(Math.abs(getTrailWidthCap() - 600) < 1e-9, '轨迹宽度上限仍是 getTrailWidthCap()（200 层 = 600）',
+    `got ${getTrailWidthCap()}`);
+  ok(Math.abs(playerCap(6) - 24) < 1e-9, 'E11 移速上限仍是 playerCap(6)（200 层 = 24）',
+    `got ${playerCap(6)}`);
+  ok(/E06[\s\S]{0,400}playerCap\(100\)/.test(html), 'E06 那条仍然写 playerCap(100)');
+  ok(/G\.buffs\.trailWidth = Math\.min\(G\.buffs\.trailWidth \+ 2 \* vmul, getTrailWidthCap\(\)\);/.test(html),
+    'E06 的轨宽仍然走 getTrailWidthCap()');
+
+  // ---------- 25f 教程文案跟着曲线改 ----------
+  ok(html.includes('楼层难度 = 1 + 0.3365x + 0.0566x² + 0.0063x³'),
+    '秘典里的难度公式换成了三次曲线');
+  ok(!html.includes('1.56^(楼层-1)'), '秘典里不再出现 1.56^(楼层-1)');
+  ok(!html.includes('1.56^(层数 − 30)'), '秘典里的 BOSS 血量不再写成 1.56^(层数−30)');
+
+  // ---------- 25g 记录回放两个别名 ----------
+  ok(getDiffAtFloor(50) === diffScaleAt(50) && getMonsterScaleAtFloor(50) === diffScaleAt(50),
+    'getDiffAtFloor / getMonsterScaleAtFloor 是同一条曲线的两个别名',
+    `${getDiffAtFloor(50)} / ${getMonsterScaleAtFloor(50)}`);
+
+  G.floor = keepFloor;
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);

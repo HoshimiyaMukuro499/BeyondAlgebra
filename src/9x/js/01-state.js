@@ -178,45 +178,46 @@
     }
 
     // ============================================================
-    //  指数增长公式
+    //  难度曲线
     // ============================================================
-    // v9.15: 难度曲线加拐点。30 层前维持原来的指数曲线（前期手感不变），
-    // 之后转多项式——仍然一直变难，但不再涨成天文数字。
-    // 旧曲线到 118 层是 ×34,800,440，新曲线 ×687；配合解开怪物血量上限，
-    // 「变难」终于体现在战斗里，而不是只体现在右上角的数字上。
-    // v9.27: 拐点与多项式尾巴一起撤掉，改成**第 1 层起的单条指数曲线**，
-    // 底数同时抬高（1.16 → 1.56，绝对 +0.4）。用户要的是「后期难度指数上升
-    // 而非多项式」。代价见 EDITION：三道「撞顶就封顶」的闸门（怪物攻击
-    // diff^0.35 的 ×12、普通怪 HP 1e9、BOSS HP 1e8）是照旧曲线调的，新曲线在
-    // 第 17 / 40 / 38 层就会撞上，撞上之后怪不再变强——所以那三道闸门在 v9.27
-    // 一并抬到只防溢出的位置，否则「指数」只是 HUD 上的数字。
-    const DIFF_BASE = 1.56;
-    // DIFF_KNEE 不再是难度曲线的拐点。它现在只是「前期 / 后期」的分界，
-    // 精华上限（getEssenceCap）与清层卡数（getFloorClearCards）还按它分档。
+    // v9.32: 换回多项式，但这次是**一条三次曲线管到底**——没有拐点、没有分段、
+    // 也没有第二条标尺。x = 层数 − 1，所以第 1 层正好 ×1.00。
+    //
+    //   难度(x) = 1 + 0.3365x + 0.0566x² + 0.0063x³
+    //
+    // 取值：10 层 ×13.2 / 30 层 ×212 / 50 层 ×895 / 100 层 ×6.70e3 / 211 层 ×6.09e4。
+    // 比原来那条 1.56^(层-1) 平缓得多（211 层 6.1e4 而不是 3.6e40），所以
+    // HP_OVERFLOW_GUARD(1e15) / ATK_OVERFLOW_GUARD(1e9) 彻底变成纯兜底，
+    // 到 211 层也只用掉它们的千分之一。
+    //
+    // ⚠️ 难度显示与怪物数值现在是**同一个数**。以前那套「难度标尺 + 怪物软上限标尺」
+    //    的分家（MONSTER_SOFT_KNEE / MONSTER_SOFT_RATE）已经不需要了——曲线本身
+    //    就不爆炸，没必要再收一次口。对局记录里的 diff 与 ms 两列从此相等。
+    const DIFF_C1 = 0.3365;
+    const DIFF_C2 = 0.0566;
+    const DIFF_C3 = 0.0063;
+    // 把层数参数化：G.floor 是「当前」层，读历史某一层要用这个（对局记录回放）。
+    function diffScaleAt(f) {
+        const x = f - 1;
+        return 1 + DIFF_C1 * x + DIFF_C2 * x * x + DIFF_C3 * x * x * x;
+    }
+    // DIFF_KNEE 不是曲线拐点。它只是「前期 / 后期」的分界，精华上限
+    // （getEssenceCap）、清层卡数（getFloorClearCards）与 BOSS 血量尾巴还按它分档。
     const DIFF_KNEE = 30;
     function getDifficultyMultiplier() {
-        return Math.pow(DIFF_BASE, G.floor - 1);
+        return diffScaleAt(G.floor);
     }
 
-    // v9.31: 怪物数值的标尺。**难度标尺本身没变**——getDifficultyMultiplier() 仍然是
-    // HUD、图鉴与对局记录里那个「难度」，还是 1.56^(层-1)。这一条只管怪物的 HP / 攻击 /
-    // BOSS，以及「跟着难度一起涨的伤害源」（终结技、R 消除、E10 反噬、爆裂词缀）。
-    //
-    // 为什么伤害源也必须换过来：那些伤害源原来吃的是真难度（211 层 3.6e40），而怪物的
-    // 血量被 HP_OVERFLOW_GUARD 钉在 1e15——也就是说后期每一发核弹都是 1e25 倍的过量击杀。
-    // 如果只收怪物的血量、不收伤害源，玩家会一刀秒掉全场。
-    //
-    // 形状：60 层之前与 getDifficultyMultiplier() 逐字节一致（所以前期手感一点没动），
-    // 60 层之后从指数改成线性——拐点值 × (1 + (层-60) × 2%)。
-    // 211 层的标尺从 3.6e40 收到 1.0e12。
+    // 怪物数值标尺。**现在与难度是同一个值**——保留这个函数名，是为了那八个消费方
+    // （spawnMonster / spawnDebugMonster / getBossAtk / spawnBossMinion / E10 反噬 /
+    // 终结技 / R 消除 / 爆裂词缀）不用改：它们要的是「这一层的强度标尺」，
+    // 而不是「哪条曲线」。
     function getMonsterScale() {
-        if (G.floor <= MONSTER_SOFT_KNEE) return Math.pow(DIFF_BASE, G.floor - 1);
-        const knee = Math.pow(DIFF_BASE, MONSTER_SOFT_KNEE - 1);
-        return knee * (1 + (G.floor - MONSTER_SOFT_KNEE) * MONSTER_SOFT_RATE);
+        return getDifficultyMultiplier();
     }
 
-    // v9.27: 难度系数不再是「几百」——第 100 层就是 1.3e19。HUD 与结算界面上
-    // 原来统一 toFixed(2)，现在会印出二十几位数字把版面撑破，所以按量级分档显示。
+    // 难度系数在后期能到六位数。HUD 与结算界面上原来统一 toFixed(2)，
+    // 高位时会把版面撑破，所以按量级分档显示。
     function formatDiff(v) {
         if (!isFinite(v)) return '∞';
         if (v < 10000) return v.toFixed(2);

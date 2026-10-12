@@ -3,7 +3,95 @@
 ## 版本规则
 - **新版本不更改旧版本文件**。每次修改创建新的独立版本文件。
 - 版本号格式：`试玩版demo_无限模式X.X.html`
-- 当前开发版本：**v9.31**
+- 当前开发版本：**v9.32**
+
+---
+
+## v9.32 — 三次曲线全层数生效 + 取消玩家攻击力上限
+
+**文件**：`密文轨迹demo9.32.html`（构建产物，源码在 `src/9x/`）
+**基于**：v9.31
+
+### 两处改动
+
+#### 1. 难度曲线：`1.56^(层-1)` → 三次多项式
+
+```
+难度(x) = 1 + 0.3365x + 0.0566x² + 0.0063x³        x = 层数 − 1
+```
+
+`x = 层数 − 1` 是刻意的——第 1 层正好 ×1.00。
+
+| 楼层 | 旧式 `1.56^(f-1)` | 新式（三次） |
+|--:|--:|--:|
+| 1 | 1.00 | 1.00 |
+| 10 | 54.7 | 13.21 |
+| 30 | 3.99e5 | 212.0 |
+| 50 | 1.3e9 | 894.6 |
+| 100 | 1.32e19 | 6.70e3 |
+| 211 | **3.6e40** | **6.09e4** |
+
+v9.31 的处理办法是**在难度之外再拉一条尺子给怪物用**（`getMonsterScale()`，60 层后
+改线性），代价是 HUD 上的「难度 ×」与实际打的怪从此对不上号。这一版不再打补丁——
+换掉曲线本身。三次多项式**本身就不爆炸**，于是不需要「收口」，两条尺子并回一条：
+
+- `DIFF_BASE`（1.56）、`MONSTER_SOFT_KNEE`(60)、`MONSTER_SOFT_RATE`(0.02) **全部删除**。
+- `getMonsterScale()` 退化成 `getDifficultyMultiplier()` 的**别名**——保留这个名字只是
+  为了让那八个消费方（`spawnMonster` / `spawnDebugMonster` / `getBossAtk` /
+  `spawnBossMinion` / E10 反噬 / 终结技 / `activateEliminate()` / 爆裂词缀新星）
+  一行都不用改。
+- 对局记录里的 `diff` 与 `ms` 两列从此**恒等**（列本身保留，格式不变）。
+- `getBossHp()` 的尾巴从「除以 `1.56^29`」改成「除以 `diffScaleAt(DIFF_KNEE)`」。
+  `f ≤ 30` 显式钳成 `1` 那道**必须留着**——丢了第 10 层的 `tail` 会算成 `D(10)/D(30)
+  = 0.062`，BOSS 直接软掉 **16 倍**，而且不报错。留着它，前 30 层逐字节不变，
+  30 层之后 BOSS : 普通怪的血量比恒定在 ~29.5 倍。
+
+`DIFF_KNEE = 30` 保留，但它**不是拐点**（三次曲线处处平滑）——只是「前期 / 后期」的
+分档线，被 `getEssenceCap()` / 清层卡数 / `EARLY_NORMAL_MUL` / BOSS 尾巴钳位四处共用。
+
+**副作用（预期，不是 bug）**：后期难度大幅下降，211 层从 3.6e40 掉到 6.09e4。`1e15` /
+`1e9` 那两道防溢出闸门彻底沦为纯兜底，到 211 层也只用掉千分之一。前期普通怪的
+`EARLY_NORMAL_MUL`(0.7) 与 `BOSS_EARLY_MUL_START`(0.35) **没有跟着回调**——本次只动了
+曲线与攻击力上限，若试玩觉得前 30 层太软，该动的是这两个常数。
+
+#### 2. 取消玩家攻击力上限
+
+三条路径全部放开：
+
+| 位置 | 原来 | 现在 |
+|:--|:--|:--|
+| `02-combat.js` E01 攻击增幅 | `playerCap(250)` | 无上限累加 |
+| `02-combat.js` E02 连环击 | `playerCap(49)` | 无上限累加 |
+| `00-data.js` 商店「攻击强化」 | `playerCap(2000)` | 无上限累加 |
+
+顺带删掉 `TURRET_ATK_CEILING`（`00-data.js`，值 `1.0`，用在 `04-trail.js`
+`getTurretAttackPower()`）。它本来就是 1.0，**删掉数值上没有任何变化**——只是
+「塔的伤害上限」这个概念不再存在了。塔的强度现在天然是玩家攻击力的一个比例，
+大环闪电 = 1.00 倍。玩家攻击力不封顶，塔也就不封顶。
+
+其余软上限（`E06` 轨伤 `playerCap(100)` / 轨宽 `getTrailWidthCap()` / `E11` 移速
+`playerCap(6)` / 商店轨迹淬炼）**不动**——这次只放开了攻击力这一条轴。
+
+### 涉及文件
+
+| 文件 | 改动 |
+|:--|:--|
+| `src/9x/meta.json` | → 9.32 |
+| `src/9x/js/01-state.js` | `DIFF_C1/C2/C3`、`diffScaleAt(f)`；`getDifficultyMultiplier()` 改读它；`getMonsterScale()` 改成别名；删 `DIFF_BASE` |
+| `src/9x/js/00-data.js` | 删 `MONSTER_SOFT_KNEE` / `MONSTER_SOFT_RATE` / `TURRET_ATK_CEILING`；`getBossHp()` 尾巴；商店攻击强化去上限 |
+| `src/9x/js/02-combat.js` | E01 / E02 去 `playerCap` |
+| `src/9x/js/04-trail.js` | `getTurretAttackPower()` 去掉 ceiling 乘子 |
+| `src/9x/js/03-tutorial.js` | 秘典：难度公式与 BOSS 血量文案 |
+| `src/9x/js/10-sim.js` | `getDiffAtFloor` / `getMonsterScaleAtFloor` 改走 `diffScaleAt` |
+| `web/probe-9x.mjs` | 第 20 / 24 节分岔 + 新增第 25 节 |
+
+### 验证
+
+`node web/bundle-game.mjs` → `密文轨迹demo9.32.html`，`--check` 一致；
+探针 **661 通过 / 0 失败**；交叉跑 9.31（607）/ 9.30（530）/ 9.29（507）/ 9.28（492）/
+9.27（383）全绿。浏览器内实测：曲线取值、`getMonsterScale() === getDifficultyMultiplier()`、
+三个被删符号不存在、塔比例 1.00、越过旧上限后仍继续涨、`hp211 = 2.53e6`、
+`bossHp(30) = 260099`（与旧式逐字节相等）。
 
 ---
 
