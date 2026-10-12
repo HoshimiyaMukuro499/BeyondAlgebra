@@ -2,7 +2,7 @@
 
 2D 俯视角射击动作 + 轻塔防 HTML5 游戏。玩家用 WASD 移动留下可叠加的伤害轨迹、自动射击清怪、把「密文板」两两组合成永久被动，保护核心据点冲击最高楼层。
 
-**网页试玩**：<https://miwen-guiji.pages.dev> — `/classic/` 经典版 · `/ai/` AI 拓展版
+**网页试玩**：<https://miwen-guiji.pages.dev> — `/classic/` 经典版 · `/ai/` AI 拓展版 · `/v4/` 减法版
 
 ---
 
@@ -38,18 +38,21 @@
 
 ---
 
-## 两条版本线
+## 三条版本线
 
 | 系列 | 定位 | 最新版本 | 文件 |
 |:--|:--|:--|:--|
 | **2.x** | 经典版 · 无限波次生存 | **v2.20** | [密文轨迹demo2.20.html](密文轨迹demo2.20.html) |
 | **9.x** | AI 拓展版 · Roguelike 重构 | **v9.32** | [密文轨迹demo9.32.html](密文轨迹demo9.32.html) |
+| **4.x** | 减法版 · 只留核心链路 | **v4.0** | [密文轨迹demo4.0.html](密文轨迹demo4.0.html) |
+
+4.x 是从 v9.32 **分叉**出来的并行产品线，不新增玩法，只做一件事：把不在核心链路（移动 → 轨迹 → 闭环 → 图腾 → 组合）上的系统全部挂上开关并**默认关闭**，想开哪个按 `F` 自己开；`?flags=all` 可一键还原 9.x 的全部系统。
 
 ### 版本规则
 
 **新版本不更改旧版本文件**——每次修改都创建新的独立版本文件，任何版本都可直接双击打开。完整改动记录见 [BeyondAlgebra/EDITION.md](BeyondAlgebra/EDITION.md)。
 
-> 从 v9.16 起，9.x 的**源码**拆到了 [src/9x/](src/9x/)（分模块），根目录的 `密文轨迹demo9.XX.html` 是 `npm run build:game` **拼装出的产物**。产物仍是自包含单文件、可直接双击。改 9.x 请改 `src/9x/`，**不要直接编辑根目录的 HTML**——下次构建会覆盖掉（`npm run build:game -- --check` 可校验两者是否一致）。2.x 与 v9.15 及更早的 9.x 仍是手写的单文件。
+> 从 v9.16 起，9.x 的**源码**拆到了 [src/9x/](src/9x/)（分模块），根目录的 `密文轨迹demo9.XX.html` 是 `npm run build:game` **拼装出的产物**；4.x 同理，源码在 [src/4x/](src/4x/)，构建命令 `npm run build:game4`。产物仍是自包含单文件、可直接双击。改 9.x 请改 `src/9x/`，改 4.x 请改 `src/4x/`，**不要直接编辑根目录的 HTML**——下次构建会覆盖掉（`npm run build:game -- --check` 可校验两者是否一致）。2.x 与 v9.15 及更早的 9.x 仍是手写的单文件。
 
 ---
 
@@ -60,6 +63,7 @@ BeyondAlgebra/
 ├── README.md                  # 本文件——仓库索引
 ├── package.json               # npm 脚本（构建 / 部署 / 模拟）
 ├── 密文轨迹demo9.X.html        # 9.x 系列各版本（单文件，含全部 CSS+JS）
+├── 密文轨迹demo4.X.html        # 4.x 减法版
 ├── 密文轨迹demo2.X.html        # 2.12 起的版本
 ├── 试玩版demo_无限模式2.X.html  # 2.0–2.11 早期版本
 ├── src/9x/                    # 9.16+ 的多文件源码（拼装成根目录的单文件产物）
@@ -68,13 +72,14 @@ BeyondAlgebra/
 │   ├── body.html              # 页面结构
 │   ├── meta.json              # 版本号与头部注释
 │   └── js/00-data.js … 10-sim.js   # 11 个模块，按序拼进同一个 <script>
+├── src/4x/                    # 4.x 减法版的源码（与 src/9x/ 同构，各自独立演进）
 ├── simCore.js                 # 纯 Node.js 模拟引擎（零依赖）
 ├── analyzeSim.js              # 对局结果分析引擎（10 项指标）
 ├── simRunner.js               # Puppeteer 无头运行器
 ├── sim.bat                    # Windows 快捷脚本
 ├── web/                       # 网页版构建与 Cloudflare 部署
-│   ├── bundle-game.mjs        # 把 src/9x/ 拼装成单文件 HTML
-│   ├── build.mjs              # 自动挑选 2.x / 9.x 最新版本生成静态站点
+│   ├── bundle-game.mjs        # 把 src/<线>/ 拼装成单文件 HTML（--src=4x 切到 4.x）
+│   ├── build.mjs              # 自动挑选 2.x / 9.x / 4.x 最新版本生成静态站点
 │   └── probe-9x.mjs           # 无头回归探针（假 DOM 驱动构建产物，无需 Puppeteer）
 ├── BeyondAlgebra/             # 策划案与开发文档（Obsidian 仓库）
 │   ├── README.md              # 策划案精简版：规则 / 怪物 / 公式 / 密文板全表
@@ -104,13 +109,14 @@ node analyzeSim.js sim_results.json      # 输出 10 项指标分析
 
 ## 网页版部署
 
-`web/build.mjs` 会扫描仓库根目录，自动挑选 **2.x 最新版** → `/classic/`、**9.x 最新版** → `/ai/`，并生成首页。原版本文件不会被改动（构建产物逐字节等于源文件）。
+`web/build.mjs` 会扫描仓库根目录，自动挑选 **2.x 最新版** → `/classic/`、**9.x 最新版** → `/ai/`、**4.x 最新版** → `/v4/`，并生成首页。原版本文件不会被改动（构建产物逐字节等于源文件）。
 
 托管在 **Cloudflare Pages**，项目名 `miwen-guiji`，生产域名为项目级域名 `miwen-guiji.pages.dev`——不含任何账号标识，且国内可直连（`workers.dev` 域名在国内通常需要代理）。
 
 ```bash
 npm run build:game    # 只把 src/9x/ 拼装成根目录的单文件 HTML
-npm run build:web     # 拼装 + 生成静态站点到 web/public/
+npm run build:game4   # 只把 src/4x/ 拼装成密文轨迹demo4.0.html
+npm run build:web     # 拼装（两条线）+ 生成静态站点到 web/public/
 npm run preview       # 本地预览（wrangler pages dev）
 npm run deploy        # 构建并发布到 Cloudflare Pages
 ```
@@ -121,7 +127,7 @@ npm run deploy        # 构建并发布到 Cloudflare Pages
 npx wrangler login
 ```
 
-发布新版游戏时无需改动部署配置——把 `密文轨迹demoX.X.html` 放进仓库根目录，重跑 `npm run deploy` 即会自动上线（2.x 取 minor 最大者 → `/classic/`，9.x 取 minor 最大者 → `/ai/`）。
+发布新版游戏时无需改动部署配置——把 `密文轨迹demoX.X.html` 放进仓库根目录，重跑 `npm run deploy` 即会自动上线（2.x 取 minor 最大者 → `/classic/`，9.x → `/ai/`，4.x → `/v4/`）。
 
 ---
 

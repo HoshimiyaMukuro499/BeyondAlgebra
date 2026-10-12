@@ -1,0 +1,161 @@
+
+<div class="wrapper">
+    <div class="game-row">
+        <div class="canvas-wrap">
+            <canvas id="gameCanvas" width="780" height="560"></canvas>
+
+            <!-- v9.25 动态摇杆。DOM 而不是画在 canvas 上：底座跟着手指落在任意位置，
+                 包括画面两侧的黑边——画在 canvas 里会被边界裁掉。屏幕坐标输入、
+                 屏幕坐标渲染，输入与视觉同一套坐标系。 -->
+            <div class="joy-hint" id="joyHint"></div>
+            <div class="joy" id="joyBase"><div class="joy-knob" id="joyKnob"></div></div>
+
+            <!-- v9.25 死亡后的重开入口。桌面端侧栏那个「↺ 重开」够用，但手机端
+                 .panel 是收起的抽屉，战斗界面上没有任何可点的重开按钮。 -->
+            <button class="gameover-restart" id="gameoverRestart">↺ 重新开始</button>
+
+            <!-- v9.24 手机端覆盖层。全部只在 body.mobile 下显示（见 styles.css），
+                 桌面端一行都不渲染——这样桌面布局与 9.23 完全一致。
+                 放在 .canvas-wrap 内部而不是挂在 body 上：抽屉展开时这一块整体
+                 右移缩到右半屏，覆盖层跟着走，不需要任何 JS 去同步位置。 -->
+            <div class="mobile-topbar" id="mobileHud"></div>
+            <button class="mobile-icon-btn" id="mobileFullscreenBtn" title="全屏">⛶ 全屏</button>
+            <button class="mobile-icon-btn" id="mobileCodexBtn" title="机制图鉴">📖 图鉴</button>
+            <button class="mobile-drawer-btn" id="drawerToggleBtn" title="密文版 / 被动">🔮 面板</button>
+            <div class="mobile-actions">
+                <button class="mobile-act-btn" id="mobileDashBtn">💨<span>冲刺</span></button>
+                <button class="mobile-act-btn" id="mobileElimBtn">🧹<span>消除</span></button>
+                <button class="mobile-act-btn ult" id="mobileUltBtn">⚡<span>终极技</span></button>
+            </div>
+        </div>
+
+        <div class="panel" id="panelRoot">
+            <button class="drawer-close" id="drawerCloseBtn">◀ 收起面板</button>
+            <div class="panel-box">
+                <h4>📊 密文轨迹 demo {{VERSION}} · 新手教程（古老的石板 1-5）</h4>
+                <div class="stat-row"><span>🏰 核心</span><span class="stat-val" id="coreDisplay">100%</span></div>
+                <div class="stat-row"><span>🏢 楼层</span><span class="stat-val wave-display" id="waveDisplay">1</span></div>
+                <div class="stat-row"><span>⭐ 得分</span><span class="stat-val score" id="scoreDisplay">0</span></div>
+                <div class="stat-row"><span>🛡️ 护盾</span><span class="stat-val" id="hpDisplay">100</span></div>
+                <div class="stat-row"><span>⚔️ 攻击</span><span class="stat-val" id="atkDisplay">10</span></div>
+                <div class="stat-row"><span>💥 倍率</span><span class="stat-val" id="multDisplay">x1.0</span></div>
+                <div class="stat-row"><span>🐾 怪物</span><span class="stat-val" id="monsterCount">0</span></div>
+                <div class="stat-row"><span>💀 击杀</span><span class="stat-val" id="killDisplay">0</span></div>
+                <div class="stat-row"><span>💎 精华</span><span class="stat-val" id="essenceDisplay" style="color:#c0a0ff;">0</span></div>
+                <div class="stat-row" style="border-bottom:none;margin-top:2px;font-size:10px;color:#6a8aaa;">
+                    <span>📈 难度系数</span>
+                    <span class="stat-val" id="diffDisplay" style="color:#ff8844;">1.00x</span>
+                </div>
+                <div class="stat-row" style="border-bottom:none;font-size:10px;color:#ffb347;">
+                    <span id="classDisplay">🧙 未选择</span>
+                </div>
+            </div>
+
+            <div class="panel-box">
+                <h4>🃏 手牌 <span style="font-weight:400;font-size:9px;color:#6a85a3;">左键填入 · 满20替旧</span>
+                    <span class="hand-count" id="handCountDisplay">触发:0 效果:0</span>
+                </h4>
+                <div class="hand-row" id="handContainer"></div>
+
+                <div class="slot-group">
+                    <div class="slot" id="triggerSlot">⬅ 触发<br><span class="sub">点击选择</span></div>
+                    <div class="slot" id="effectSlot">效果 ➡<br><span class="sub">点击选择</span></div>
+                </div>
+                <button class="btn-combine" id="combineBtn">🔮 宣读组合</button>
+                <div class="feedback" id="feedbackBox"><span class="tag">✦</span> 永久被动，触发即叠加</div>
+            </div>
+
+            <div class="panel-box">
+                <h4>⚡ 被动 <span id="passiveSlotInfo" style="font-weight:400;font-size:9px;color:#ffb347;">0/4槽</span></h4>
+                <div class="passive-box" id="passiveList">
+                    <div style="color:#5a7a9a;font-size:10px;">暂无被动</div>
+                </div>
+            </div>
+
+            <div class="panel-box">
+                <h4>🏺 遗物 <span id="relicCount" style="font-weight:400;font-size:9px;color:#ffb347;">0个</span></h4>
+                <div class="relic-box" id="relicList">
+                    <div style="color:#5a7a9a;font-size:10px;">暂无遗物</div>
+                </div>
+            </div>
+
+            <div class="panel-box">
+                <h4>📦 批量宣读 <span style="font-weight:400;font-size:9px;color:#ffb347;" id="batchInfo">暂停时可批量组合</span></h4>
+                <div style="max-height:60px;overflow-y:auto;font-size:10px;color:#b8d0ea;" id="batchList">
+                    <div style="color:#5a7a9a;font-size:10px;">暂停后在此排队组合</div>
+                </div>
+                <button class="btn-combine" id="batchCombineBtn" style="margin-top:4px;background:#8b4513;" disabled>📜 宣读全部 (0组)</button>
+            </div>
+
+            <!-- v9.22: 真空期进度条（#vacuumBar / #vacuumLabel / #vacuumFill / #skipBtn）删除 -->
+
+            <div class="controls-hint">
+                <span><kbd>W A S D</kbd> 移动</span>
+                <span><kbd>Shift</kbd> 冲刺轨迹</span>
+                <span><kbd>空格</kbd> 宣读</span>
+                <span><kbd>P</kbd> 暂停</span>
+                <span><kbd>Q</kbd> 终极技</span>
+                <span><kbd>R</kbd> 消除</span>
+                <span>轨迹阻挡 · 围剿伤害</span>
+                <button class="btn-reset" id="fullscreenBtn">⛶ 全屏</button>
+                <button class="btn-reset" id="logBtn" style="background:#2a4a3a;border-color:#4a8a5a;color:#aaddbb;">📋 导出记录</button>
+                <button class="btn-reset" id="resetBtn">↺ 重开</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="selection-overlay" id="selectionOverlay">
+    <h3>🎴 选择一张卡牌加入手牌</h3>
+    <div class="selection-row" id="selectionRow"></div>
+</div>
+
+<div class="pause-overlay" id="pauseOverlay">
+    <span class="pause-text">⏸ 已暂停</span>
+</div>
+
+<!-- v9.4 暂停工作台 -->
+<div class="pause-workshop" id="pauseWorkshop">
+    <h4>🔮 密文工作台</h4>
+    <p class="pw-hint">战场已冻结 · 自由组合密文版并宣读</p>
+    <button class="pw-btn" id="pwCombineBtn">🔮 宣读组合 (空格)</button>
+    <button class="pw-btn" id="pwResumeBtn">▶ 继续战斗</button>
+</div>
+
+<!-- v9.25 全屏引导（手机端，只弹一次）。放在 .canvas-wrap 之外、与 #classOverlay 同级：
+     它要盖住整屏，而不是只盖住画面那一块。z-index 高于 #classOverlay，所以开局先看到它，
+     点掉之后才露出职业选择。 -->
+<div class="fs-overlay" id="fsOverlay">
+    <div class="fs-title">⛶ 点击进入全屏模式</div>
+    <div class="fs-sub">横屏游玩体验最好 · 显示不全时请旋转设备</div>
+</div>
+
+<!-- v9.25 启动自检条。手机端报过「只看到职业选择标题、既没有卡牌也没有按钮」——
+     那正好是「脚本没跑完」的样子（#classRow 靠 JS 填、#fsOverlay 靠 JS 点亮）。
+     本机复现不出来，所以留一个兜底：启动期的任何异常都直接写在屏幕底部，
+     玩家截个图就能定位，而不是对着一片空白干瞪眼。见 template.html 的 __bootError。 -->
+<div class="boot-error" id="bootErrorBar"></div>
+
+<!-- v9.4 职业选择 -->
+<div class="class-overlay active" id="classOverlay">
+    <h2>🧙 选择你的密文法师</h2>
+    <div class="class-row" id="classRow"></div>
+</div>
+
+<!-- v9.4 地图选择 -->
+<div class="map-overlay" id="mapOverlay">
+    <h3>🗺️ 选择前进路线</h3>
+    <div class="map-row" id="mapRow"></div>
+</div>
+
+<!-- v9.4 密文商人 -->
+<div class="merchant-overlay" id="merchantOverlay">
+    <h3>🧙‍♂️ 密文商人</h3>
+    <p class="essence-display" id="merchantEssence">💎 精华: 0</p>
+    <div class="merchant-row" id="merchantRow"></div>
+    <div class="merchant-actions">
+        <button class="btn-refresh-shop" id="shopRefreshBtn">🔄 刷新商品</button>
+        <button class="btn-leave-shop" id="leaveShopBtn">离开商店</button>
+    </div>
+</div>
+

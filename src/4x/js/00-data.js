@@ -1,0 +1,815 @@
+    // ============================================================
+    //  9.10 · 自动模拟模式+AI驾驶+自主优化Loop
+    // ============================================================
+
+    // ---------- 词条数据 ----------
+    // v9.28: T01「对自身」与 T02「对敌群」删除——这两张说的是同一件事的两种写法，
+    // 而且「触发条件」本来就是触发板唯一的信息，多一张同义的只是把池子稀释。
+    // T03 改名「命中精英时」（**只改 label，id 保持 T03**——05-update.js 有两处按
+    // 字符串引用它），并给它一个 ×1.2 的加成，见 T03_EFFECT_MUL。
+    const TRIGGERS = [
+        { id: 'T03', label: '命中精英时', emoji: '⭐' },
+        { id: 'T06', label: '怪触轨', emoji: '🐾' },
+        { id: 'T07', label: '射击命中', emoji: '🎯' },
+        // v9.23: T08、「连环击杀」出率 -30%（权重 1 → 0.7）。
+        { id: 'T08', label: '连环击杀', emoji: '🔥', weight: 0.7 },
+        { id: 'T10', label: '残血触发', emoji: '❤️‍🔥' },
+        { id: 'T12', label: '闭环触发', emoji: '⭕' },
+        // v9.28: 稀有触发板「唤魔者」。40 层起按 rareChance() 抽取（1% → 5%），
+        // 是全局最重的一张牌：**宣读那一刻**清空全场怪物，然后当场招出一只
+        // 数值取 max（该层 BOSS 值, 清场前全场怪数值之和 ×1.13）的三词条 BOSS，
+        // 打死它才拿得到稀有藏品「唤魔之钥」。见 02-combat.js 的 triggerEvoker()。
+        // cardColor 只给这一张卡上红色（07-ui.js 的 renderHandUI 读它写 inline 样式）。
+        { id: 'T14', label: '唤魔者', emoji: '👹', rare: true, cardColor: '#a01f2e' },
+        // v9.25: T13「消除」**已从手牌里拿掉**——它变成玩家的一个技能：
+        // 30 秒冷却，按 R 触发一次（见 04-trail.js 的 activateEliminate()）。
+        // 原因：它作为卡牌时，抽到与否完全看运气，而它的效果是「清场 + 拆塔」，
+        // 这种量级的爆发挂在随机掉落上，等于把玩家的节奏交给抽卡。
+        // 现在的 weight 机制只剩 T08 在用（0.7，见上），所以 randomTrigger() 保留。
+    ];
+
+    // ---------- v9.28 稀有密文版 ----------
+    // 40 层之前卡池里没有任何新东西，后期就是同一套牌反复叠层。加一组只在
+    // 40 层后出现的稀有卡：3 张稀有效果板 + 1 张稀有触发板「唤魔者」。
+    // 概率：第 40 层 1%，线性爬到第 80 层 5%，之后恒 5%。
+    // 落点在 randomTrigger() / randomEffect() 内部——开局白送、击杀掉落、清层
+    // 三选一、休息点、商店、牌库全都走这两个函数，一处改完全覆盖。
+    const RARE_CARD_MIN_FLOOR = 40;
+    const RARE_CARD_MIN_CHANCE = 0.01;   // 第 40 层
+    const RARE_CARD_MAX_CHANCE = 0.05;   // 第 80 层起封顶
+    function rareChance() {
+        if (G.floor < RARE_CARD_MIN_FLOOR) return 0;
+        const t = Math.min(1, (G.floor - RARE_CARD_MIN_FLOOR) / 40);   // 40 → 80 层
+        return RARE_CARD_MIN_CHANCE + (RARE_CARD_MAX_CHANCE - RARE_CARD_MIN_CHANCE) * t;
+    }
+
+    // v9.21/v9.23: 加权随机。触发板与效果板各一份权重表（T08 / E02 / E11 是 0.7），
+    // 原来这段逻辑在 randomTrigger / randomEffect 里各抄了一遍，v9.28 抽成公共的。
+    function pickWeighted(list) {
+        let total = 0;
+        for (const c of list) total += (c.weight || 1);
+        let r = Math.random() * total;
+        for (const c of list) { r -= (c.weight || 1); if (r <= 0) return c; }
+        return list[list.length - 1];
+    }
+
+    // 所有「随机发一张触发板」的地方都必须走这里（找牌、图鉴那种按 id 命中的查找不需要）。
+    function randomTrigger() {
+        const rare = TRIGGERS.filter(t => t.rare);
+        if (rare.length > 0 && Math.random() < rareChance()) return pickWeighted(rare);
+        return pickWeighted(TRIGGERS.filter(t => !t.rare));
+    }
+
+    const EFFECTS = [
+        { id: 'E01', label: '攻击增幅', emoji: '⚔️' },
+        // v9.23: E02「连环击」与 E11「自速暴涨」出率 -30%（权重 1 → 0.7）。
+        { id: 'E02', label: '连环击', emoji: '💥', weight: 0.7 },
+        { id: 'E03', label: '生命回复', emoji: '💚' },
+        // v9.23: E04「移速减慢」删除。它和 E14「延缓」、轨迹迟缓三套减速
+        // 叠在一起，是同一个效果换了三个来源；`G.buffs.slowAll` 本身保留，
+        // 因为冰轨永冻（+0.15）和时间膨胀器（+0.2）还在用它。
+        { id: 'E06', label: '轨迹升级', emoji: '⬆️' },
+        { id: 'E07', label: '轨迹爆伤', emoji: '💣' },
+        { id: 'E10', label: '怪物反噬', emoji: '🔄' },
+        { id: 'E11', label: '自速暴涨', emoji: '💨', weight: 0.7 },
+        { id: 'E12', label: '闪电链', emoji: '⚡' },
+        { id: 'E13', label: '冰冻', emoji: '❄️' },
+        { id: 'E14', label: '延缓', emoji: '⏳' },   // v9.19
+        // v9.28 稀有效果板（40 层起 1%~5%）。数值刻意放低——它们的强度不靠单张，
+        // 靠「40 层之后卡池终于有新东西」这件事本身。三张都有上限，见 RARE_E1x_CAP：
+        // 它们是「每次触发都涨一点」的永久属性，挂在 T06 这种每帧都在发生的触发板上，
+        // 不封顶会滚成天文数字。
+        { id: 'E15', label: '图腾加固·极', emoji: '🗿', rare: true },   // 图腾血量 +3（商店版是 +1）
+        { id: 'E16', label: '护盾扩容', emoji: '🔰', rare: true },       // 护盾上限 +5（基础 100）
+        { id: 'E17', label: '急速装填', emoji: '⏩', rare: true },       // 射速 +8%（全局基础 1.2）
+    ];
+
+    // v9.23: 效果板的加权随机，和 randomTrigger() 同款。凡是「随机发一张效果板」
+    // 的地方都必须走这里，直接下标取 EFFECTS 会绕过权重与稀有判定。
+    //（按 id 命中的查找不需要。）
+    function randomEffect() {
+        const rare = EFFECTS.filter(e => e.rare);
+        if (rare.length > 0 && Math.random() < rareChance()) return pickWeighted(rare);
+        return pickWeighted(EFFECTS.filter(e => !e.rare));
+    }
+
+    // v9.28: 三张稀有效果板的上限。E15 对照「图腾加固」商店版只加 1 点、
+    // 图腾上限 10 座；E16 对照基础护盾 100；E17 对照全局 PLAYER_FIRE_RATE_MUL=1.2。
+    const RARE_E15_CAP = 30;      // 图腾血量加成
+    const RARE_E16_CAP = 300;     // 玩家护盾上限
+    const RARE_E17_CAP = 2.0;     // 射速倍率
+
+    // v9.28: T03「命中精英时」的生效数值倍率——它从「换个条件的触发板」变成
+    // 「值得为它配一张强效果板」的触发板。applyPassiveEffect() 与 removePassive()
+    // 必须读同一个来源，否则移除一张 T03 被动会多扣/少扣。
+    const T03_EFFECT_MUL = 1.2;
+
+    // v9.28: 冰冻的绝对上限（帧）。原来是写死的 180，n 层累加第 4 层就被截断
+    // （54×4=216 → 180），等于「层数越高越看不出来」。改成 600（10 秒）——
+    // ×n 的成长由乘法本身提供，这个数只负责兜底「永远冻住」。
+    const FREEZE_MAX_FRAMES = 600;
+
+    // v9.28: 唤魔者 BOSS 的数值口径——该层 BOSS 值与「清场前全场怪数值之和 ×1.13」
+    // 取大者。清场是好处，招出来的 BOSS 就是代价：清场前怪越多、越强，BOSS 越硬。
+    const EVOKER_SUM_MUL = 1.13;
+
+    // ---------- v9.28 射击小怪的三个数 ----------
+    // 射程 = 中环基础炮台（TURRET_MID_RANGE × m 1.0）的 85%。0.85 是需求本身，
+    // 所以比值与基数分开写，别把 119 直接硬编进类型表里。
+    const TURRET_MID_RANGE = 140;
+    const ENEMY_SHOOTER_RANGE_MUL = 0.85;
+    const ENEMY_SHOOTER_RANGE = Math.round(TURRET_MID_RANGE * ENEMY_SHOOTER_RANGE_MUL);  // 119
+    const ENEMY_SHOOTER_UNLOCK_FLOOR = 25;
+    // 「攻击频率为主人公初始射击频率」——就是 G.fireRate 的初值 40 帧
+    // （01-state.js / 08-main.js 的 G.fireRate = 40）。改了那边要同步改这里。
+    const ENEMY_SHOOTER_INTERVAL = 40;
+    const ENEMY_SHOT_LIFE = 8;   // 弹道拖尾的存活帧数（只是渲染用，命中是即时的）
+
+    // ---------- 怪物类型定义 ----------
+    const MONSTER_TYPES = {
+        BASIC: {
+            id: 'basic',
+            label: '普通',
+            emoji: '👾',
+            color: '#cc6633',
+            eliteColor: '#dd5544',
+            baseHp: 36,
+            hpScale: 16,
+            baseSpeed: 0.28125,
+            speedScale: 0.0125,
+            baseAtk: 5,
+            atkScale: 1.1,
+            radius: 12,
+            eliteRadius: 18,
+            scoreValue: 5,
+            eliteScoreValue: 15,
+            weight: 30,
+            moveInterval: 60,
+        },
+        FAST: {
+            id: 'fast',
+            label: '疾速',
+            emoji: '💨',
+            color: '#66ccff',
+            eliteColor: '#44aadd',
+            baseHp: 22,
+            hpScale: 9.0,
+            baseSpeed: 0.5625,
+            speedScale: 0.021875,
+            baseAtk: 3,
+            atkScale: 0.75,
+            radius: 10,
+            eliteRadius: 14,
+            scoreValue: 6,
+            eliteScoreValue: 18,
+            weight: 25,
+            moveInterval: 30,
+        },
+        TANK: {
+            id: 'tank',
+            label: '重装',
+            emoji: '🛡️',
+            color: '#88aa77',
+            eliteColor: '#66aa55',
+            baseHp: 112,
+            hpScale: 40,
+            baseSpeed: 0.125,
+            speedScale: 0.0046875,
+            baseAtk: 8,
+            atkScale: 1.5,
+            radius: 18,
+            eliteRadius: 24,
+            scoreValue: 10,
+            eliteScoreValue: 25,
+            weight: 18,
+            moveInterval: 120,
+        },
+        HEALER: {
+            id: 'healer',
+            label: '治疗',
+            emoji: '💚',
+            color: '#55dd88',
+            eliteColor: '#44cc77',
+            baseHp: 45,
+            hpScale: 16,
+            baseSpeed: 0.21875,
+            speedScale: 0.009375,
+            baseAtk: 2,
+            atkScale: 0.45,
+            radius: 13,
+            eliteRadius: 17,
+            scoreValue: 8,
+            eliteScoreValue: 20,
+            weight: 12,
+            isHealer: true,
+            healAmount: 4.0,
+            moveInterval: 80,
+        },
+        SPLITTER: {
+            id: 'splitter',
+            label: '分裂',
+            emoji: '🧬',
+            color: '#ffaa44',
+            eliteColor: '#ee8833',
+            baseHp: 68,
+            hpScale: 25,
+            baseSpeed: 0.25,
+            speedScale: 0.0109375,
+            baseAtk: 5,
+            atkScale: 0.9,
+            radius: 14,
+            eliteRadius: 18,
+            scoreValue: 9,
+            eliteScoreValue: 24,
+            weight: 10,
+            isSplitter: true,
+            splitCount: 4,
+            moveInterval: 70,
+        },
+        SCORCHER: {
+            id: 'scorcher', label: '灼烧', emoji: '🔥',
+            color: '#ff6622', eliteColor: '#ff4411',
+            baseHp: 33, hpScale: 12,
+            baseSpeed: 0.25, speedScale: 0.011,
+            baseAtk: 5, atkScale: 0.85,
+            radius: 12, eliteRadius: 16,
+            scoreValue: 7, eliteScoreValue: 20,
+            weight: 12, moveInterval: 55,
+            isScorcher: true, fireTrailInterval: 8, fireTrailLife: 150,
+            unlocksAtWave: 8,
+        },
+        WRAITH: {
+            id: 'wraith', label: '虚灵', emoji: '👻',
+            color: '#aa88ee', eliteColor: '#8866cc',
+            baseHp: 21, hpScale: 7.5,
+            baseSpeed: 0.28, speedScale: 0.015,
+            baseAtk: 3, atkScale: 0.7,
+            radius: 11, eliteRadius: 15,
+            scoreValue: 8, eliteScoreValue: 22,
+            weight: 10, moveInterval: 45,
+            isWraith: true, bulletResist: 0.3,
+            unlocksAtWave: 12,
+        },
+        // v9.28: 射击小怪。第 25 层起进池（走 unlocksAtWave，和灼烧 8 / 虚灵 12 同一套）。
+        // 它跟别的怪只差两件事：① 索敌**无条件优先炮台**（场上有塔就锁塔，没有才锁核心）
+        // ② 走到射程内就停下远程开火，不贴脸。伤害口径与近战完全一致，见 fireEnemyShot()。
+        // 射程取「中环基础炮台 🗼」的 85%：中环 m = 1.0，basic 的 rg = 140 → 119px
+        // （炮台射程表在 04-trail.js 的 T 里，改那边要同步改这里的 TURRET_MID_RANGE）。
+        SHOOTER: {
+            id: 'shooter', label: '射击', emoji: '🔫',
+            color: '#cc66dd', eliteColor: '#bb44cc',
+            baseHp: 30, hpScale: 13,
+            baseSpeed: 0.1875, speedScale: 0.008,
+            baseAtk: 6, atkScale: 1.2,
+            radius: 12, eliteRadius: 16,
+            scoreValue: 11, eliteScoreValue: 26,
+            // STAGE_TYPES 里每一种关卡都显式写了 shooter 的权重，这个 weight 只是
+            // 「关卡类型查不到」时的兜底，量级对齐表里那个 0.4（表里是 ×10 的尺度）。
+            weight: 4, moveInterval: 60,
+            isShooter: true,
+            unlocksAtWave: ENEMY_SHOOTER_UNLOCK_FLOOR,
+            shootRange: ENEMY_SHOOTER_RANGE,
+            shootInterval: ENEMY_SHOOTER_INTERVAL,
+        },
+        BOSS: {
+            id: 'boss', label: 'BOSS', emoji: '👑',
+            color: '#ff2255', eliteColor: '#ff0044',
+            baseHp: 100000, hpScale: 0, baseSpeed: 0.1, speedScale: 0,
+            baseAtk: 45, atkScale: 0, radius: 30, eliteRadius: 35,
+            scoreValue: 3000, eliteScoreValue: 3000, weight: 0,
+            isBoss: true, spawnInterval: 100, moveInterval: 60,
+        },
+    };
+
+    // ---------- 精英词缀 ----------
+    // v9.25: 圈层类词条落地时的半径放大倍数。表里存基数（100 / 90），
+    // 实际生成时乘这一项——「×1.5」只在这里出现一次，调平衡改一处就够。
+    // 削减圈 100→150、减速圈 90→135、火圈 90→135。
+    const AFFIX_ZONE_R_MUL = 1.5;
+    // 同属性同屏最多几个圈。BOSS 每 5 秒落一个、每个活 6 秒，本来就最多同时 2 个；
+    // 但一只 BOSS 带两个圈层类词条时（比如削减区 + 减速区）会各自独立计数，
+    // 有个硬上限才不会被「场上有 3 只带圈词条的怪」堆成一片没法走的地毯。
+    const AFFIX_ZONE_MAX_PER_KIND = 3;
+
+    // v9.24: 前 6 个（再生/荆棘/迅捷/巨人/吸血/爆裂）都是「给怪物自己加数值」。
+    // 后 8 个换了方向——不去加强怪物，而是去干扰**玩家的三个系统**：
+    //   移动   → 突进 / 牵引
+    //   输出   → 削减区 / 减速区
+    //   召唤物 → 敌图腾 / 群生（外加火焰区同时烧玩家和图腾）
+    // 所以它们不能只靠 spawnMonster() 里乘一个系数实现，需要一个逐帧钩子。
+    // 行为一律写在下面这些声明式字段里（zone / fireZone / dash / vortex /
+    // swarm / onCoreHit / onDeath），由 05-update.js 的 tickAffixes()、
+    // onAffixCoreHit()、onAffixDeath() 三个统一入口去读——加词条只需要动这张表。
+    //
+    // v9.25: 这条分界线现在也是**归属线**。后 8 个带 bossOnly: true，
+    // 精英怪抽不到、只有 BOSS 会带——它们改的是「玩家的走法」，挂在随时刷新的
+    // 小怪身上只是零散骚扰，玩家记不住；变成 BOSS 的招牌才有分量。
+    const AFFIXES = [
+        { id: 'regen',     label: '再生', emoji: '💚', color: '#44ff88',
+          desc: '每帧回复生命', minWave: 5 },
+        { id: 'thorns',    label: '荆棘', emoji: '🌿', color: '#ff6644',
+          desc: '反弹伤害给玩家', minWave: 5 },
+        { id: 'swift',     label: '迅捷', emoji: '💨', color: '#66ccff',
+          desc: '速度+40%', minWave: 5 },
+        { id: 'giant',     label: '巨人', emoji: '🦍', color: '#ffaa44',
+          desc: '双倍HP与体型', minWave: 5 },
+        { id: 'vampiric',  label: '吸血', emoji: '🩸', color: '#ff3366',
+          desc: '攻击时回复生命', minWave: 5 },
+        { id: 'explosive', label: '爆裂', emoji: '💥', color: '#ff6622',
+          desc: '死亡时范围爆炸', minWave: 5 },
+
+        // ---- v9.24 新增 · v9.25 起为 BOSS 专属 ----
+        // 三个圈层类（zone / fireZone）的半径存的是**基数**，真正落地时乘
+        // AFFIX_ZONE_R_MUL——这样「×1.5」这件事在代码里看得见，调平衡只用改一处。
+        // every / spawnRange / life 由 05-update.js 的 spawnAffixZone() 读。
+        { id: 'weaken',    label: '削减区', emoji: '🟥', color: '#ff4455', bossOnly: true,
+          desc: `每 5 秒在附近落一个 ${Math.round(100 * AFFIX_ZONE_R_MUL)}px 削减圈（攻击 ×0.6）`,
+          minWave: 5, zone: { r: 100, playerAtkMul: 0.6, every: 300, spawnRange: 300, life: 360 } },
+        { id: 'slowzone',  label: '减速区', emoji: '🟦', color: '#4499ff', bossOnly: true,
+          desc: `每 5 秒在附近落一个 ${Math.round(90 * AFFIX_ZONE_R_MUL)}px 减速圈（移速 ×0.65）`,
+          minWave: 5, zone: { r: 90, playerSpeedMul: 0.65, every: 300, spawnRange: 300, life: 360 } },
+        { id: 'firezone',  label: '火焰区', emoji: '🔥', color: '#ff6622', bossOnly: true,
+          desc: `每 5 秒在附近落一个 ${Math.round(90 * AFFIX_ZONE_R_MUL)}px 火圈，站在里面持续掉血`,
+          minWave: 5, fireZone: { r: 90, every: 300, spawnRange: 300, life: 360 } },
+        { id: 'dash',      label: '突进', emoji: '🌀', color: '#cc66ff', bossOnly: true,
+          desc: '每 3 秒朝玩家猛冲一段', minWave: 5,
+          dash: { every: 180, dist: 90 } },
+        { id: 'vortex',    label: '牵引', emoji: '🌪', color: '#88ddff', bossOnly: true,
+          desc: '持续把周围玩家往自己拉', minWave: 5,
+          vortex: { r: 160, pull: 0.15 } },
+        { id: 'seal',      label: '封印', emoji: '🔒', color: '#ddcc44', bossOnly: true,
+          desc: '撞核心时随机封印玩家一个被动 4 秒', minWave: 5,
+          onCoreHit: 'seal' },
+        { id: 'swarm',     label: '群生', emoji: '👥', color: '#66dd88', bossOnly: true,
+          desc: '每 6 秒分裂出 20% HP 的残影（上限 3）', minWave: 5,
+          swarm: { every: 360, hpFrac: 0.20, max: 3 } },
+        { id: 'totem',     label: '敌图腾', emoji: '🗿', color: '#ff8844', bossOnly: true,
+          desc: '死亡后原地留下敌意图腾', minWave: 5,
+          onDeath: 'enemyTotem' },
+    ];
+
+    // 按 id 查词条定义。渲染、钩子、图鉴都要用，直接下标取容易漏。
+    function affixDef(id) {
+        return AFFIXES.find(a => a.id === id) || null;
+    }
+    // 从「当前楼层已解锁」的词条里随机抽 n 个（不重复）。
+    // opts 用对象而不是位置参数：现在有两个可选项，再加一个布尔读起来就分不清谁是谁。
+    //   exclude  —— 想剔掉的 id 列表，用来排除对某个持有者没意义的词条（见 spawnBoss()）
+    //   bossOnly —— true 只抽 BOSS 专属的 8 个；'any' / 省略则不区分（调试生成与测试用）
+    //               v9.28: false 不再是「只有普通 6 个」，而是**精英共享池**——
+    //               14 个全在池里，bossOnly 的 8 个按 ELITE_BOSS_AFFIX_WEIGHT 半权。
+    // v9.28: 精英怪与 BOSS 词条「共享」的那半边——后 8 个 bossOnly 词条现在精英怪
+    // 也抽得到，但只算半权（普通 6 个 ×1，专属 8 个 ×0.5）。BOSS 自己的池子不受影响：
+    // 那边仍然一视同仁，专属词条还是 BOSS 的招牌（v9.25 的归属线只是变软，没撤销）。
+    const ELITE_BOSS_AFFIX_WEIGHT = 0.5;
+
+    function pickAffixes(n, opts) {
+        const o = opts || {};
+        const skip = o.exclude || [];
+        const wantBoss = o.bossOnly;
+        const isElite = wantBoss === false;
+        const pool = AFFIXES.filter(a =>
+            G.floor >= a.minWave
+            && skip.indexOf(a.id) < 0
+            && (wantBoss === true ? a.bossOnly === true
+                : true));
+        if (isElite) {
+            // 加权不放回抽取。BOSS 池与调试池保持原来的均匀洗牌——那边不发生
+            // 「共享」，把两边的抽样方式分开写，9.25 那套 BOSS 分布才不会被顺手改掉。
+            const items = pool.map(a => ({ a, w: a.bossOnly ? ELITE_BOSS_AFFIX_WEIGHT : 1 }));
+            const picked = [];
+            for (let k = 0; k < n && items.length > 0; k++) {
+                let total = 0;
+                for (const it of items) total += it.w;
+                let r = Math.random() * total;
+                let idx = items.length - 1;
+                for (let i = 0; i < items.length; i++) {
+                    r -= items[i].w;
+                    if (r <= 0) { idx = i; break; }
+                }
+                picked.push(items[idx].a.id);
+                items.splice(idx, 1);
+            }
+            return picked;
+        }
+        const shuffled = [...pool].sort(() => Math.random() - 0.5);
+        return shuffled.slice(0, Math.min(n, shuffled.length)).map(a => a.id);
+    }
+
+    // ---------- v9.2 命运抉择 ----------
+    const FATE_CHOICES = [
+        { id: 'trailMaster',   label: '轨迹大师', emoji: '🐾', desc: '轨迹伤害+100%',              apply() { G.fateBuffs.trailDmgMul *= 2; }, },
+        { id: 'bulletStorm',   label: '弹幕风暴', emoji: '🎯', desc: '子弹伤害+100%',              apply() { G.fateBuffs.bulletDmgMul *= 2; }, },
+        { id: 'speedDemon',    label: '疾风步',   emoji: '💨', desc: '移速+50%，护盾-30%',        apply() { G.fateBuffs.speedMul *= 1.5; G.player.maxHp = Math.floor(G.player.maxHp * 0.7); G.player.hp = Math.min(G.player.hp, G.player.maxHp); }, },
+        { id: 'ironWall',      label: '铁壁',     emoji: '🛡️', desc: '护盾+60%，移速-20%',       apply() { G.player.maxHp = Math.floor(G.player.maxHp * 1.6); G.player.hp = Math.floor(G.player.hp * 1.6); G.fateBuffs.speedMul *= 0.8; }, },
+        { id: 'doubleDrop',    label: '丰收',     emoji: '🍀', desc: '怪物+25%，掉落率×2',    apply() { G.fateBuffs.dropRateMul *= 2; G.fateBuffs.monsterCountMul *= 1.25; }, },
+        { id: 'vampiricAura',  label: '吸血光环', emoji: '🩸', desc: '击杀回血8点',               apply() { G.fateBuffs.vampHeal += 8; }, },
+        { id: 'berserker',     label: '狂战士',   emoji: '😡', desc: '攻击+50%，受伤害+40%',      apply() { G.fateBuffs.atkMul *= 1.5; G.fateBuffs.damageTakenMul *= 1.4; }, },
+        { id: 'ultraCharge',   label: '超载',     emoji: '⚡', desc: '终极技能充能速度翻倍',      apply() { G.ultimateChargeMult *= 2; }, },
+    ];
+
+    // v9.22: 连杀爆发（25/50/100 连杀的冲击波·过载·天罚）整块删除。
+    // 它和终结技的定位重叠，而且 100 连杀直接把终结技槽灌满这件事，
+    // 在下面的「固定回复速度」之后已经没有意义。
+    // 注意 G.killStreak 本身**没有**删——T08「连环击杀」还在用它（见 05-update.js）。
+
+    // v9.23: BOSS 血量整体 −10%（第 10 层 9 万、第 30 层 26 万）。
+    const BOSS_HP_MUL = 0.9;
+
+    // v9.25: BOSS 前期减压——第 1 只 BOSS（第 10 层，原本 9 万血）对刚上手的玩家
+    // 几乎是必卡的。从 1 层 ×0.5 线性爬到 20 层 ×1.0，之后恒 ×1.0。
+    // 刻意**不做断崖**：硬切成「20 层之前 ×0.5、之后 ×1.0」会让第 19/20 层两只
+    // BOSS 的血量差一倍，玩家只会读到「突然变难」，而不是「我变强了」。
+    // 作用在 HP（getBossHp）与攻击（spawnBoss）两处——用户说的是「数值」。
+    const BOSS_EARLY_RAMP_END = 20;
+    // v9.27: 爬坡起点再往下压 30%（×0.5 → ×0.35）。注意这是**乘在爬坡起点上**，
+    // 不是「1~20 层整体 −30%」——第 1 层正好 −30%，越往后衰减越少，第 20 层归零：
+    //   第 10 层 0.35 + 0.65×9/19 = 0.6579（原 0.7368，相对 −10.7%）
+    //   第 20 层起仍 ×1.0，后期一点没动（用户选的就是「只削前期，后期不变」）。
+    const BOSS_EARLY_MUL_START = 0.35;
+    function bossEarlyMul() {
+        const t = Math.min(1, Math.max(0, (G.floor - 1) / (BOSS_EARLY_RAMP_END - 1)));
+        return BOSS_EARLY_MUL_START + (1 - BOSS_EARLY_MUL_START) * t;
+    }
+    // v9.23: BOSS 召唤爪牙的速率 +5%。v9.24: 再加 5%，累计 1.1025。
+    // 写成乘积而不是 1.1025，是为了让两次调整的出处都留在代码里。
+    // 初始间隔（type.spawnInterval = 100）和后续的 max(50, 150-层数×2) 都除这一项。
+    const BOSS_SUMMON_RATE_MUL = 1.05 * 1.05;
+    function bossSummonInterval(base) {
+        return Math.max(1, Math.round(base / BOSS_SUMMON_RATE_MUL));
+    }
+
+    // v9.24: 普通怪 HP 与攻击力各 −20%。配合「BOSS 爪牙更密」一起，
+    // 整体方向是「怪更多、每只更脆」。移速**不动**——出怪变密之后如果怪还变慢，
+    // 就只剩「又慢又肉又没威胁」，纯粹拖时间，不会更紧张。
+    // 只作用于 spawnMonster() 与分裂子体；BOSS / 爪牙 / 调试生成都不吃这一项。
+    const MONSTER_STAT_MUL = 0.8;
+
+    // ---------- v9.27 前期普通怪再 −30% ----------
+    // 只打在**普通怪**身上（精英与 BOSS 都不吃），只在 `< DIFF_KNEE` 层生效。
+    // 与 MONSTER_STAT_MUL 叠乘：0.8 × 0.7 = 0.56，HP 与攻击都乘、移速不动。
+    // 动机：v9.27 那条曲线从第 1 层起就是 1.56 的指数，不把前期压软的话前几层直接劝退。
+    // ⚠️ v9.32 换成三次曲线后，前 30 层比原来平缓得多（10 层 ×13.2 而非 ×55.5），
+    //    这一项**没有跟着回调**——用户这次只点了曲线与攻击力上限。若试玩觉得前期太软，
+    //    该动的是这个常数，而不是曲线（曲线是全层共用的）。
+    const EARLY_NORMAL_MUL = 0.7;
+
+    // ---------- v9.27 防溢出天花板 ----------
+    // 这三个数原来是**难度闸门**：撞上之后怪就不再变强（旧注释写的「第 37 层就撞顶，
+    // 之后每层的怪一模一样——游戏在那之后其实已经结束了」）。它们的大小是照
+    // 1.16 + 多项式尾巴那条旧曲线量的，而 v9.27 的新曲线在第 17 / 40 / 38 层就会
+    // 撞上去，等于把「指数上升」直接截断。所以现在把它们抬到**纯粹防溢出**的位置——
+    // 远在任何一局能打到的层数之外（怪物攻击大约第 22 层就能一下打穿 100 点护盾，
+    // 一局到不了那儿），曲线本身不再被截断。
+    const HP_OVERFLOW_GUARD = 1e15;     // 普通怪与 BOSS 的血量
+    const ATK_OVERFLOW_GUARD = 1e9;     // 普通怪与 BOSS 的攻击（原来分别是 120 / 12 倍）
+
+    // ---------- v9.31 玩家软上限 ----------
+    // 背景：玩家那批成长轴（攻 / 轨伤 / 轨宽 / 移速）原来全是死数字，在 11～21 层
+    // 前后就撞满，之后每一段 20 层的环比恒为 ×1.00——玩家的数值从第 21 层起就是
+    // 装饰品，活下来靠的是少数几个跟着强度标尺缩放的伤害源。
+    //
+    // 现在改成**随层数抬升的软上限**：cap = base × (1 + 层数 × 0.015)，200 层约 ×4。
+    // v9.32 起难度曲线本身也平缓了（见 01-state.js 的三次曲线），两者增速接近，
+    // 玩家的数值终于是**看得见地涨**，而不是早早冻住。
+    // 硬闸门 1e15 / 1e9 保留，但从此只是纯防溢出。
+    const PLAYER_CAP_RATE = 0.015;
+    function playerCap(base) { return base * (1 + G.floor * PLAYER_CAP_RATE); }
+    // 轨迹宽度只有这一个上限——E06（02-combat.js）与「轨迹拓宽」（下面的 STAT_CHOICES）
+    // 共用它。v9.31 之前两处各写一个数（60 与 150），宽到 150 之后再拿「轨迹拓宽」会被
+    // Math.min(151, 60) 一路砍回 60。
+    function getTrailWidthCap() { return playerCap(150); }
+
+    // ---------- v9.24 手机端虚拟摇杆 · v9.25 改为动态位置 ----------
+    // v9.25: 底座不再是固定坐标，而是「按在哪、圆心就在哪」（见 09-events.js 的
+    // setStickFromTouch）。所以这里只剩半径——而且半径的单位从 canvas 像素变成了
+    // **CSS 像素**，因为摇杆改成 DOM 元素绘制（可能落在 canvas 外的黑边上，
+    // 画在 canvas 里会被边界裁掉）。r 只作为拿不到元素尺寸时的兜底。
+    const JOYSTICK = { r: 62 };
+
+    // ---------- v9.25 「消除」技能 ----------
+    // 从触发板 T13 改成玩家技能：30 秒冷却，按 R（手机端右下角 🧹 圆钮）触发一次。
+    // 帧数口径，和游戏里其它计时保持一致。
+    const ELIMINATE_COOLDOWN = 30 * 60;
+
+    // ---------- v9.25 玩家 / 图腾的出手强度 ----------
+    // 玩家图腾（建筑）的单发伤害是玩家攻击力的一个**比例**，类型之间按旧权重分：
+    //
+    //   单发伤害 = 玩家攻击力 × (d × m) / TURRET_RATIO_NORM
+    //
+    // d 是类型表里的相对权重（basic 30 / rapid 18 / lightning 50 / frost 10 / trail 35），
+    // m 是大中小环的尺寸倍率（0.6 / 1.0 / 1.5）。分母取旧 d×m 的最大值，于是
+    // 「大环闪电」正好是玩家攻击力的 1.00 倍，其余按旧比例往下排——比例关系和
+    // v9.24 之前一致，只是绝对值不再随层数难度指数膨胀。
+    //
+    // 伤害在**开火那一刻**算（见 05-update.js 的图腾循环），所以玩家捡到攻击加成后
+    // 场上的塔会立刻跟着变强，不是召唤时的快照。
+    //
+    // v9.32: 原来这里还有一个 TURRET_ATK_CEILING = 1.0 的乘子，作为「塔的伤害上限」
+    // 的显式表达。它本来就是 1.0，删掉在数值上**没有任何变化**——只是那个「上限」
+    // 的概念不再存在了（玩家攻击力本身也不再封顶，见 02-combat.js 的 E01/E02）。
+    //
+    // ⚠️ TURRET_RATIO_NORM 写死为 `50 × 1.5`（最大 d × 最大 m）。改类型表的 d 列或
+    //    改成大环倍率，这里必须一起改，否则比例就不再以 1.0 倍封顶。
+    const TURRET_RATIO_NORM = 50 * 1.5;
+    // 敌图腾（怪物的敌对建筑）**单独算**——它不吃玩家的攻击力，走自己那套
+    // `3 + f × 0.2`（见 05-update.js 的 updateEnemyTotems）。
+    // 玩家开火频率 +20%：冷却整体除以 1.2。上下限一起缩——只改上面那个 48 会让
+    // 后期被 Math.max(24, …) 的地板吃掉，看着改了实际没生效。
+    const PLAYER_FIRE_RATE_MUL = 1.2;
+
+    // ---------- v9.25 密文版掉落（开局 / 击杀 / BOSS 磨血） ----------
+    // 三个新来源，全部走「平衡掉落」（触发板与效果板按手牌数量取少的那边，
+    // 见 07-ui.js 的 dropBalancedCard），抽到几张都一次结算、只弹一条汇总。
+    const START_CARDS = 6;              // 正式开局白送 6 张
+    const KILL_CARD_EVERY = 20;         // 每击杀 20 个怪物判定一次
+    const KILL_CARD_CHANCE = 0.30;
+    // BOSS 每被磨掉 25% 血量判定一次。概率表是一张**完整的**分布（50+20+20+10=100），
+    // 所以只掷一次骰子，落在哪段就是几张——不是「先判中不中、再判中几张」。
+    const BOSS_CARD_STEP = 0.25;
+    function rollBossCardCount() {
+        const r = Math.random();
+        if (r < 0.50) return 1;
+        if (r < 0.70) return 2;
+        if (r < 0.90) return 3;
+        return 4;
+    }
+
+    // 基础式仍是 2 + 层数/10（第 5 层 2 张、第 50 层 7 张、第 100 层 12 张），
+    // 再按「前期 ×1.1、后期 ×0.9」缩放。拐点沿用难度的 DIFF_KNEE = 30。
+    // 只影响清层奖励——BOSS 掉落、商人、休整那三个来源不动。
+    const CARD_EARLY_MUL = 1.1;
+    const CARD_LATE_MUL = 0.9;
+    function getFloorClearCards() {
+        const base = 2 + Math.floor(G.floor / 10);
+        const mul = G.floor < DIFF_KNEE ? CARD_EARLY_MUL : CARD_LATE_MUL;
+        return Math.max(1, Math.round(base * mul));
+    }
+
+    function getBossHp() {
+        // v9.15: 和难度曲线同步加拐点，否则 BOSS 自己按 1.7^(层/10) 一路指数涨，
+        // 118 层就是 2000 万血——玩家永远打不死，又是一个「假难度」。
+        // v9.23: 整体再 −10%，第 10 / 20 / 30 层是 9 万 / 15.3 万 / 26 万。
+        // v9.25: 再乘前期减压系数——第 10 层 ×0.7368 ≈ 6.6 万，20 层起恢复满值。
+        // v9.27: 尾巴从多项式换成同一底数的指数。BOSS 自己那两段（1.7^(层/10)
+        // 的「每 10 层跳一档」，30 层封顶）保持原样——用户没要求动它，而且它是
+        // BOSS 独有的档位感，和全局难度曲线不是一回事。
+        // v9.32: 尾巴改成「本层标尺 / 第 30 层标尺」——第 30 层正好是 1（与旧式相等），
+        // 之后跟着三次曲线一起涨。这样 BOSS 与普通怪的血量比恒定在 ~29.5 倍，
+        // 任何层数都不会出现「BOSS 反而不如一只精英肉」。
+        // 30 层以下必须显式钳成 1：那一段的档位感由上面 1.7^(层/10) 那道梯子负责，
+        // 尾巴再插一脚会把第 10 层的 BOSS 直接砍到旧值的十六分之一。
+        const g = Math.floor(G.floor / 10);
+        const tail = G.floor <= DIFF_KNEE
+            ? 1
+            : getMonsterScale() / diffScaleAt(DIFF_KNEE);
+        return Math.floor(BOSS_HP_MUL * 100000
+            * Math.pow(1.7, Math.min(g, 3) - 1)
+            * tail
+            * bossEarlyMul());
+    }
+
+    // ---------- v9.6 关卡类型（怪物分布多样化）----------
+    const STAGE_TYPES = [
+        { id:'mixed',     label:'混编',     icon:'⚔️', desc:'标准怪物混合',  weights:{ basic:1, fast:1, tank:1, healer:0.6, splitter:0.4, scorcher:0.2, wraith:0.2, shooter:0.4 } },
+        { id:'fastRush',  label:'疾驰洪流', icon:'💨', desc:'疾速怪海战术',  weights:{ basic:0.3, fast:5, tank:0.1, healer:0.2, splitter:0.3, scorcher:0.2, wraith:0.3, shooter:0.3 } },
+        { id:'siege',     label:'重装攻城', icon:'🛡️', desc:'坦克+治疗组合', weights:{ basic:1, fast:0.2, tank:4, healer:2, splitter:0.3, scorcher:0.1, wraith:0.1, shooter:0.3 } },
+        { id:'fireStorm', label:'烈焰风暴', icon:'🔥', desc:'灼烧怪为主',    weights:{ basic:0.5, fast:0.5, tank:0.5, healer:0.3, splitter:0.3, scorcher:4, wraith:0.5, shooter:0.3 } },
+        { id:'ghostTown', label:'幽灵小镇', icon:'👻', desc:'虚灵免疫轨迹',  weights:{ basic:0.3, fast:0.3, tank:0.2, healer:0.2, splitter:0.2, scorcher:0.2, wraith:4, shooter:0.5 } },
+        { id:'eliteSquad',label:'精英小队', icon:'⭐', desc:'高精英率',      weights:{ basic:1, fast:1, tank:1, healer:1, splitter:1, scorcher:0.5, wraith:0.5, shooter:0.5 }, eliteMult:2.5 },
+        { id:'bossStage', label:'BOSS战',   icon:'👑', desc:'楼层BOSS',      weights:{ basic:0, fast:0, tank:0, healer:0, splitter:0, scorcher:0, wraith:0, shooter:0 }, isBoss:true },
+    ];
+
+    // ---------- v9.6 轮椅组合 ----------
+    const CHAIR_COMBOS = [
+        { id:'trailRevenge', trigger:'T06', effect:'E10', name:'轨迹反噬', emoji:'🐾🔥', desc:'轨迹→反噬→全怪互伤', trailType:'fire', bonus(G){ G.buffs.trailDmg+=4; } },
+        { id:'chainStorm', trigger:'T07', effect:'E12', name:'连锁风暴', emoji:'⚡🎯', desc:'射击→闪电链→清场', trailType:'lightning', bonus(G){ G.fireRate=Math.max(12,G.fireRate-8); } },   // v9.19: -2→-8，见 SURGE 的注释
+        { id:'iceTrail', trigger:'T06', effect:'E13', name:'冰轨永冻', emoji:'❄️🐾', desc:'触轨→冰冻→罚站', trailType:'ice', bonus(G){ G.buffs.trailWidth+=4; G.buffs.slowAll=Math.min(0.7,G.buffs.slowAll+0.15); } },
+        // v9.28: 触发板从 T02「对敌群」改成 T08「连环击杀」——T01/T02 删掉了，
+        // 这条轮椅的数值与轨迹外观一点没动，只是换了个还存在的触发条件。
+        { id:'trailExplosion', trigger:'T08', effect:'E07', name:'爆轨清场', emoji:'💣🐾', desc:'连环击杀→引爆轨迹→AOE', trailType:'fire', bonus(G){ G.buffs.trailDmg+=5; } },
+        { id:'vampLord', trigger:'T08', effect:'E03', name:'吸血领主', emoji:'🩸💚', desc:'连杀→回血→永生', trailType:'basic', bonus(G){ G.fateBuffs.vampHeal+=16; } },
+        { id:'bulletHell', trigger:'T07', effect:'E02', name:'弹幕地狱', emoji:'🎯💥', desc:'命中→倍率→指数增长', trailType:'lightning', bonus(G){ G.buffs.multUp+=0.5; } },
+    ];
+
+    // ---------- v9.6 轨迹类型视觉 ----------
+    const TRAIL_STYLES = {
+        basic:    { color:'hsla(210,80%,60%,{a})', glow:'hsla(210,90%,60%,{a})', widthMul:1.0 },
+        fire:     { color:'rgba(255,100,30,{a})',  glow:'rgba(255,60,20,{a})',   widthMul:1.3 },
+        ice:      { color:'rgba(140,210,255,{a})',  glow:'rgba(180,220,255,{a})',  widthMul:1.5 },
+        lightning:{ color:'rgba(255,220,60,{a})',   glow:'rgba(255,200,40,{a})',   widthMul:1.1 },
+    };
+
+    // ---------- v9.6 地图节点（用来画可视化地图）----------
+    const NODE_POOL = [
+        { id:'combat',     label:'战斗',  icon:'⚔️', color:'#8ab0d0', stageType:'mixed' },
+        { id:'combatFast', label:'疾驰',  icon:'💨', color:'#66ccff', stageType:'fastRush' },
+        { id:'combatSiege',label:'攻城',  icon:'🛡️', color:'#88aa77', stageType:'siege' },
+        { id:'combatFire', label:'烈火',  icon:'🔥', color:'#ff6622', stageType:'fireStorm' },
+        { id:'combatGhost',label:'幽灵',  icon:'👻', color:'#aa88ee', stageType:'ghostTown' },
+        { id:'elite',      label:'精英',  icon:'⭐', color:'#cc66ff', stageType:'eliteSquad' },
+        { id:'merchant',   label:'商人',  icon:'🧙‍♂️', color:'#ffb347', isMerchant:true },
+        { id:'rest',       label:'休整',  icon:'🏕️', color:'#44cc88', isRest:true },
+        { id:'boss',       label:'BOSS',  icon:'👑', color:'#ff2255', stageType:'bossStage' },
+    ];
+
+    const MONSTER_TYPE_LIST = Object.values(MONSTER_TYPES);
+
+    // ---------- v9.4 职业定义 ----------
+    const CLASSES = [
+        {
+            id: 'trailWeaver', name: '轨迹编织者', emoji: '🐾',
+            desc: '掌控轨迹之力的秘法大师，留下的轨迹更持久且伤害更高。',
+            stats: '轨迹伤害+3 | 轨迹宽度+4 | 轨迹留存+50% | 移速-10%',
+            apply(G) {
+                G.buffs.trailDmg += 3; G.buffs.trailWidth += 4;
+                G.trailLifeBonus = 180; // 轨迹额外留存
+                G.player.speed *= 0.9;
+            },
+        },
+        {
+            id: 'bulletStorm', name: '弹幕风暴', emoji: '🎯',
+            desc: '精通射击的战场指挥官，子弹如暴风雨般倾泻。',
+            stats: '射速+40% | 子弹伤害+5 | 弹丸+1(散射) | 移速+15%',
+            apply(G) {
+                G.fireRate = Math.max(3, Math.floor(G.fireRate * 0.6));
+                G.buffs.atkUp += 5;
+                G.extraBullets = 1; // 额外弹丸
+                G.player.speed *= 1.15;
+            },
+        },
+        {
+            id: 'guardian', name: '堡垒守卫', emoji: '🛡️',
+            desc: '以钢铁意志守护核心，厚重的护盾让敌人绝望。',
+            stats: '护盾+80 | 核心HP+40 | 攻击+8 | 移速-25% | 射速-20%',
+            apply(G) {
+                G.player.maxHp += 80; G.player.hp += 80;
+                G.core.maxHp += 40; G.core.hp += 40;
+                G.buffs.atkUp += 8;
+                G.player.speed *= 0.75;
+                G.fireRate = Math.floor(G.fireRate * 1.25);
+            },
+        },
+        {
+            id: 'arcaneScholar', name: '奥术学者', emoji: '🔮',
+            desc: '研究密文本质的学者，擅长组合更多被动，充能速度极快。',
+            stats: '被动槽位+1 | 终极充能+50% | 初始3张手牌 | 精华掉落+50%',
+            apply(G) {
+                G.maxSlots += 1;
+                G.ultimateChargeMult *= 1.5;
+                G.essenceBonus = 0.5; // 精华掉落加成
+            },
+        },
+    ];
+
+    // ---------- v9.4 遗物定义 ----------
+    const RELICS = [
+        { id: 'cipherAmplifier', name: '密文增幅器', emoji: '📡', rarity: 'rare',
+          desc: '被动效果触发时额外触发一次', apply(G) { G.relicBuffs.doubleTrigger = true; } },
+        { id: 'timeDilator', name: '时间膨胀器', emoji: '⏳', rarity: 'epic',
+          desc: '怪物移速-20%，轨迹留存+120帧', apply(G) { G.buffs.slowAll = Math.min(0.7, G.buffs.slowAll + 0.2); G.trailLifeBonus = (G.trailLifeBonus || 0) + 120; } },
+        { id: 'essenceMagnet', name: '精华磁铁', emoji: '🧲', rarity: 'common',
+          desc: '击杀掉落精华+2', apply(G) { G.relicBuffs.essencePerKill = (G.relicBuffs.essencePerKill || 0) + 2; } },
+        { id: 'glassCannon', name: '玻璃大炮', emoji: '💎', rarity: 'rare',
+          desc: '攻击+50%，护盾-40%', apply(G) { G.fateBuffs.atkMul *= 1.5; G.player.maxHp = Math.floor(G.player.maxHp * 0.6); G.player.hp = Math.min(G.player.hp, G.player.maxHp); } },
+        { id: 'phoenixFeather', name: '凤凰羽毛', emoji: '🪶', rarity: 'epic',
+          desc: '核心被毁时复活一次(恢复50%核心HP)', apply(G) { G.relicBuffs.revive = true; } },
+        { id: 'shadowBlade', name: '暗影之刃', emoji: '🗡️', rarity: 'rare',
+          desc: '子弹有20%概率造成双倍伤害', apply(G) { G.relicBuffs.critChance = (G.relicBuffs.critChance || 0) + 0.2; } },
+        { id: 'healingWard', name: '治愈护符', emoji: '💚', rarity: 'common',
+          desc: '每波开始时回复20%护盾', apply(G) { G.relicBuffs.waveHeal = (G.relicBuffs.waveHeal || 0) + 0.2; } },
+        { id: 'thornsAura', name: '荆棘光环', emoji: '🌿', rarity: 'common',
+          desc: '攻击核心的怪物受到5点反伤', apply(G) { G.relicBuffs.thornsDmg = (G.relicBuffs.thornsDmg || 0) + 5; } },
+        { id: 'greedyChalice', name: '贪婪圣杯', emoji: '🏆', rarity: 'epic',
+          desc: '怪物数量+30%，但掉落率×3', apply(G) { G.fateBuffs.monsterCountMul *= 1.3; G.fateBuffs.dropRateMul *= 3; } },
+        { id: 'windBoots', name: '疾风之靴', emoji: '👢', rarity: 'common',
+          desc: '移速永久+25%', apply(G) { G.fateBuffs.speedMul *= 1.25; } },
+        { id: 'coreShield', name: '核心护盾发生器', emoji: '🔰', rarity: 'rare',
+          desc: '核心获得20点额外HP上限', apply(G) { G.core.maxHp += 20; G.core.hp += 20; } },
+        { id: 'berserkerTotem', name: '狂战图腾', emoji: '🗿', rarity: 'rare',
+          desc: '护盾低于30%时攻击力翻倍', apply(G) { G.relicBuffs.lowHpBerserk = true; } },
+        // v9.28: 稀有藏品「唤魔之钥」。**不进随机池**——dropRelic() 会跳过 hidden，
+        // 它只能从唤魔者 BOSS 身上掉（05-update.js 的 BOSS 死亡分支）。
+        // 效果：总分 lg +1（即 score ×10）+ 已激活的每个密文版被动层数 +1，
+        // 见 07-ui.js 的 gainEvokerKey()。这里 apply() 留空——层数那半边
+        // 要遍历 G.passives，不适合塞进一个只接收 G 的纯函数里。
+        { id: 'evokerKey', name: '唤魔之钥', emoji: '🗝️', rarity: 'epic', hidden: true,
+          desc: '总分 lg +1，且已激活的密文版被动全部 +1 层', apply(G) {} },
+    ];
+
+    // v9.6: 旧波次变体和地图节点已移除，使用上方STAGE_TYPES和NODE_POOL
+
+    // v9.22: MAP_NODES 已删除——v9.6 起节点一律走 NODE_POOL，
+    // 这张表的 getMods() 没有任何调用点，treasure 关卡类型也由它带进死胡同。
+
+    // ---------- v9.10 属性提升选项 / v9.18 商店也卖这一套 ----------
+    // 原来是写在 07-ui.js 里的，v9.18 起 getMerchantStock() 也要用它，
+    // 所以挪到数据模块——否则「数据模块取 UI 模块的 const」是个看不见的顺序依赖。
+    // shopCost 是商店单价基准，实际售价再乘 (1 + 层数×0.06)。
+    const STAT_CHOICES = [
+        { id: 'atkUp',     label: '攻击强化', emoji: '⚔️', desc: '永久攻击+3',        color: '#ff8844', shopCost: 12,
+          // v9.32: 不再封顶（原 playerCap(2000)）。与 E01 一起构成玩家攻击力的两条增长路径，
+          // 两条现在都是无上限累加——玩家攻击力这件事上，「上限」已经不存在了。
+          apply() { G.buffs.atkUp += 3; setFeedback('⚔️ 攻击力永久+3！', '#ff8844'); } },
+        { id: 'heal',      label: '生命复苏', emoji: '💚', desc: '回复30%最大护盾',   color: '#44ff88', shopCost: 10,
+          apply() { const healAmt = Math.floor(G.player.maxHp * 0.3); G.player.hp = Math.min(G.player.maxHp, G.player.hp + healAmt);
+                    spawnParticles(G.player.x, G.player.y, '#44ff88', 12);
+                    showFloatingText(G.player.x, G.player.y - G.player.r, '+' + healAmt, '#44ff88');
+                    setFeedback('💚 回复' + healAmt + '护盾！', '#44ff88'); } },
+        { id: 'speedUp',   label: '疾步',     emoji: '💨', desc: '永久移速+5%',       color: '#88ddff', shopCost: 12,
+          apply() { G.buffs.speedUp = Math.min(G.buffs.speedUp + 0.05, playerCap(6)); setFeedback('💨 移速永久+5%！', '#88ddff'); } },
+        { id: 'trailUp',   label: '轨迹淬炼', emoji: '🐾', desc: '永久轨迹伤害+1',    color: '#ffdd44', shopCost: 14,
+          apply() { G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1, playerCap(400)); setFeedback('🐾 轨迹伤害永久+1！', '#ffdd44'); } },
+        // v9.18 新增两条
+        { id: 'trailWidth', label: '轨迹拓宽', emoji: '📏', desc: '永久轨迹宽度+1',   color: '#66dd88', shopCost: 14,
+          // v9.31: 原来这里封 60，而 E06 封 150——宽到 150 之后再拿这一项，
+          // Math.min(151, 60) 会一路砍回 60，净亏 90。记录里 L41/L66/L81/L86 四次实测
+          // 全是 150→60，第四次之后永久停在 54。现在与 E06 共用同一个软上限，
+          // 而且写成**只增不减**，保证这条路径永远不会把已有的宽度吃掉。
+          apply() { G.buffs.trailWidth = Math.max(G.buffs.trailWidth,
+              Math.min(G.buffs.trailWidth + 1, getTrailWidthCap()));
+              setFeedback('📏 轨迹宽度永久+1！', '#66dd88'); } },
+        // v9.20: 跟着基础血量一起缩到 30%（3 → 1）。不缩的话，塔基础血只剩
+        // 2/4/6 而这一项还加 3，一次购买就能把小环从 2 顶到 5——比削弱前还硬。
+        { id: 'turretHp',  label: '图腾加固', emoji: '🗼', desc: '图腾血量+1',        color: '#88aacc', shopCost: 14,
+          apply() { G.turretHpBonus = (G.turretHpBonus || 0) + 1;
+                    for (const t of G.turrets) { t.maxHp += 1; t.hp += 1; }   // 已有的塔一起加厚
+                    setFeedback('🗼 图腾血量+1！（含场上 ' + G.turrets.length + ' 座）', '#88aacc'); } },
+    ];
+
+    // ---------- v9.21 图腾扩容 ----------
+    // 不进 STAT_CHOICES——它不是商店商品，只在每层打完的奖励界面按小概率露脸
+    // （概率见 07-ui.js 的 showStatChoice）。放在这里是因为 UI 和模拟器都要用同一份。
+    const TURRET_SLOT_CHOICE = {
+        id: 'turretSlot', label: '图腾扩容', emoji: '🗼',
+        desc: '图腾上限+1',
+        color: '#ffdd66',
+        apply() {
+            G.maxTurrets = (G.maxTurrets || 10) + 1;
+            setFeedback('🗼 图腾上限 +1 → ' + G.maxTurrets + '！', '#ffdd66');
+            showNotification('🗼 图腾上限 +1', '#ffdd66', 200);
+        },
+    };
+
+    // ---------- v9.4 商人商品 / v9.18 经济重做 ----------
+    // v9.18 改动：
+    //   1. 删掉「精华提取」——花 5 精华返 15-25 是数学上的白送套利
+    //   2. 密文版出率降低（4 个槽位 → 2 个），增益与遗物出率升高
+    //   3. 增益就是每层奖励那套 STAT_CHOICES
+    // 价格**不随层数放大**：每层战斗精华已经硬顶在 8（后期 16），收入被钳住了，
+    // 价格再跟着层数涨就是双重紧缩，商店会变成看客。密文商人每 4 层才出现一次，
+    // 一轮攒下的 32 精华刚好够买一两件——这就是想要的节奏。
+    // 刷新逻辑见 refreshMerchantStock()：刷新也走这份生成流程。
+    function getMerchantStock() {
+        const stock = [];
+
+        // 密文版：各 1 张（原来各 2 张）
+        const pickedT = randomTrigger();   // v9.21: 走加权抽取；T08 权重 0.7，其余等权（T13 已于 v9.25 移出触发板）
+        const shuffledE = [...EFFECTS].sort(() => Math.random() - 0.5);
+        stock.push({ type: 'card', card: { ...pickedT, cardType: 'trigger' }, cost: 8, emoji: pickedT.emoji, label: pickedT.label, desc: '触发板' });
+        stock.push({ type: 'card', card: { ...shuffledE[0], cardType: 'effect' }, cost: 10, emoji: shuffledE[0].emoji, label: shuffledE[0].label, desc: '效果板' });
+
+        // 增益：与每层奖励同款，抽 2 个不重复的
+        const buffs = [...STAT_CHOICES].sort(() => Math.random() - 0.5).slice(0, 2);
+        for (const b of buffs) {
+            stock.push({ type: 'buff', buff: b, cost: b.shopCost, emoji: b.emoji, label: b.label, desc: b.desc + '（永久）' });
+        }
+
+        // 遗物：1 个保底，40% 再出一个（不重复）
+        const rareRelics = RELICS.filter(r => r.rarity === 'rare' || r.rarity === 'epic').sort(() => Math.random() - 0.5);
+        // 兜底：万一遗物表被改到没有 rare/epic，也不该让商店崩掉
+        const pool = rareRelics.length > 0 ? rareRelics : [...RELICS].sort(() => Math.random() - 0.5);
+        stock.push({ type: 'relic', relic: pool[0], cost: 35 + Math.floor(Math.random() * 20), emoji: pool[0].emoji, label: pool[0].name, desc: pool[0].desc });
+        if (pool[1] && Math.random() < 0.4) {
+            const r2 = pool[1];
+            stock.push({ type: 'relic', relic: r2, cost: 40 + Math.floor(Math.random() * 20), emoji: r2.emoji, label: r2.name, desc: r2.desc });
+        }
+
+        // 治疗
+        stock.push({ type: 'heal', cost: 12, emoji: '💚', label: '治疗药剂', desc: '回复40%护盾' });
+        return stock;
+    }
+
+    // ---------- v9.4 地形障碍 ----------
+    function generateTerrain() {
+        G.terrain = [];
+        const w = G.canvasWidth || 780, h = G.canvasHeight || 560;
+        const cx = w / 2, cy = h / 2;
+        // 核心周围安全区不生成
+        const safeR = 80;
+        const count = 3 + Math.floor(G.floor / 8);
+        for (let i = 0; i < count; i++) {
+            let tx, ty, tr;
+            let attempts = 0;
+            do {
+                tx = rand(40, w - 40);
+                ty = rand(40, h - 40);
+                tr = rand(20, 50);
+                attempts++;
+            } while (attempts < 20 && dist({ x: tx, y: ty }, { x: cx, y: cy }) < safeR + tr + 20);
+            if (attempts < 20) {
+                G.terrain.push({ x: tx, y: ty, r: tr, life: G.floor * 60 + 600, alpha: 0.4 });
+            }
+        }
+    }
+

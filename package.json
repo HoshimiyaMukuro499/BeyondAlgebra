@@ -6,9 +6,10 @@
   "type": "module",
   "scripts": {
     "build:game": "node web/bundle-game.mjs",
-    "build:web": "node web/bundle-game.mjs && node web/build.mjs",
-    "deploy": "node web/bundle-game.mjs && node web/build.mjs && npx wrangler pages deploy web/public --project-name=miwen-guiji --branch=main --commit-dirty=true",
-    "preview": "node web/bundle-game.mjs && node web/build.mjs && npx wrangler pages dev web/public",
+    "build:game4": "node web/bundle-game.mjs --src=4x",
+    "build:web": "node web/bundle-game.mjs && node web/bundle-game.mjs --src=4x && node web/build.mjs",
+    "deploy": "node web/bundle-game.mjs && node web/bundle-game.mjs --src=4x && node web/build.mjs && npx wrangler pages deploy web/public --project-name=miwen-guiji --branch=main --commit-dirty=true",
+    "preview": "node web/bundle-game.mjs && node web/bundle-game.mjs --src=4x && node web/build.mjs && npx wrangler pages dev web/public",
     "probe": "node web/bundle-game.mjs && node web/probe-9x.mjs",
     "sim": "node simCore.js"
   }

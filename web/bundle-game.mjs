@@ -1,4 +1,7 @@
-// 把 src/9x/ 下的模块拼装成自包含的单文件 HTML（密文轨迹demo<版本>.html）。
+// 把 src/<线>/ 下的模块拼装成自包含的单文件 HTML（密文轨迹demo<版本>.html）。
+//
+// 版本线用 `--src=` 指定：缺省 `9x`（9.x），`--src=4x` 即 4.x 减法版。
+// 两条线的源码树互相独立，各自的 meta.json 决定产物文件名，互不覆盖。
 //
 // 为什么是「拼接进同一个 <script>」而不是 ES modules：
 //   1. 作用域与拆分前完全一致——不需要 import/export，不必改动任何变量引用
@@ -9,7 +12,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SRC = path.join(ROOT, 'src', '9x');
+
+// 版本线：`--src=4x` → src/4x/，缺省 src/9x/（不改动任何现有命令的行为）
+const srcArg = process.argv.find((a) => a.startsWith('--src='));
+const SRC_DIR = srcArg ? srcArg.slice('--src='.length) : '9x';
+const SRC = path.join(ROOT, 'src', SRC_DIR);
+if (!fs.existsSync(SRC)) throw new Error(`找不到源码目录 src/${SRC_DIR}/`);
 
 // 只剥掉写入时补的那一个换行。多剥一次会吃掉模块末尾本来就有的空行，
 // 而模块边界恰好都是空行——会导致拼装产物比原文件少行。
@@ -24,7 +32,7 @@ const body = read(path.join(SRC, 'body.html'));
 const jsDir = path.join(SRC, 'js');
 const files = fs.readdirSync(jsDir).filter((f) => f.endsWith('.js'))
   .sort((a, b) => parseInt(a, 10) - parseInt(b, 10) || a.localeCompare(b));
-if (files.length === 0) throw new Error('src/9x/js 下没有任何模块');
+if (files.length === 0) throw new Error(`src/${SRC_DIR}/js 下没有任何模块`);
 
 const js = files.map((f) => read(path.join(jsDir, f))).join('\n');
 
@@ -52,14 +60,14 @@ const outFile = path.join(ROOT, `密文轨迹demo${meta.version}.html`);
 if (process.argv.includes('--check')) {
   const onDisk = fs.existsSync(outFile) ? fs.readFileSync(outFile, 'utf8') : null;
   if (onDisk === null) {
-    console.error(`✗ ${path.basename(outFile)} 不存在，先跑 npm run build:game`);
+    console.error(`✗ ${path.basename(outFile)} 不存在，先跑 npm run ${SRC_DIR === '9x' ? 'build:game' : 'build:game4'}`);
     process.exit(1);
   }
   if (onDisk !== out) {
-    console.error(`✗ ${path.basename(outFile)} 与 src/9x/ 不一致——产物被手改过，或是忘了重新构建`);
+    console.error(`✗ ${path.basename(outFile)} 与 src/${SRC_DIR}/ 不一致——产物被手改过，或是忘了重新构建`);
     process.exit(1);
   }
-  console.log(`✓ ${path.basename(outFile)} 与 src/9x/ 一致`);
+  console.log(`✓ ${path.basename(outFile)} 与 src/${SRC_DIR}/ 一致`);
 } else {
   fs.writeFileSync(outFile, out);
   const kb = (Buffer.byteLength(out) / 1024).toFixed(0);

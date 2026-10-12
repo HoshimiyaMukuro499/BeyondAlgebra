@@ -1,6 +1,6 @@
 // 《密文轨迹》网页版构建脚本
 //
-// 扫描仓库根目录，自动挑选 2.x（经典版）与 9.x（AI 拓展版）的最新版本，
+// 扫描仓库根目录，自动挑选 2.x（经典版）、9.x（AI 拓展版）与 4.x（减法版）的最新版本，
 // 复制到 web/public/ 下并生成首页。原版本文件不会被改动。
 //
 // 用法：node web/build.mjs
@@ -45,26 +45,31 @@ function latestOf(versions, major) {
 const versions = scanVersions();
 const classic = latestOf(versions, 2);
 const ai = latestOf(versions, 9);
+const reduce = latestOf(versions, 4);
 
 mkdirSync(join(publicDir, 'classic'), { recursive: true });
 mkdirSync(join(publicDir, 'ai'), { recursive: true });
+mkdirSync(join(publicDir, 'v4'), { recursive: true });
 
 // 原样复制，不做任何内容修改——部署产物与仓库文件逐字节一致
 copyFileSync(join(repoRoot, classic.file), join(publicDir, 'classic', 'index.html'));
 copyFileSync(join(repoRoot, ai.file), join(publicDir, 'ai', 'index.html'));
+copyFileSync(join(repoRoot, reduce.file), join(publicDir, 'v4', 'index.html'));
 
 const sizes = {
   classic: (statSync(join(publicDir, 'classic', 'index.html')).size / 1024).toFixed(0),
   ai: (statSync(join(publicDir, 'ai', 'index.html')).size / 1024).toFixed(0),
+  reduce: (statSync(join(publicDir, 'v4', 'index.html')).size / 1024).toFixed(0),
 };
 
-writeFileSync(join(publicDir, 'index.html'), landingPage(classic, ai, sizes), 'utf8');
+writeFileSync(join(publicDir, 'index.html'), landingPage(classic, ai, reduce, sizes), 'utf8');
 
 console.log(`经典版 2.x → /classic/  ← ${classic.file} (v${classic.version}, ${sizes.classic} KB)`);
 console.log(`AI 拓展版 9.x → /ai/     ← ${ai.file} (v${ai.version}, ${sizes.ai} KB)`);
+console.log(`减法版 4.x → /v4/       ← ${reduce.file} (v${reduce.version}, ${sizes.reduce} KB)`);
 console.log('首页已生成：/');
 
-function landingPage(classic, ai, sizes) {
+function landingPage(classic, ai, reduce, sizes) {
   return `<!DOCTYPE html>
 <html lang="zh">
 <head>
@@ -142,10 +147,22 @@ function landingPage(classic, ai, sizes) {
     </div>
     <div class="meta">${sizes.ai} KB · 单文件 · ${ai.file}</div>
   </a>
+  <a class="card" href="/v4/">
+    <div class="icon">✂️</div>
+    <div class="name">减法版</div>
+    <div class="ver">v${reduce.version}</div>
+    <div class="desc">
+      只留核心链路：移动 → 轨迹 → 闭环 → 图腾 → 组合<br>
+      其余系统全部挂开关，默认关闭<br>
+      按 F 打开开关面板，想开哪个开哪个
+    </div>
+    <div class="meta">${sizes.reduce} KB · 单文件 · ${reduce.file}</div>
+  </a>
 </div>
 <footer>
   <div>通用：WASD 移动 · 鼠标点手牌填槽 · 空格宣读组合 · H 机制图鉴</div>
   <div>9.x 追加：Shift 冲刺轨迹 · Q 终极技 · P 暂停（工作台批量宣读）</div>
+  <div>4.x 追加：F 开关面板 · 参数 ?flags=all 还原 9.x 的全部系统</div>
   <div>首次进入会播放新手教程「古老的石板 1-5」，可随时跳过</div>
 </footer>
 </body>
