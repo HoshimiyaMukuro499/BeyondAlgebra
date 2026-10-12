@@ -73,6 +73,8 @@ BeyondAlgebra/
 │   ├── meta.json              # 版本号与头部注释
 │   └── js/00-data.js … 10-sim.js   # 11 个模块，按序拼进同一个 <script>
 ├── src/4x/                    # 4.x 减法版的源码（与 src/9x/ 同构，各自独立演进）
+│   └── js/00-core.js … 10-sim.js   # 13 个模块，每个包成 IIFE + 命名空间，边界由 --check 机器检查
+│                                   # （比 9.x 多 00-core.js 与 00-flags.js：全局状态与功能开关）
 ├── simCore.js                 # 纯 Node.js 模拟引擎（零依赖）
 ├── analyzeSim.js              # 对局结果分析引擎（10 项指标）
 ├── simRunner.js               # Puppeteer 无头运行器
@@ -87,6 +89,7 @@ BeyondAlgebra/
 │   ├── VALUES_DESIGN.md       # 数值设计笔记：理解的地方（问题 → 设计 → 陷阱）
 │   ├── VALUES_LEGACY.md       # 旧版数值总表（v9.31 状态，存档不再维护）
 │   ├── EDITION.md             # 版本记录（按时间倒序）
+│   ├── PLAYTEST.md            # 真人试玩记录表（4.0 减法版的验证手段：一页纸、四个数）
 │   └── CLAUDE.md              # 代码结构索引与更新指南
 ├── 策划案.pdf / *.docx         # 策划文档
 └── 对局记录_*.txt              # 模拟引擎输出的对局数据

@@ -51,6 +51,8 @@ const Data = (function () {
     const RARE_CARD_MIN_CHANCE = 0.01;   // 第 40 层
     const RARE_CARD_MAX_CHANCE = 0.05;   // 第 80 层起封顶
     function rareChance() {
+        // 4.0: 关掉稀有卡就是恒 0——稀有卡只有 E15/E16/E17 三张，都从这里摸概率。
+        if (!G.flags.rareCards) return 0;
         if (G.floor < RARE_CARD_MIN_FLOOR) return 0;
         const t = Math.min(1, (G.floor - RARE_CARD_MIN_FLOOR) / 40);   // 40 → 80 层
         return RARE_CARD_MIN_CHANCE + (RARE_CARD_MAX_CHANCE - RARE_CARD_MIN_CHANCE) * t;
@@ -381,6 +383,18 @@ const Data = (function () {
         const skip = o.exclude || [];
         const wantBoss = o.bossOnly;
         const isElite = wantBoss === false;
+        // 4.0: 精英与 BOSS 的词缀各挂一个开关。关掉就是空表——调用方本来就按
+        // 「可能一条都没有」写（词缀本来就可能抽不到），所以返回 [] 是安全的。
+        // 圈层 / 封印 / 敌图腾都靠精英词缀带出来，所以 affixElite 一并把它们关掉。
+        //
+        // ⚠️ 判定「生成的是哪一种」不能只看 bossOnly：**两个真正的调用点传的都是 `'any'`**
+        // （02-combat:516 精英 / :669 BOSS），那说的是「全池都能抽」，两种都能用——
+        // 只看它的话这两个开关就等于没接。所以调用方现在显式带 `kind`；
+        // 没带 kind 的 'any'（只剩探针）按「两边都关才作废」处理。
+        const kind = o.kind || (wantBoss === false ? 'elite' : wantBoss === true ? 'boss' : 'any');
+        const off = { elite: !G.flags.affixElite, boss: !G.flags.affixBoss,
+                      any: !G.flags.affixElite && !G.flags.affixBoss };
+        if (off[kind]) return [];
         const pool = AFFIXES.filter(a =>
             G.floor >= a.minWave
             && skip.indexOf(a.id) < 0
@@ -487,7 +501,11 @@ const Data = (function () {
     // 玩家的数值终于是**看得见地涨**，而不是早早冻住。
     // 硬闸门 1e15 / 1e9 保留，但从此只是纯防溢出。
     const PLAYER_CAP_RATE = 0.015;
-    function playerCap(base) { return base * (1 + G.floor * PLAYER_CAP_RATE); }
+    // 4.0: softCap 关掉就是「上限恒等于基准」——成长曲线还在涨，但每个上限都钉在基准值上。
+    function playerCap(base) {
+        if (!G.flags.softCap) return base;
+        return base * (1 + G.floor * PLAYER_CAP_RATE);
+    }
     // 轨迹宽度只有这一个上限——E06（02-combat.js）与「轨迹拓宽」（下面的 STAT_CHOICES）
     // 共用它。v9.31 之前两处各写一个数（60 与 150），宽到 150 之后再拿「轨迹拓宽」会被
     // Math.min(151, 60) 一路砍回 60。
@@ -778,7 +796,9 @@ const Data = (function () {
 
         // 密文版：各 1 张（原来各 2 张）
         const pickedT = randomTrigger();   // v9.21: 走加权抽取；T08 权重 0.7，其余等权（T13 已于 v9.25 移出触发板）
-        const shuffledE = [...EFFECTS].sort(() => Math.random() - 0.5);
+        // 4.0: 商人的效果板**不走 rareChance()**，是直接从 EFFECTS 里洗牌的。所以关掉
+        // 稀有卡时得在这里单独滤一遍，否则会出现「稀有卡关了，商人还在卖 E15」。
+        const shuffledE = [...EFFECTS].filter(e => G.flags.rareCards || !e.rare).sort(() => Math.random() - 0.5);
         stock.push({ type: 'card', card: { ...pickedT, cardType: 'trigger' }, cost: 8, emoji: pickedT.emoji, label: pickedT.label, desc: '触发板' });
         stock.push({ type: 'card', card: { ...shuffledE[0], cardType: 'effect' }, cost: 10, emoji: shuffledE[0].emoji, label: shuffledE[0].label, desc: '效果板' });
 
@@ -788,14 +808,16 @@ const Data = (function () {
             stock.push({ type: 'buff', buff: b, cost: b.shopCost, emoji: b.emoji, label: b.label, desc: b.desc + '（永久）' });
         }
 
-        // 遗物：1 个保底，40% 再出一个（不重复）
-        const rareRelics = RELICS.filter(r => r.rarity === 'rare' || r.rarity === 'epic').sort(() => Math.random() - 0.5);
-        // 兜底：万一遗物表被改到没有 rare/epic，也不该让商店崩掉
-        const pool = rareRelics.length > 0 ? rareRelics : [...RELICS].sort(() => Math.random() - 0.5);
-        stock.push({ type: 'relic', relic: pool[0], cost: 35 + Math.floor(Math.random() * 20), emoji: pool[0].emoji, label: pool[0].name, desc: pool[0].desc });
-        if (pool[1] && Math.random() < 0.4) {
-            const r2 = pool[1];
-            stock.push({ type: 'relic', relic: r2, cost: 40 + Math.floor(Math.random() * 20), emoji: r2.emoji, label: r2.name, desc: r2.desc });
+        // 遗物：1 个保底，40% 再出一个（不重复）。4.0: 关掉遗物就整块不出货。
+        if (G.flags.relics) {
+            const rareRelics = RELICS.filter(r => r.rarity === 'rare' || r.rarity === 'epic').sort(() => Math.random() - 0.5);
+            // 兜底：万一遗物表被改到没有 rare/epic，也不该让商店崩掉
+            const pool = rareRelics.length > 0 ? rareRelics : [...RELICS].sort(() => Math.random() - 0.5);
+            stock.push({ type: 'relic', relic: pool[0], cost: 35 + Math.floor(Math.random() * 20), emoji: pool[0].emoji, label: pool[0].name, desc: pool[0].desc });
+            if (pool[1] && Math.random() < 0.4) {
+                const r2 = pool[1];
+                stock.push({ type: 'relic', relic: r2, cost: 40 + Math.floor(Math.random() * 20), emoji: r2.emoji, label: r2.name, desc: r2.desc });
+            }
         }
 
         // 治疗
@@ -806,6 +828,9 @@ const Data = (function () {
     // ---------- v9.4 地形障碍 ----------
     function generateTerrain() {
         G.terrain = [];
+        // 4.0: 守卫放在函数里而不是调用点——先清空再判，这样半路关掉开关也不会
+        // 留着一地上一层的障碍。
+        if (!G.flags.terrain) return;
         const w = G.canvasWidth || 780, h = G.canvasHeight || 560;
         const cx = w / 2, cy = h / 2;
         // 核心周围安全区不生成

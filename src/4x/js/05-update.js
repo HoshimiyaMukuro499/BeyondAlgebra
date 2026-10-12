@@ -201,6 +201,8 @@ const Update = (function () {
     // 下界就是「不许落在自己脚下」，否则又变成 v9.24 那个「贴着 BOSS 走」的老样子。
     // 落定之后这个圈与 m 再无关系。
     function spawnAffixZone(m, kind) {
+        // 4.0: 守入口而不是守三个调用点（:301 火圈 / :306 削减圈 / 减速圈）。
+        if (!G.flags.circleZones) return false;
         if (typeof affixDef !== 'function') return false;
         const def = affixDef(kind);
         const cfg = def && (def.zone || def.fireZone);
@@ -556,7 +558,9 @@ const Update = (function () {
             const trailLen = 6;
             const t = addTrail(p.x - tdx * trailLen, p.y - tdy * trailLen, p.x + tdx * trailLen, p.y + tdy * trailLen);
             // v9.7: 冲刺轨迹（Shift键）——更宽更亮
-            if (G.keys.shift) {
+            // 4.0: 冲刺的全部效果就是这条更宽的轨迹（伤害 ×2.5 由 isSprint 标记带出，
+            // 见下面 :752），所以这一个开关就够。
+            if (G.keys.shift && G.flags.sprintTrails) {
                 const sprintLen = 12;
                 const st = { x1: p.x - tdx * sprintLen, y1: p.y - tdy * sprintLen, x2: p.x + tdx * sprintLen, y2: p.y + tdy * sprintLen, life: 180, layer: 2, trailType: G.activeTrailType, isSprint: true };
                 G.sprintTrails.push(st);
@@ -1050,8 +1054,11 @@ const Update = (function () {
             if (G.notifications[i].life <= 0) G.notifications.splice(i, 1);
         }
 
+        // 4.0: 危险区中途被关掉时，已经落地的那几个要**当场清掉**——否则它们既不再
+        // 生成也不再消失，会一直挂在地图上烧人，等于开关没关。
+        if (!G.flags.hazards && G.hazardZones.length > 0) G.hazardZones.length = 0;
         // v9.3: 环境危险区（40波起）
-        if (G.floor >= 40) {
+        if (G.floor >= 40 && G.flags.hazards) {
             G.hazardTimer++;
             if (G.hazardTimer >= 900) { G.hazardTimer = 0;
                 if (G.hazardZones.length < 5) {
@@ -1184,6 +1191,10 @@ const Update = (function () {
 
     // ---------- v9.7 围剿检测 ----------
     function checkEnclosure() {
+        // 4.0: 守入口省掉整趟 8 方向 × 全轨迹的扫描（每 30 帧一次，是这里最贵的一段）。
+        // Tutorial.emit('enclosure') 在这个块里，关掉之后教程那一步也会被 03-tutorial 的
+        // flag 跳过机制整步略过，两边一致。
+        if (!G.flags.enclosure) return;
         // 简化围剿：检查是否有怪物被轨迹包围
         // 方法：对每个怪物，检查其周围8个方向是否都有轨迹
         for (const m of G.monsters) {

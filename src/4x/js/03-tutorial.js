@@ -44,7 +44,7 @@ const Tutor = (function () {
                 { on: 'move', n: 300, hold: 150,
                   text: '怪物会一直朝核心逼近，路上会自己绕开石头——它们不会停。',
                   fallback: '先随便走一走，比如绕一个方形。' },
-                { on: 'sprint', gate: true, point: 'player', hold: 180,
+                { on: 'sprint', gate: true, flag: 'sprintTrails', point: 'player', hold: 180,
                   text: '按住 Shift 冲刺：轨迹更宽、更亮，伤害 ×2.5。这是你最快的输出手段。',
                   fallback: '按住键盘左下角的 Shift 键，同时按 W A S D 移动。' },
                 { on: 'kill', n: 1, hold: 150,
@@ -94,7 +94,7 @@ const Tutor = (function () {
                   fallback: '按下键盘的空格键。' },
                 { on: 'event', name: 'combine', hold: 180,
                   text: '两张牌消耗了，变成永久被动：怪物踩到轨迹时，全场怪物互相伤害。' },
-                { on: 'event', name: 'chair', point: 'player', hold: 150,
+                { on: 'event', name: 'chair', flag: 'chair', point: 'player', hold: 150,
                   text: '🦽 轮椅组合「轨迹反噬」！看你的轨迹——它变成红色火焰了。' },
                 { on: 'after', d: 40, hold: 180,
                   text: '6 组特定搭配会激活轮椅组合：额外数值加成 + 轨迹外观改变。它们是设计者明说的「通关答案」。' },
@@ -102,7 +102,7 @@ const Tutor = (function () {
                   autofill: ['T07', 'E12'],
                   text: '手牌里现在有 🎯射击命中 和 ⚡闪电链——再填一次槽位，按 空格 宣读。',
                   fallback: '点手牌里的 🎯射击命中 和 ⚡闪电链，然后按空格。' },
-                { on: 'event', name: 'combine2', hold: 160,
+                { on: 'event', name: 'combine2', flag: 'chair', hold: 160,
                   text: '⚡ 轮椅组合「连锁风暴」！轨迹变金色，射速 +2，子弹变成闪电链。' },
                 { on: 'after', d: 40, hold: 180,
                   text: '回头看你第 2 层的塔：T12 绑的效果板决定图腾类型，E01→速射 / E12→雷电 / E13→冰霜 / E06→轨迹。' },
@@ -169,14 +169,14 @@ const Tutor = (function () {
                   fallback: '让怪物靠近中央的核心，看它撞上去会怎样。' },
                 { on: 'essence', n: 1, hold: 150,
                   text: '💎 精华是货币，击杀获得。攒够了去 🧙 商人 那里买牌、买遗物。' },
-                { on: 'after', d: 40, gate: true, hold: 160,
+                { on: 'after', d: 40, gate: true, flag: 'ultimate', hold: 160,
                   text: '⚡ 你的终极技已充满。按 Q 释放「轨迹风暴」——引爆全场轨迹，全体眩晕 2 秒。',
                   fallback: '按键盘的 Q 键。' },
-                { on: 'event', name: 'ultimate', hold: 160,
+                { on: 'event', name: 'ultimate', flag: 'ultimate', hold: 160,
                   text: '充能不看伤害，按固定速度回：回满要 25 秒 ÷ (1 + 楼层/50)。第 40 层起再快 ×1.5。' },
-                { on: 'after', d: 40, hold: 160,
+                { on: 'after', d: 40, flag: 'enclosure', hold: 160,
                   text: '🔒 围剿：怪物周围 8 个方向被轨迹封住 6 个以上，就会触发包围伤害 + 眩晕。' },
-                { on: 'event', name: 'enclosure', needsMob: true, hold: 150,
+                { on: 'event', name: 'enclosure', flag: 'enclosure', needsMob: true, hold: 150,
                   text: '包围成功！锁死它们的走位——这一招在后期很关键。',
                   fallback: '用轨迹把一只怪围起来，八个方向堵住六个以上。' },
                 { on: 'after', d: 40, hold: 150,
@@ -478,6 +478,9 @@ const Tutor = (function () {
                 if (!this.seen) this.startCfg(TUTORIAL_OUTRO, G.floor);
                 return;
             }
+            // 4.0: 教程开关关掉 = 一次也不演。守在这里而不是在 startFloor()——出怪接管的
+            // 标记 tookOver 也要跟着保持 false，否则那几层会等着一个永远不会来的脚本。
+            if (!G.flags.tutorial) return;
             if (this.seen || this.finished) return;
             const cfg = TUTORIAL_FLOORS[G.floor];
             if (!cfg) return;
@@ -653,10 +656,31 @@ const Tutor = (function () {
                 return;
             }
 
-            const next = this.idx + 1;
+            let next = this.idx + 1;
+            // 4.0: 声明了 flag 的步骤，开关一关就**整步跳过**——既不播字幕（免得玩家读到
+            // 一段「按 Q」的说明而 Q 在这个配置下什么也不做），也不去等一个永远不可能
+            // 发生的触发条件。不跳的话每步都要干等 45 秒保底超时（TUTORIAL_TIMEOUT +
+            // TUTORIAL_FORCE，见 02-combat.js:776），四五步攒起来就是几分钟空转。
+            while (next < this.cfg.steps.length) {
+                const sk = this.cfg.steps[next];
+                if (!sk.flag || G.flags[sk.flag]) break;
+                // 跳过的门控步要记得销账，否则 gateLeft 永远扣不完（gateClosed() 是死代码，
+                // 但别给下一个人埋雷）。
+                if (sk.gate && this.gateLeft > 0) this.gateLeft--;
+                next++;
+            }
+            // 跳掉的步骤算「已消费」，idx 得跟着前进——pendingScript() / holdFloor() 都是
+            // 从 this.idx + 1 往后扫的，idx 留在原地会把跳过的 spawn 又当成待办，
+            // 于是 clearCondition() 永远不成立，教程卡在「清空一层」上。
+            this.idx = next - 1;
             if (next >= this.cfg.steps.length) {
                 if (this.cfg.next) {
-                    const nx = this.cfg.next === 'NODEMAP' ? TUTORIAL_NODEMAP : null;
+                    // 4.0: 关掉地图节点时这一节演不了——它的退场条件就是「玩家在节点地图上
+                    // 选一次路」（07-ui.js:433 选完置 outroPending）。没有地图就没人选，
+                    // 教程会永远停在沙盒配置里不收尾。直接跳到收尾字幕。
+                    const nx = this.cfg.next === 'NODEMAP'
+                        ? (G.flags.mapNodes ? TUTORIAL_NODEMAP : TUTORIAL_OUTRO)
+                        : null;
                     if (nx) { this.startCfg(nx, this.floor); }
                     return;
                 }
@@ -703,6 +727,10 @@ const Tutor = (function () {
         },
 
         replay() {
+            // 4.0: 教程开关关着时，图鉴里这颗「重看教程」就是个死按钮（onFloorStart 会直接
+            // 返回）。玩家既然明确点了重看，就把开关打开——setFlag 会写回 localStorage，
+            // 面板下次打开也是勾上的，不会出现「按钮没反应」。
+            if (!G.flags.tutorial) Flags.setFlag('tutorial', true);
             this.seen = false;
             this.finished = false;
             Main.resetGame();   // reset() 会把 restarted 一并清掉
@@ -802,7 +830,10 @@ const Tutor = (function () {
     // 教程角标 / 图鉴要能点击，所以教程期间强制放开 canvas 的鼠标事件
     function tutorialSyncPointer() {
         if (G.simMode) return;
-        const want = G.mapMode || Tutorial.active || Tutorial.codexOpen || !Tutorial.seen;
+        // 4.0: 教程关掉时最后一个条件要摘掉——否则「还没看过教程」会一直为真，canvas 的
+        // 鼠标事件被永久放开，挡住下面那层的正常交互。
+        const want = G.mapMode || Tutorial.active || Tutorial.codexOpen
+            || (!Tutorial.seen && G.flags.tutorial);
         setCanvasPointer(want);
     }
 

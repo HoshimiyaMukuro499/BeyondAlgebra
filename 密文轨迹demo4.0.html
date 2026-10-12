@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>密文轨迹 demo 4.0</title>
-    <!-- v4.0（4.x 减法版首版）。从 v9.32 分叉出来的一条**并行产品线**，源码在 src/4x/（src/9x/ 原地冻结，不再改动，9.32 仍可重建）。这一版**不新增任何玩法**，只做两件事。(1) FEATURE_FLAG——所有不在核心链路（移动→轨迹→闭环→图腾→组合）上的系统全部挂上开关并**默认关闭**：遗物 / 命运抉择 / 精英词缀 / BOSS 专属词缀 / 圈层 / 轮椅组合 / 地图节点（含商人、休整）/ 属性三选一 / 终极技 / 消除 / 稀有卡 / 唤魔者 / 槽满自动宣读 / 围剿 / 环境危险区 / 地形 / 冲刺轨迹 / 射击怪 / 职业选择 / 软上限。只有「新手教程」与「调试模式」默认开——教程与 02/04/05/07/09 五个模块耦合，关它要动五处调用方；调试模式是开关面板自身的入口。按 F 打开开关面板逐条开、即时生效、写回 localStorage；URL 参数 ?flags=<逗号分隔> 与 ?flags=all 可覆盖，其中 ?flags=all 让本版行为与 v9.32 逐条一致（等价性回归用）。开关读数是 G.flags，取值优先级 URL 参数 > localStorage > 默认。(2) 模块边界——11 个模块各自包成 IIFE 并返回命名空间（Data/State/Combat/Tutorial/Trail/Update/Render/UI/Main/Events/Sim），跨模块符号在模块开头的 import 前言里显式解构，因此模块内部调用点一行未改；处在循环依赖上的符号不解构，改走命名空间（见 DESIGN 说明）。npm run build:game4 构建，web/bundle-game.mjs --check 除一致性外还会检查每个模块的自由标识符是否都出现在 import 前言或命名空间前缀里——写错名字会当场构建失败，边界因此不再只存在于注释里。注：本版**未**处理 v9.3x 时期的版本考古注释（原计划第 3 条），它们原样保留。 -->
+    <!-- v4.0（4.x 减法版首版）。从 v9.32 分叉出来的一条**并行产品线**，源码在 src/4x/（src/9x/ 原地冻结，不再改动，9.32 仍可重建）。这一版**不新增任何玩法**，只做两件事。(1) FEATURE_FLAG——所有不在核心链路（移动→轨迹→闭环→图腾→组合）上的系统全部挂上开关并**默认关闭**：遗物 / 命运抉择 / 精英词缀 / BOSS 专属词缀 / 圈层 / 轮椅组合 / 地图节点（含商人、休整）/ 属性三选一 / 终极技 / 消除 / 稀有卡 / 唤魔者 / 槽满自动宣读 / 围剿 / 环境危险区 / 地形 / 冲刺轨迹 / 射击怪 / 职业选择 / 软上限。只有「新手教程」与「调试模式」默认开——教程与 02/04/05/07/09 五个模块耦合，关它要动五处调用方；调试模式是开关面板自身的入口。按 F 打开开关面板逐条开、即时生效、写回 localStorage（F 键故意不受「调试模式」开关管，否则关掉调试台就再也开不回来了）；URL 参数 ?flags=<逗号分隔> 与 ?flags=all / ?flags=none 可覆盖，其中 ?flags=all 让本版行为与 v9.32 逐条一致（等价性回归用），?flags=none 是这一版真正的默认体验。开关读数是 G.flags，取值优先级 URL 参数 > localStorage > 默认。(2) 模块边界——13 个模块各自包成 IIFE 并返回命名空间（Core/Flags/Data/State/Combat/Tutorial/Trail/Update/Render/UI/Main/Events/Sim，Sim 必须排在最后），跨模块符号在模块开头的 import 前言里显式解构，因此模块内部调用点一行未改；处在循环依赖上的符号不解构，改走命名空间（见 DESIGN 说明）。npm run build:game4 构建，web/bundle-game.mjs --check 除一致性外还会检查每个模块的自由标识符是否都出现在 import 前言或命名空间前缀里——写错名字会当场构建失败，边界因此不再只存在于注释里。注：本版**未**处理 v9.3x 时期的版本考古注释（原计划第 3 条），它们原样保留。 -->
 
     <style>
         * {
@@ -592,6 +592,69 @@
             pointer-events: auto;
         }
         .btn-leave-shop:hover { background: #1f3145; border-color: #8ab0d0; }
+
+        /* 4.0 功能开关面板（F） */
+        .flag-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            z-index: 140;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            gap: 8px;
+            padding: 16px;
+        }
+        .flag-overlay.active { display: flex; }
+        .flag-overlay h3 { color: #ffb347; font-size: 20px; }
+        .flag-hint {
+            color: #8aa3c0;
+            font-size: 12px;
+            max-width: 620px;
+            text-align: center;
+            line-height: 1.6;
+        }
+        .flag-hint-dim { color: #5a7a9a; font-size: 11px; }
+        .flag-row {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 6px 14px;
+            max-width: 660px;
+            width: 100%;
+            max-height: 52vh;
+            overflow-y: auto;
+            pointer-events: auto;
+            margin: 4px 0;
+        }
+        .flag-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            background: #1a2635;
+            border: 1px solid #2a3f57;
+            border-radius: 10px;
+            padding: 7px 10px;
+            cursor: pointer;
+            transition: 0.15s;
+        }
+        .flag-item:hover { border-color: #3a5575; background: #21303f; }
+        .flag-item input { margin-top: 3px; cursor: pointer; flex: 0 0 auto; }
+        .flag-text { display: flex; flex-direction: column; min-width: 0; }
+        .flag-name { font-size: 13px; color: #e0e8f0; font-weight: 600; }
+        .flag-desc { font-size: 10px; color: #8aa3c0; line-height: 1.4; }
+        .flag-actions { display: flex; gap: 10px; margin-top: 4px; }
+        .btn-flag {
+            background: #2a3f57;
+            border: 1px solid #5a7a9a;
+            color: #cfe0f0;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+        .btn-flag:hover { background: #35506e; border-color: #8ab0d0; }
 
         /* v9.4 遗物展示 */
         .relic-box {
@@ -1185,6 +1248,20 @@
     </div>
 </div>
 
+<!-- 4.0 功能开关面板（按 F）。行由 src/4x/js/00-flags.js 按开关表生成 -->
+<div class="flag-overlay" id="flagOverlay">
+    <h3>⚙️ 功能开关</h3>
+    <p class="flag-hint">这一版默认只留核心循环（移动 → 轨迹 → 闭环 → 图腾 → 组合）。想要哪个系统，勾上它。</p>
+    <p class="flag-hint">多数开关即时生效（关掉时已在地上生效的东西会一起清掉）；<b>职业选择</b>只在开局读一次，改了要下一局才换。改动会记住。</p>
+    <div class="flag-row" id="flagRow"></div>
+    <div class="flag-actions">
+        <button class="btn-flag" id="flagAllOn">全开（= 9.32）</button>
+        <button class="btn-flag" id="flagAllOff">全关</button>
+        <button class="btn-flag" id="flagClose">关闭（F）</button>
+    </div>
+    <p class="flag-hint flag-hint-dim">也可以用网址参数：?flags=all / ?flags=none / ?flags=relics,fate</p>
+</div>
+
 <script>
 // ============================================================
 //  00-core —— 全局状态与基础工具（4.0 新增）
@@ -1470,6 +1547,8 @@ const Data = (function () {
     const RARE_CARD_MIN_CHANCE = 0.01;   // 第 40 层
     const RARE_CARD_MAX_CHANCE = 0.05;   // 第 80 层起封顶
     function rareChance() {
+        // 4.0: 关掉稀有卡就是恒 0——稀有卡只有 E15/E16/E17 三张，都从这里摸概率。
+        if (!G.flags.rareCards) return 0;
         if (G.floor < RARE_CARD_MIN_FLOOR) return 0;
         const t = Math.min(1, (G.floor - RARE_CARD_MIN_FLOOR) / 40);   // 40 → 80 层
         return RARE_CARD_MIN_CHANCE + (RARE_CARD_MAX_CHANCE - RARE_CARD_MIN_CHANCE) * t;
@@ -1800,6 +1879,18 @@ const Data = (function () {
         const skip = o.exclude || [];
         const wantBoss = o.bossOnly;
         const isElite = wantBoss === false;
+        // 4.0: 精英与 BOSS 的词缀各挂一个开关。关掉就是空表——调用方本来就按
+        // 「可能一条都没有」写（词缀本来就可能抽不到），所以返回 [] 是安全的。
+        // 圈层 / 封印 / 敌图腾都靠精英词缀带出来，所以 affixElite 一并把它们关掉。
+        //
+        // ⚠️ 判定「生成的是哪一种」不能只看 bossOnly：**两个真正的调用点传的都是 `'any'`**
+        // （02-combat:516 精英 / :669 BOSS），那说的是「全池都能抽」，两种都能用——
+        // 只看它的话这两个开关就等于没接。所以调用方现在显式带 `kind`；
+        // 没带 kind 的 'any'（只剩探针）按「两边都关才作废」处理。
+        const kind = o.kind || (wantBoss === false ? 'elite' : wantBoss === true ? 'boss' : 'any');
+        const off = { elite: !G.flags.affixElite, boss: !G.flags.affixBoss,
+                      any: !G.flags.affixElite && !G.flags.affixBoss };
+        if (off[kind]) return [];
         const pool = AFFIXES.filter(a =>
             G.floor >= a.minWave
             && skip.indexOf(a.id) < 0
@@ -1906,7 +1997,11 @@ const Data = (function () {
     // 玩家的数值终于是**看得见地涨**，而不是早早冻住。
     // 硬闸门 1e15 / 1e9 保留，但从此只是纯防溢出。
     const PLAYER_CAP_RATE = 0.015;
-    function playerCap(base) { return base * (1 + G.floor * PLAYER_CAP_RATE); }
+    // 4.0: softCap 关掉就是「上限恒等于基准」——成长曲线还在涨，但每个上限都钉在基准值上。
+    function playerCap(base) {
+        if (!G.flags.softCap) return base;
+        return base * (1 + G.floor * PLAYER_CAP_RATE);
+    }
     // 轨迹宽度只有这一个上限——E06（02-combat.js）与「轨迹拓宽」（下面的 STAT_CHOICES）
     // 共用它。v9.31 之前两处各写一个数（60 与 150），宽到 150 之后再拿「轨迹拓宽」会被
     // Math.min(151, 60) 一路砍回 60。
@@ -2197,7 +2292,9 @@ const Data = (function () {
 
         // 密文版：各 1 张（原来各 2 张）
         const pickedT = randomTrigger();   // v9.21: 走加权抽取；T08 权重 0.7，其余等权（T13 已于 v9.25 移出触发板）
-        const shuffledE = [...EFFECTS].sort(() => Math.random() - 0.5);
+        // 4.0: 商人的效果板**不走 rareChance()**，是直接从 EFFECTS 里洗牌的。所以关掉
+        // 稀有卡时得在这里单独滤一遍，否则会出现「稀有卡关了，商人还在卖 E15」。
+        const shuffledE = [...EFFECTS].filter(e => G.flags.rareCards || !e.rare).sort(() => Math.random() - 0.5);
         stock.push({ type: 'card', card: { ...pickedT, cardType: 'trigger' }, cost: 8, emoji: pickedT.emoji, label: pickedT.label, desc: '触发板' });
         stock.push({ type: 'card', card: { ...shuffledE[0], cardType: 'effect' }, cost: 10, emoji: shuffledE[0].emoji, label: shuffledE[0].label, desc: '效果板' });
 
@@ -2207,14 +2304,16 @@ const Data = (function () {
             stock.push({ type: 'buff', buff: b, cost: b.shopCost, emoji: b.emoji, label: b.label, desc: b.desc + '（永久）' });
         }
 
-        // 遗物：1 个保底，40% 再出一个（不重复）
-        const rareRelics = RELICS.filter(r => r.rarity === 'rare' || r.rarity === 'epic').sort(() => Math.random() - 0.5);
-        // 兜底：万一遗物表被改到没有 rare/epic，也不该让商店崩掉
-        const pool = rareRelics.length > 0 ? rareRelics : [...RELICS].sort(() => Math.random() - 0.5);
-        stock.push({ type: 'relic', relic: pool[0], cost: 35 + Math.floor(Math.random() * 20), emoji: pool[0].emoji, label: pool[0].name, desc: pool[0].desc });
-        if (pool[1] && Math.random() < 0.4) {
-            const r2 = pool[1];
-            stock.push({ type: 'relic', relic: r2, cost: 40 + Math.floor(Math.random() * 20), emoji: r2.emoji, label: r2.name, desc: r2.desc });
+        // 遗物：1 个保底，40% 再出一个（不重复）。4.0: 关掉遗物就整块不出货。
+        if (G.flags.relics) {
+            const rareRelics = RELICS.filter(r => r.rarity === 'rare' || r.rarity === 'epic').sort(() => Math.random() - 0.5);
+            // 兜底：万一遗物表被改到没有 rare/epic，也不该让商店崩掉
+            const pool = rareRelics.length > 0 ? rareRelics : [...RELICS].sort(() => Math.random() - 0.5);
+            stock.push({ type: 'relic', relic: pool[0], cost: 35 + Math.floor(Math.random() * 20), emoji: pool[0].emoji, label: pool[0].name, desc: pool[0].desc });
+            if (pool[1] && Math.random() < 0.4) {
+                const r2 = pool[1];
+                stock.push({ type: 'relic', relic: r2, cost: 40 + Math.floor(Math.random() * 20), emoji: r2.emoji, label: r2.name, desc: r2.desc });
+            }
         }
 
         // 治疗
@@ -2225,6 +2324,9 @@ const Data = (function () {
     // ---------- v9.4 地形障碍 ----------
     function generateTerrain() {
         G.terrain = [];
+        // 4.0: 守卫放在函数里而不是调用点——先清空再判，这样半路关掉开关也不会
+        // 留着一地上一层的障碍。
+        if (!G.flags.terrain) return;
         const w = G.canvasWidth || 780, h = G.canvasHeight || 560;
         const cx = w / 2, cy = h / 2;
         // 核心周围安全区不生成
@@ -2264,6 +2366,216 @@ const Data = (function () {
     };
 })();
 
+// ============================================================
+//  00-flags —— 4.0 的功能开关（「减法」的机制本体）
+// ============================================================
+// 4.0: 9.x 一路加到 9.32，第一次玩的人能记住的系统大概只有三个。这一版**不新增任何玩法**，
+// 而是给每个「不在核心链路（移动 → 轨迹 → 闭环 → 图腾 → 组合）上」的系统挂一个开关，
+// 并且**默认全部关闭**。开关是加法——想玩哪个自己打开。
+//
+// 唯一的读取点是 `G.flags.<名字>`。这一条是刻意的：只有一个落点，就能一处查清
+// 「关掉某系统之后，代码里还剩哪些地方在碰它」。
+//
+// 读数优先级：URL 参数 > localStorage > 默认值。
+//   ?flags=all          全开（等价性开关：全开时 4.0 必须与 9.32 行为一致）
+//   ?flags=none         全关
+//   ?flags=relics,fate  只开这两个，其余全关（**穷举式**，故意不再叠加上一步的结果）
+// URL 是穷举的，是为了让试玩和探针都能一句话把配置钉死，不受上次点的开关影响。
+//
+// 边界见 web/scope-check.mjs。本模块只依赖 Core（要往 `G.flags` 上挂东西）。
+const Flags = (function () {
+    const { G } = Core;
+
+    // key        读取用的名字（G.flags.key）
+    // label      面板上显示的名字
+    // desc       一句话：关掉之后会少什么
+    // defaultOn  默认值。只有教程与调试台默认开——教程是第一次游玩的门面，
+    //            关掉省不下认知负担却要动五个模块；调试台是开发工具。
+    //
+    // 顺序 = 面板上的顺序，按「关掉的收益 ÷ 改动成本」排。
+    const FEATURE_FLAGS = [
+        { key: 'relics', label: '遗物', desc: '不掉遗物，HUD 那一栏空着', defaultOn: false },
+        { key: 'fate', label: '命运抉择', desc: '每 10 层不再三选一，直接进下一层', defaultOn: false },
+        { key: 'affixElite', label: '精英词缀', desc: '精英不带词条（连带圈层/封印/敌图腾）', defaultOn: false },
+        { key: 'affixBoss', label: 'BOSS 专属词缀', desc: 'BOSS 不带词条', defaultOn: false },
+        { key: 'circleZones', label: '圈层', desc: '不掉削减圈/减速圈/火焰圈', defaultOn: false },
+        { key: 'chair', label: '轮椅组合', desc: '少一组保底组合与轨迹皮肤', defaultOn: false },
+        { key: 'mapNodes', label: '地图节点', desc: '不出路线图；商人与休整一并消失', defaultOn: false },
+        { key: 'statChoice', label: '属性三选一', desc: '每 5 层没有属性提升', defaultOn: false },
+        { key: 'ultimate', label: '终极技', desc: '没有 Q、没有充能条', defaultOn: false },
+        { key: 'eliminate', label: '消除', desc: '没有 R、没有冷却环', defaultOn: false },
+        { key: 'rareCards', label: '稀有卡', desc: '抽不到 E15/E16/E17（稀有触发板·唤魔者也一起没了；商人不卖）', defaultOn: false },
+        { key: 'evoker', label: '唤魔者', desc: '抽不到 T14，抽到也宣读无效', defaultOn: false },
+        { key: 'autoUpgrade', label: '槽满自动宣读', desc: '手牌只攒不花，得自己动手合', defaultOn: false },
+        { key: 'enclosure', label: '围剿', desc: '没有围剿奖励', defaultOn: false },
+        { key: 'hazards', label: '环境危险区', desc: '低层不再出危险区', defaultOn: false },
+        { key: 'terrain', label: '地形障碍', desc: '不出地形障碍', defaultOn: false },
+        { key: 'sprintTrails', label: '冲刺轨迹', desc: 'Shift 不再触发冲刺', defaultOn: false },
+        { key: 'shooter', label: '射击怪', desc: '该类型不进刷怪池', defaultOn: false },
+        { key: 'classes', label: '职业选择', desc: '固定用轨迹编织者直接开局（下一局生效）', defaultOn: false },
+        { key: 'softCap', label: '软上限', desc: '成长上限恒等于基准值', defaultOn: false },
+        { key: 'tutorial', label: '新手教程', desc: '跳过开场教学（改动面大，默认开）', defaultOn: true },
+        { key: 'debug', label: '调试台', desc: '` 键的生成怪物面板（默认开）', defaultOn: true },
+    ];
+
+    const STORAGE_KEY = 'miwen4.flags';
+
+    /** 按 URL > localStorage > 默认值的优先级算出一份开关表。 */
+    function readFlags() {
+        const out = {};
+        for (const f of FEATURE_FLAGS) out[f.key] = !!f.defaultOn;
+
+        // localStorage：坏数据（手改过、上个版本的格式）当作没有，不要把游戏卡死
+        let stored = null;
+        try { stored = localStorage.getItem(STORAGE_KEY); } catch (e) { stored = null; }
+        if (stored) {
+            try {
+                const obj = JSON.parse(stored);
+                for (const f of FEATURE_FLAGS) {
+                    if (typeof obj[f.key] === 'boolean') out[f.key] = obj[f.key];
+                }
+            } catch (e) { /* 忽略 */ }
+        }
+
+        // URL：穷举式覆盖（见文件头说明）
+        let q = '';
+        try { q = new URLSearchParams(window.location.search).get('flags') || ''; } catch (e) { q = ''; }
+        if (q) {
+            if (q === 'all') {
+                for (const f of FEATURE_FLAGS) out[f.key] = true;
+            } else if (q === 'none') {
+                for (const f of FEATURE_FLAGS) out[f.key] = false;
+            } else {
+                const want = new Set(q.split(',').map((s) => s.trim()).filter(Boolean));
+                const known = new Set(FEATURE_FLAGS.map((f) => f.key));
+                for (const f of FEATURE_FLAGS) out[f.key] = want.has(f.key);
+                // 拼错名字要能当场发现，否则「我明明开了」会变成一场空
+                for (const w of want) if (!known.has(w)) console.warn(`[4.0] ?flags= 里有未知开关：${w}`);
+            }
+        }
+        return out;
+    }
+
+    /** 把当前开关写回 localStorage（只有面板点击会调它，URL 参数不写）。 */
+    function persist() {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(G.flags)); } catch (e) { /* 无痕模式等 */ }
+    }
+
+    /** 翻一个开关。面板点击的落点。 */
+    function setFlag(key, on) {
+        if (!(key in G.flags)) return;
+        G.flags[key] = !!on;
+        persist();
+        syncSkillButtons();
+    }
+
+    /** 全开 / 全关。面板上的两个按钮，也是试玩对照的快捷方式。 */
+    function setAll(on) {
+        for (const f of FEATURE_FLAGS) G.flags[f.key] = !!on;
+        persist();
+        syncSkillButtons();
+    }
+
+    // ---------- 关掉开关之后 DOM 上的残留 ----------
+    // 大部分「关掉」都落在每帧重绘或每次触发时才读开关的地方（canvas、掉落、刷怪），
+    // 开关一翻下一次就自然消失。手机端的技能按钮是例外：它们是**常驻 DOM**，
+    // 按下去什么也不发生才是最难解释的一种残留。所以在每次改开关之后补一次同步。
+    function syncSkillButtons() {
+        const map = { mobileUltBtn: 'ultimate', mobileElimBtn: 'eliminate' };
+        for (const id of Object.keys(map)) {
+            const el = typeof document !== 'undefined' && document.getElementById
+                ? document.getElementById(id) : null;
+            if (el) el.style.display = G.flags[map[id]] ? '' : 'none';
+        }
+    }
+
+    // ---------- 开关面板（按 F） ----------
+    // 面板本体放在这里而不是 07-ui.js：它只依赖开关表，和别的 UI 没有往来，
+    // 而 `F` 键的处理在 09-events.js（那里只调 Flags.togglePanel()）。
+    let flagPanelEl = null;
+
+    function buildPanel() {
+        flagPanelEl = document.getElementById('flagOverlay');
+        if (!flagPanelEl) return null;
+        const row = document.getElementById('flagRow');
+        if (!row || row.dataset.built) return flagPanelEl;
+
+        for (const f of FEATURE_FLAGS) {
+            const item = document.createElement('label');
+            item.className = 'flag-item';
+            const box = document.createElement('input');
+            box.type = 'checkbox';
+            box.checked = !!G.flags[f.key];
+            box.addEventListener('change', () => setFlag(f.key, box.checked));
+            item.dataset.key = f.key;
+
+            const name = document.createElement('span');
+            name.className = 'flag-name';
+            name.textContent = f.label;
+
+            const desc = document.createElement('span');
+            desc.className = 'flag-desc';
+            desc.textContent = f.desc;
+
+            const text = document.createElement('span');
+            text.className = 'flag-text';
+            text.appendChild(name);
+            text.appendChild(desc);
+
+            item.appendChild(box);
+            item.appendChild(text);
+            row.appendChild(item);
+        }
+
+        const on = document.getElementById('flagAllOn');
+        const off = document.getElementById('flagAllOff');
+        const close = document.getElementById('flagClose');
+        if (on) on.addEventListener('click', () => { setAll(true); syncPanel(); });
+        if (off) off.addEventListener('click', () => { setAll(false); syncPanel(); });
+        if (close) close.addEventListener('click', () => closePanel());
+
+        row.dataset.built = '1';
+        return flagPanelEl;
+    }
+
+    /** 把 G.flags 的当前值刷回勾选框（全开/全关之后要调）。 */
+    function syncPanel() {
+        if (!flagPanelEl) return;
+        for (const box of flagPanelEl.querySelectorAll('.flag-item')) {
+            const input = box.querySelector('input');
+            if (input) input.checked = !!G.flags[box.dataset.key];
+        }
+    }
+
+    function openPanel() {
+        const el = buildPanel();
+        if (!el) return;
+        syncPanel();
+        el.classList.add('active');
+        G.flagPanelOpen = true;
+    }
+
+    function closePanel() {
+        if (flagPanelEl) flagPanelEl.classList.remove('active');
+        G.flagPanelOpen = false;
+    }
+
+    function togglePanel() {
+        if (G.flagPanelOpen) closePanel(); else openPanel();
+    }
+
+    // 挂到 G 上。G 是 Core 里的 const 对象，只能原地改字段（不能重新绑定）。
+    G.flags = readFlags();
+    // 开局先对齐一次：用 `?flags=none` 打开时，那颗「按了没反应」的按钮根本不该出现。
+    // 此时 DOM 已经解析完（模板里正文槽位排在脚本槽位之前）。
+    // （别在源码注释里写出那两个字面量：构建脚本最后会扫一遍「模板还有没有没替换的槽位」，
+    //   注释里的同名占位符会被当成漏填，构建直接失败。）
+    syncSkillButtons();
+
+    return {
+        FEATURE_FLAGS, readFlags, setFlag, setAll, togglePanel, openPanel, closePanel,
+    };
+})();
 // ============================================================
 //  01-state —— 状态派生值 / 对局记录 / 精华经济
 // ============================================================
@@ -2742,6 +3054,8 @@ const Combat = (function () {
         const stageWeights = stageDef ? stageDef.weights : {};
         let weights = typePool.map(t => {
             if (t.unlocksAtWave && G.floor < t.unlocksAtWave) return 0;
+            // 4.0: 关掉射击怪就是不进刷怪池（权重 0，抽取时自然轮不到它）
+            if (t.isShooter && !G.flags.shooter) return 0;
             let w = stageWeights[t.id] !== undefined ? stageWeights[t.id] * 10 : t.weight;
             if (t.id === 'healer' && G.floor < 3) w *= 0.2;
             if (t.id === 'splitter' && G.floor < 2) w *= 0.2;
@@ -2887,9 +3201,11 @@ const Combat = (function () {
         // v9.1 词缀（v9.25: 改用 pickAffixes()——这里原本内联复制了一份抽池逻辑，
         // 是唯一绕开 pickAffixes 的地方，改抽池规则时最容易漏掉。调试生成看全池，
         // 所以传 'any'。）
+        // 4.0: 补一个 kind——'any' 只说「全池都能抽」，分不出精英还是 BOSS，
+        // 4.0 的 affixElite / affixBoss 两个开关就判不了。
         let affixes = [];
         if (isElite) {
-            affixes = pickAffixes(getAffixCount(), { bossOnly: 'any' });
+            affixes = pickAffixes(getAffixCount(), { bossOnly: 'any', kind: 'elite' });
         }
         if (affixes.includes('giant')) { hp *= 2;
             radius *= 1.5; }
@@ -3042,7 +3358,7 @@ const Combat = (function () {
             // v9.25: 只有 BOSS 能抽到 bossOnly 的那 8 个（'any' = 14 个全池）。
             // 排除 dash 与 swarm——BOSS 已经是 alwaysMoving，本体也已经有专属的爪牙
             // 召唤器，这两条对它属于「已经有的东西的弱化版」，白占槽位。
-            affixes: pickAffixes(affixCount, { exclude: ['dash', 'swarm'], bossOnly: 'any' }),
+            affixes: pickAffixes(affixCount, { exclude: ['dash', 'swarm'], bossOnly: 'any', kind: 'boss' }),
             // v9.28: BOSS 也补上这组状态字段——原来它整个没有 frozen/stunned/slowTimer，
             // E14 能生效只是各处读的时候都写了 `|| 0`。
             frozen: 0, stunned: 0, slowTimer: 0, passiveFreeze: 0, passiveSlow: 0, passiveDotTimer: 0,
@@ -3210,7 +3526,7 @@ const Tutor = (function () {
                 { on: 'move', n: 300, hold: 150,
                   text: '怪物会一直朝核心逼近，路上会自己绕开石头——它们不会停。',
                   fallback: '先随便走一走，比如绕一个方形。' },
-                { on: 'sprint', gate: true, point: 'player', hold: 180,
+                { on: 'sprint', gate: true, flag: 'sprintTrails', point: 'player', hold: 180,
                   text: '按住 Shift 冲刺：轨迹更宽、更亮，伤害 ×2.5。这是你最快的输出手段。',
                   fallback: '按住键盘左下角的 Shift 键，同时按 W A S D 移动。' },
                 { on: 'kill', n: 1, hold: 150,
@@ -3260,7 +3576,7 @@ const Tutor = (function () {
                   fallback: '按下键盘的空格键。' },
                 { on: 'event', name: 'combine', hold: 180,
                   text: '两张牌消耗了，变成永久被动：怪物踩到轨迹时，全场怪物互相伤害。' },
-                { on: 'event', name: 'chair', point: 'player', hold: 150,
+                { on: 'event', name: 'chair', flag: 'chair', point: 'player', hold: 150,
                   text: '🦽 轮椅组合「轨迹反噬」！看你的轨迹——它变成红色火焰了。' },
                 { on: 'after', d: 40, hold: 180,
                   text: '6 组特定搭配会激活轮椅组合：额外数值加成 + 轨迹外观改变。它们是设计者明说的「通关答案」。' },
@@ -3268,7 +3584,7 @@ const Tutor = (function () {
                   autofill: ['T07', 'E12'],
                   text: '手牌里现在有 🎯射击命中 和 ⚡闪电链——再填一次槽位，按 空格 宣读。',
                   fallback: '点手牌里的 🎯射击命中 和 ⚡闪电链，然后按空格。' },
-                { on: 'event', name: 'combine2', hold: 160,
+                { on: 'event', name: 'combine2', flag: 'chair', hold: 160,
                   text: '⚡ 轮椅组合「连锁风暴」！轨迹变金色，射速 +2，子弹变成闪电链。' },
                 { on: 'after', d: 40, hold: 180,
                   text: '回头看你第 2 层的塔：T12 绑的效果板决定图腾类型，E01→速射 / E12→雷电 / E13→冰霜 / E06→轨迹。' },
@@ -3335,14 +3651,14 @@ const Tutor = (function () {
                   fallback: '让怪物靠近中央的核心，看它撞上去会怎样。' },
                 { on: 'essence', n: 1, hold: 150,
                   text: '💎 精华是货币，击杀获得。攒够了去 🧙 商人 那里买牌、买遗物。' },
-                { on: 'after', d: 40, gate: true, hold: 160,
+                { on: 'after', d: 40, gate: true, flag: 'ultimate', hold: 160,
                   text: '⚡ 你的终极技已充满。按 Q 释放「轨迹风暴」——引爆全场轨迹，全体眩晕 2 秒。',
                   fallback: '按键盘的 Q 键。' },
-                { on: 'event', name: 'ultimate', hold: 160,
+                { on: 'event', name: 'ultimate', flag: 'ultimate', hold: 160,
                   text: '充能不看伤害，按固定速度回：回满要 25 秒 ÷ (1 + 楼层/50)。第 40 层起再快 ×1.5。' },
-                { on: 'after', d: 40, hold: 160,
+                { on: 'after', d: 40, flag: 'enclosure', hold: 160,
                   text: '🔒 围剿：怪物周围 8 个方向被轨迹封住 6 个以上，就会触发包围伤害 + 眩晕。' },
-                { on: 'event', name: 'enclosure', needsMob: true, hold: 150,
+                { on: 'event', name: 'enclosure', flag: 'enclosure', needsMob: true, hold: 150,
                   text: '包围成功！锁死它们的走位——这一招在后期很关键。',
                   fallback: '用轨迹把一只怪围起来，八个方向堵住六个以上。' },
                 { on: 'after', d: 40, hold: 150,
@@ -3644,6 +3960,9 @@ const Tutor = (function () {
                 if (!this.seen) this.startCfg(TUTORIAL_OUTRO, G.floor);
                 return;
             }
+            // 4.0: 教程开关关掉 = 一次也不演。守在这里而不是在 startFloor()——出怪接管的
+            // 标记 tookOver 也要跟着保持 false，否则那几层会等着一个永远不会来的脚本。
+            if (!G.flags.tutorial) return;
             if (this.seen || this.finished) return;
             const cfg = TUTORIAL_FLOORS[G.floor];
             if (!cfg) return;
@@ -3819,10 +4138,31 @@ const Tutor = (function () {
                 return;
             }
 
-            const next = this.idx + 1;
+            let next = this.idx + 1;
+            // 4.0: 声明了 flag 的步骤，开关一关就**整步跳过**——既不播字幕（免得玩家读到
+            // 一段「按 Q」的说明而 Q 在这个配置下什么也不做），也不去等一个永远不可能
+            // 发生的触发条件。不跳的话每步都要干等 45 秒保底超时（TUTORIAL_TIMEOUT +
+            // TUTORIAL_FORCE，见 02-combat.js:776），四五步攒起来就是几分钟空转。
+            while (next < this.cfg.steps.length) {
+                const sk = this.cfg.steps[next];
+                if (!sk.flag || G.flags[sk.flag]) break;
+                // 跳过的门控步要记得销账，否则 gateLeft 永远扣不完（gateClosed() 是死代码，
+                // 但别给下一个人埋雷）。
+                if (sk.gate && this.gateLeft > 0) this.gateLeft--;
+                next++;
+            }
+            // 跳掉的步骤算「已消费」，idx 得跟着前进——pendingScript() / holdFloor() 都是
+            // 从 this.idx + 1 往后扫的，idx 留在原地会把跳过的 spawn 又当成待办，
+            // 于是 clearCondition() 永远不成立，教程卡在「清空一层」上。
+            this.idx = next - 1;
             if (next >= this.cfg.steps.length) {
                 if (this.cfg.next) {
-                    const nx = this.cfg.next === 'NODEMAP' ? TUTORIAL_NODEMAP : null;
+                    // 4.0: 关掉地图节点时这一节演不了——它的退场条件就是「玩家在节点地图上
+                    // 选一次路」（07-ui.js:433 选完置 outroPending）。没有地图就没人选，
+                    // 教程会永远停在沙盒配置里不收尾。直接跳到收尾字幕。
+                    const nx = this.cfg.next === 'NODEMAP'
+                        ? (G.flags.mapNodes ? TUTORIAL_NODEMAP : TUTORIAL_OUTRO)
+                        : null;
                     if (nx) { this.startCfg(nx, this.floor); }
                     return;
                 }
@@ -3869,6 +4209,10 @@ const Tutor = (function () {
         },
 
         replay() {
+            // 4.0: 教程开关关着时，图鉴里这颗「重看教程」就是个死按钮（onFloorStart 会直接
+            // 返回）。玩家既然明确点了重看，就把开关打开——setFlag 会写回 localStorage，
+            // 面板下次打开也是勾上的，不会出现「按钮没反应」。
+            if (!G.flags.tutorial) Flags.setFlag('tutorial', true);
             this.seen = false;
             this.finished = false;
             Main.resetGame();   // reset() 会把 restarted 一并清掉
@@ -3968,7 +4312,10 @@ const Tutor = (function () {
     // 教程角标 / 图鉴要能点击，所以教程期间强制放开 canvas 的鼠标事件
     function tutorialSyncPointer() {
         if (G.simMode) return;
-        const want = G.mapMode || Tutorial.active || Tutorial.codexOpen || !Tutorial.seen;
+        // 4.0: 教程关掉时最后一个条件要摘掉——否则「还没看过教程」会一直为真，canvas 的
+        // 鼠标事件被永久放开，挡住下面那层的正常交互。
+        const want = G.mapMode || Tutorial.active || Tutorial.codexOpen
+            || (!Tutorial.seen && G.flags.tutorial);
         setCanvasPointer(want);
     }
 
@@ -4540,6 +4887,8 @@ const Trail = (function () {
 
     // ---------- v9.1 终极技能 ----------
     function activateUltimate() {
+        // 4.0: 关掉终极技就整个失效。守卫放函数入口，Q 键、模拟、以后的调用点一处就够。
+        if (!G.flags.ultimate) return;
         G.ultimateGauge = 0;
         G.ultimateActive = true;
         G.ultimateTimer = 60;
@@ -4629,6 +4978,8 @@ const Trail = (function () {
     // v9.25: 「消除」的入口。按键（R / 手机端 🧹 圆钮）走这里，卡牌不再有这条路径。
     // 冷却中按下去给一句反馈而不是静默忽略——不然玩家会以为按键没生效。
     function tryEliminate() {
+        // 4.0: 关掉消除就按 R 没反应（也给一句反馈，免得玩家以为按键坏了）
+        if (!G.flags.eliminate) { UI.setFeedback('🧹 消除已被关闭（功能开关）', '#8aa3c0'); return; }
         if (G.gameOver || G.paused || G.selectingActive) return;
         if (G.eliminateCooldown > 0) {
             UI.setFeedback(`🧹 消除冷却中 · 还要 ${(G.eliminateCooldown / 60).toFixed(1)}s`, '#8ab3d0');
@@ -4668,6 +5019,8 @@ const Trail = (function () {
     // 也顺带覆盖「槽位刚刚变满」那一刻。每帧只宣读一组，所以不会同一帧把 20 张手牌
     // 连锁清空、玩家什么都看不见。
     function tryAutoUpgrade() {
+        // 4.0: 关掉自动宣读就是手牌只攒不花——非升级的组合仍然要玩家自己排。
+        if (!G.flags.autoUpgrade) return false;
         const pick = findAutoUpgrade();
         if (!pick) return false;
         // doCombine 只写被动、不碰手牌（手牌的口径归 fillSlot / grantCards 管），
@@ -4696,6 +5049,13 @@ const Trail = (function () {
         // 在放牌时早已把它们从手牌里摘掉；executeBatch()（暂停排队）同理。
         // 旧写法走 addPassive，会白占一个被动槽，而且 T14 永远不会被触发到。
         if (triggerId === 'T14') {
+            // 4.0: 关掉唤魔者就是宣读无效——牌还在手里（随机池那边也不再抽得到它），
+            // 但宣读不会召 BOSS，白占的那一次宣读照旧消耗掉。
+            if (!G.flags.evoker) {
+                logEvent('card_combine', { trigger: triggerId, effect: effectId, chairHit: null, oneShot: true, evokerDisabled: true });
+                UI.setFeedback('👹 唤魔者已被关闭（功能开关），本次宣读无效', '#8aa3c0');
+                return true;
+            }
             triggerEvoker();
             logEvent('card_combine', { trigger: triggerId, effect: effectId, chairHit: null, oneShot: true });
             UI.setFeedback('👹 唤魔者宣读！全场清空 + 三词条 BOSS 现身', '#a01f2e');
@@ -4712,7 +5072,9 @@ const Trail = (function () {
         addPassive(triggerId, effectId);
         logEvent('card_combine', { trigger: triggerId, effect: effectId, chairHit: null });
         let chairHit = null;
-        for (const combo of CHAIR_COMBOS) {
+        // 4.0: 关掉轮椅组合就是抽不到那几组保底——组合本身照常生效，只是没有额外 bonus
+        // 与专属轨迹皮肤。
+        for (const combo of (G.flags.chair ? CHAIR_COMBOS : [])) {
             if (combo.trigger === triggerId && combo.effect === effectId) {
                 combo.bonus(G); G.chairBonuses++;
                 G.activeTrailType = combo.trailType;
@@ -4996,6 +5358,8 @@ const Update = (function () {
     // 下界就是「不许落在自己脚下」，否则又变成 v9.24 那个「贴着 BOSS 走」的老样子。
     // 落定之后这个圈与 m 再无关系。
     function spawnAffixZone(m, kind) {
+        // 4.0: 守入口而不是守三个调用点（:301 火圈 / :306 削减圈 / 减速圈）。
+        if (!G.flags.circleZones) return false;
         if (typeof affixDef !== 'function') return false;
         const def = affixDef(kind);
         const cfg = def && (def.zone || def.fireZone);
@@ -5351,7 +5715,9 @@ const Update = (function () {
             const trailLen = 6;
             const t = addTrail(p.x - tdx * trailLen, p.y - tdy * trailLen, p.x + tdx * trailLen, p.y + tdy * trailLen);
             // v9.7: 冲刺轨迹（Shift键）——更宽更亮
-            if (G.keys.shift) {
+            // 4.0: 冲刺的全部效果就是这条更宽的轨迹（伤害 ×2.5 由 isSprint 标记带出，
+            // 见下面 :752），所以这一个开关就够。
+            if (G.keys.shift && G.flags.sprintTrails) {
                 const sprintLen = 12;
                 const st = { x1: p.x - tdx * sprintLen, y1: p.y - tdy * sprintLen, x2: p.x + tdx * sprintLen, y2: p.y + tdy * sprintLen, life: 180, layer: 2, trailType: G.activeTrailType, isSprint: true };
                 G.sprintTrails.push(st);
@@ -5845,8 +6211,11 @@ const Update = (function () {
             if (G.notifications[i].life <= 0) G.notifications.splice(i, 1);
         }
 
+        // 4.0: 危险区中途被关掉时，已经落地的那几个要**当场清掉**——否则它们既不再
+        // 生成也不再消失，会一直挂在地图上烧人，等于开关没关。
+        if (!G.flags.hazards && G.hazardZones.length > 0) G.hazardZones.length = 0;
         // v9.3: 环境危险区（40波起）
-        if (G.floor >= 40) {
+        if (G.floor >= 40 && G.flags.hazards) {
             G.hazardTimer++;
             if (G.hazardTimer >= 900) { G.hazardTimer = 0;
                 if (G.hazardZones.length < 5) {
@@ -5979,6 +6348,10 @@ const Update = (function () {
 
     // ---------- v9.7 围剿检测 ----------
     function checkEnclosure() {
+        // 4.0: 守入口省掉整趟 8 方向 × 全轨迹的扫描（每 30 帧一次，是这里最贵的一段）。
+        // Tutorial.emit('enclosure') 在这个块里，关掉之后教程那一步也会被 03-tutorial 的
+        // flag 跳过机制整步略过，两边一致。
+        if (!G.flags.enclosure) return;
         // 简化围剿：检查是否有怪物被轨迹包围
         // 方法：对每个怪物，检查其周围8个方向是否都有轨迹
         for (const m of G.monsters) {
@@ -6779,7 +7152,9 @@ const Render = (function () {
         ctx.globalAlpha = 1;
 
         // v9.1: 终极技能充能条
-        if (!G.gameOver) {
+        // 4.0: 关掉 ultimate 时这条不能画——开关面板上写的是「无 Q、无充能条」，
+        // 留着一条永远不动的灰条等于当场说谎。
+        if (!G.gameOver && G.flags.ultimate) {
             const gW = 120, gH = 7, gX = w / 2 - gW / 2, gY = h - 16;
             ctx.fillStyle = 'rgba(20,30,50,0.8)';
             ctx.fillRect(gX, gY, gW, gH);
@@ -6804,7 +7179,8 @@ const Render = (function () {
         // v9.24 的手机摇杆绘制块**已删除**——摇杆现在是 DOM 元素
         // （#joyBase / #joyKnob，见 body.html 与 09-events.js），
         // 因为它要能落在 canvas 之外的黑边上，画在 canvas 里会被边界裁掉。
-        if (!G.gameOver) {
+        // 4.0: 同理，关掉 eliminate 就不该有冷却环。
+        if (!G.gameOver && G.flags.eliminate) {
             const rW = 86, rH = 7, rX = w / 2 + 70, rY = h - 16;
             const ready = G.eliminateCooldown <= 0;
             ctx.fillStyle = 'rgba(20,30,50,0.8)';
@@ -7082,6 +7458,9 @@ const UI = (function () {
 
     // ---------- v9.4 遗物系统 ----------
     function dropRelic() {
+        // 4.0: 守入口，两个掉落点（BOSS :838 / 精英 :895）一起失效。选遗物本身不受影响，
+        // 见 gainEvokerKey——唤魔之钥是独立藏品，不在这个池子里。
+        if (!G.flags.relics) return;
         // v9.28: hidden 的遗物（唤魔之钥）不进随机池——它只能从唤魔者 BOSS 身上掉。
         const available = RELICS.filter(r => !r.hidden && !G.relics.find(r2 => r2.id === r.id));
         if (available.length === 0) return;
@@ -7260,6 +7639,8 @@ const UI = (function () {
     // ---------- v9.4 地图选择 ----------
     // ---------- v9.7 可视化蜿蜒地图 ----------
     function showNodeMap() {
+        // 4.0: 关掉地图节点就每层直推。两条进入路径（选完属性 / 休整完）都被这一个守卫兜住。
+        if (!G.flags.mapNodes) { advanceFloor(); return; }
         G.selectingActive = true; G.mapMode = true;
         // v9.26: 走统一入口——手机端不碰 .canvas-wrap（摇杆的输入面），见 setCanvasPointer 的注释
         setCanvasPointer(true);
@@ -7304,6 +7685,12 @@ const UI = (function () {
         const overlay = document.getElementById('classOverlay');
         const row = document.getElementById('classRow');
         if (!overlay || !row) return;
+        // 4.0: 关掉职业选择就直接用第 0 个职业（轨迹编织者——遮罩上本来就推荐给新手的那
+        // 一个）开局。selectClass() 自己会摘遮罩、置 selectingActive、startFloor()，
+        // 所以这里不必再补任何一步。
+        // ⚠️ 这个开关**只在开局读得到**：boot() 求值时职业就定了，中途改要等下一局。
+        // 面板里对 classes 的提示如实写了「下一局生效」。
+        if (!G.flags.classes) { selectClass(0); return; }
         G.selectingActive = true; G.paused = true;
         overlay.classList.add('active');
         row.innerHTML = CLASSES.map((c, i) =>
@@ -7329,14 +7716,18 @@ const UI = (function () {
         }
 
         // 教程：开局遮罩上的说明 + 跳过教程（只看没看过教程的那一次）
+        // 4.0: `G.flags.tutorial` 关掉时这一整段都不该出现——没教程可讲，也没教程可跳。
+        const noTutorial = Tutorial.seen || !G.flags.tutorial;
         const h2 = overlay.querySelector('h2');
         if (h2) {
             // v9.24: 教程结束后会再弹一次这个遮罩（就是「正式开局」），
             // 标题必须跟着变，否则看起来像什么都没发生。
             if (!_classOverlayTitle) _classOverlayTitle = h2.textContent;
-            h2.textContent = Tutorial.seen ? '正式开局 · 再选一次职业' : _classOverlayTitle;
+            // 4.0: 没教程时不说「再选一次」——那是第一次开局，没有「再」。
+            h2.textContent = !G.flags.tutorial ? '开场 · 选一个流派'
+                : (Tutorial.seen ? '正式开局 · 再选一次职业' : _classOverlayTitle);
         }
-        if (Tutorial.seen) {
+        if (noTutorial) {
             const h = document.getElementById('tutorialClassHint');
             const s = document.getElementById('tutorialSkipBtn');
             if (h) h.remove();
@@ -7393,7 +7784,9 @@ const UI = (function () {
         // 把教学节奏冲掉（而且反正 Tutorial 结束时会 restartRunAfterTutorial()
         // 整体重来）。判定沿用 Tutorial.seen —— 它只在这一局的教程真正结束 / 被跳过后
         // 才立起来，所以「重选职业 → 发牌」正好只发生在正式开局那一次。
-        if (Tutorial.seen) grantCards(START_CARDS, '开局补给', '#f5c542');
+        // 4.0: 教程关掉时也走这一支——`Tutorial.seen` 永远是 false 了，但这一局**不是**
+        // 教程沙盒，开局那 6 张密文版必须照发。
+        if (Tutorial.seen || !G.flags.tutorial) grantCards(START_CARDS, '开局补给', '#f5c542');
         updateUI();
     }
 
@@ -7475,6 +7868,15 @@ const UI = (function () {
     // ---------- v9.10 属性提升选择（替代密文版三选一）----------
     // v9.18: STAT_CHOICES 挪到 00-data.js——商店也开始卖同一套，见那里的注释。
     function showStatChoice() {
+        // 4.0: 关掉属性三选一就没什么好选的，直接推进下一层。守卫放在函数**入口**而不是
+        // 各个调用点——调用点有三处（清层、模拟、以及以后的），守入口只需要守一次。
+        // ⚠️ 但**不能**在这里直接 advanceFloor()：9.x 的节点地图本来就是挂在这后面的
+        // （selectStat → showNodeMap），每 5 层才出现一次。在三选一这一环推进，
+        // 等于连 mapNodes 一起关掉了——那两个开关在面板上是分开的。
+        if (!G.flags.statChoice) {
+            if (G.flags.mapNodes) showNodeMap(); else advanceFloor();
+            return;
+        }
         if (G.selectingActive) return;
         G.selectingActive = true;
         // 随机选3个
@@ -7598,7 +8000,10 @@ const UI = (function () {
         if (G.floor === 30) { showNotification('📢 精英双词缀！', '#ffaa44', 300); }
         if (G.floor === 40) { G.maxSlots = 6; G.ultimateChargeMult = 1.5; showNotification('📢 槽位+1 充能加速！', '#ffdd44', 360); }
         if (G.floor === 60) { G.maxSlots = 7; showNotification('📢 被动槽位+1！', '#ffdd44', 240); }
-        if (G.floor > 0 && G.floor % 10 === 0) {
+        // 4.0: fate 关掉时**不能**在 showFateChoice 里兜底回 advanceFloor()——那时候
+        // G.floor 已经加过了，再进一次 advanceFloor() 会一直加下去。所以守在这里的
+        // 条件上，直接落到下面的 startFloor()。
+        if (G.floor > 0 && G.floor % 10 === 0 && G.flags.fate) {
             if (G.simMode) { Sim.simAutoFateChoice(); }
             else { showFateChoice(); }
         }
@@ -7842,6 +8247,15 @@ const Events = (function () {
 
     document.addEventListener('keydown', e => {
         const k = keyOf(e);
+        // 4.0: F 开功能开关面板。这一条**故意不受 debug 开关管**——否则把调试台关掉之后
+        // 就再也打不开面板、把别的系统开不回来了（自己把自己锁在门外）。
+        if (k === 'f' && !G.simMode) { e.preventDefault(); Flags.togglePanel(); return; }
+        // 面板是模态：开着的时候只认 Esc 和 F，别的键一律不处理，
+        // 免得玩家在遮罩后面盲走出去被怪打死。
+        if (G.flagPanelOpen) {
+            if (k === 'escape') { e.preventDefault(); Flags.closePanel(); }
+            return;
+        }
         // 机制图鉴：H 开关、左右翻页（图鉴打开时吞掉其它按键）
         if (k === 'h' && !G.simMode) { e.preventDefault();
             Tutorial.codexOpen = !Tutorial.codexOpen; Tutorial.codexPage = 0; return; }
@@ -7852,10 +8266,15 @@ const Events = (function () {
         }
         // 调试模式：按键1~9生成对应怪物（教程期间禁用，免得打乱脚本）
         if (k === '`' || k === 'backquote') {
+            // 4.0: 调试台在功能开关里关掉时，这个键什么都不做——但要说一声，
+            // 否则玩家只会以为键坏了。
+            if (!G.flags.debug) { e.preventDefault(); setFeedback('🐛 调试台已关（按 F 打开功能开关）', '#8ab3d0'); return; }
             if (Tutorial.active) { e.preventDefault(); setFeedback('🎓 教程期间禁用调试模式', '#8ab3d0'); return; }
             e.preventDefault(); G.debug = !G.debug;
             setFeedback(G.debug ? '🐛 调试模式开启！按键1~9生成怪物' : '🐛 调试模式关闭', '#88ccff'); return; }
-        if (G.debug) {
+        // 4.0: 两个条件都要——G.debug 是「刚才按过 ` 键」，开关是「这个功能还在不在」。
+        // 半路把开关关掉时 G.debug 可能还立着，只认它就会继续生成怪物。
+        if (G.debug && G.flags.debug) {
             const num = parseInt(k);
             if (num >= 1 && num <= 9) { e.preventDefault();
                 spawnDebugMonster(DEBUG_TYPE_KEYS[num - 1]); return; }

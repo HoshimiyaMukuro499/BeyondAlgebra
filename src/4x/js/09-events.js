@@ -37,6 +37,15 @@ const Events = (function () {
 
     document.addEventListener('keydown', e => {
         const k = keyOf(e);
+        // 4.0: F 开功能开关面板。这一条**故意不受 debug 开关管**——否则把调试台关掉之后
+        // 就再也打不开面板、把别的系统开不回来了（自己把自己锁在门外）。
+        if (k === 'f' && !G.simMode) { e.preventDefault(); Flags.togglePanel(); return; }
+        // 面板是模态：开着的时候只认 Esc 和 F，别的键一律不处理，
+        // 免得玩家在遮罩后面盲走出去被怪打死。
+        if (G.flagPanelOpen) {
+            if (k === 'escape') { e.preventDefault(); Flags.closePanel(); }
+            return;
+        }
         // 机制图鉴：H 开关、左右翻页（图鉴打开时吞掉其它按键）
         if (k === 'h' && !G.simMode) { e.preventDefault();
             Tutorial.codexOpen = !Tutorial.codexOpen; Tutorial.codexPage = 0; return; }
@@ -47,10 +56,15 @@ const Events = (function () {
         }
         // 调试模式：按键1~9生成对应怪物（教程期间禁用，免得打乱脚本）
         if (k === '`' || k === 'backquote') {
+            // 4.0: 调试台在功能开关里关掉时，这个键什么都不做——但要说一声，
+            // 否则玩家只会以为键坏了。
+            if (!G.flags.debug) { e.preventDefault(); setFeedback('🐛 调试台已关（按 F 打开功能开关）', '#8ab3d0'); return; }
             if (Tutorial.active) { e.preventDefault(); setFeedback('🎓 教程期间禁用调试模式', '#8ab3d0'); return; }
             e.preventDefault(); G.debug = !G.debug;
             setFeedback(G.debug ? '🐛 调试模式开启！按键1~9生成怪物' : '🐛 调试模式关闭', '#88ccff'); return; }
-        if (G.debug) {
+        // 4.0: 两个条件都要——G.debug 是「刚才按过 ` 键」，开关是「这个功能还在不在」。
+        // 半路把开关关掉时 G.debug 可能还立着，只认它就会继续生成怪物。
+        if (G.debug && G.flags.debug) {
             const num = parseInt(k);
             if (num >= 1 && num <= 9) { e.preventDefault();
                 spawnDebugMonster(DEBUG_TYPE_KEYS[num - 1]); return; }

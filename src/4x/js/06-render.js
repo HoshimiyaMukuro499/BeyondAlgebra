@@ -755,7 +755,9 @@ const Render = (function () {
         ctx.globalAlpha = 1;
 
         // v9.1: 终极技能充能条
-        if (!G.gameOver) {
+        // 4.0: 关掉 ultimate 时这条不能画——开关面板上写的是「无 Q、无充能条」，
+        // 留着一条永远不动的灰条等于当场说谎。
+        if (!G.gameOver && G.flags.ultimate) {
             const gW = 120, gH = 7, gX = w / 2 - gW / 2, gY = h - 16;
             ctx.fillStyle = 'rgba(20,30,50,0.8)';
             ctx.fillRect(gX, gY, gW, gH);
@@ -780,7 +782,8 @@ const Render = (function () {
         // v9.24 的手机摇杆绘制块**已删除**——摇杆现在是 DOM 元素
         // （#joyBase / #joyKnob，见 body.html 与 09-events.js），
         // 因为它要能落在 canvas 之外的黑边上，画在 canvas 里会被边界裁掉。
-        if (!G.gameOver) {
+        // 4.0: 同理，关掉 eliminate 就不该有冷却环。
+        if (!G.gameOver && G.flags.eliminate) {
             const rW = 86, rH = 7, rX = w / 2 + 70, rY = h - 16;
             const ready = G.eliminateCooldown <= 0;
             ctx.fillStyle = 'rgba(20,30,50,0.8)';

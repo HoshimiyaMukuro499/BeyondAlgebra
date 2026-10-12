@@ -584,6 +584,69 @@
         }
         .btn-leave-shop:hover { background: #1f3145; border-color: #8ab0d0; }
 
+        /* 4.0 功能开关面板（F） */
+        .flag-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            z-index: 140;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            gap: 8px;
+            padding: 16px;
+        }
+        .flag-overlay.active { display: flex; }
+        .flag-overlay h3 { color: #ffb347; font-size: 20px; }
+        .flag-hint {
+            color: #8aa3c0;
+            font-size: 12px;
+            max-width: 620px;
+            text-align: center;
+            line-height: 1.6;
+        }
+        .flag-hint-dim { color: #5a7a9a; font-size: 11px; }
+        .flag-row {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 6px 14px;
+            max-width: 660px;
+            width: 100%;
+            max-height: 52vh;
+            overflow-y: auto;
+            pointer-events: auto;
+            margin: 4px 0;
+        }
+        .flag-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            background: #1a2635;
+            border: 1px solid #2a3f57;
+            border-radius: 10px;
+            padding: 7px 10px;
+            cursor: pointer;
+            transition: 0.15s;
+        }
+        .flag-item:hover { border-color: #3a5575; background: #21303f; }
+        .flag-item input { margin-top: 3px; cursor: pointer; flex: 0 0 auto; }
+        .flag-text { display: flex; flex-direction: column; min-width: 0; }
+        .flag-name { font-size: 13px; color: #e0e8f0; font-weight: 600; }
+        .flag-desc { font-size: 10px; color: #8aa3c0; line-height: 1.4; }
+        .flag-actions { display: flex; gap: 10px; margin-top: 4px; }
+        .btn-flag {
+            background: #2a3f57;
+            border: 1px solid #5a7a9a;
+            color: #cfe0f0;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+        .btn-flag:hover { background: #35506e; border-color: #8ab0d0; }
+
         /* v9.4 遗物展示 */
         .relic-box {
             display: flex;

@@ -159,3 +159,17 @@
     </div>
 </div>
 
+<!-- 4.0 功能开关面板（按 F）。行由 src/4x/js/00-flags.js 按开关表生成 -->
+<div class="flag-overlay" id="flagOverlay">
+    <h3>⚙️ 功能开关</h3>
+    <p class="flag-hint">这一版默认只留核心循环（移动 → 轨迹 → 闭环 → 图腾 → 组合）。想要哪个系统，勾上它。</p>
+    <p class="flag-hint">多数开关即时生效（关掉时已在地上生效的东西会一起清掉）；<b>职业选择</b>只在开局读一次，改了要下一局才换。改动会记住。</p>
+    <div class="flag-row" id="flagRow"></div>
+    <div class="flag-actions">
+        <button class="btn-flag" id="flagAllOn">全开（= 9.32）</button>
+        <button class="btn-flag" id="flagAllOff">全关</button>
+        <button class="btn-flag" id="flagClose">关闭（F）</button>
+    </div>
+    <p class="flag-hint flag-hint-dim">也可以用网址参数：?flags=all / ?flags=none / ?flags=relics,fate</p>
+</div>
+

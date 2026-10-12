@@ -364,6 +364,8 @@ const Combat = (function () {
         const stageWeights = stageDef ? stageDef.weights : {};
         let weights = typePool.map(t => {
             if (t.unlocksAtWave && G.floor < t.unlocksAtWave) return 0;
+            // 4.0: 关掉射击怪就是不进刷怪池（权重 0，抽取时自然轮不到它）
+            if (t.isShooter && !G.flags.shooter) return 0;
             let w = stageWeights[t.id] !== undefined ? stageWeights[t.id] * 10 : t.weight;
             if (t.id === 'healer' && G.floor < 3) w *= 0.2;
             if (t.id === 'splitter' && G.floor < 2) w *= 0.2;
@@ -509,9 +511,11 @@ const Combat = (function () {
         // v9.1 词缀（v9.25: 改用 pickAffixes()——这里原本内联复制了一份抽池逻辑，
         // 是唯一绕开 pickAffixes 的地方，改抽池规则时最容易漏掉。调试生成看全池，
         // 所以传 'any'。）
+        // 4.0: 补一个 kind——'any' 只说「全池都能抽」，分不出精英还是 BOSS，
+        // 4.0 的 affixElite / affixBoss 两个开关就判不了。
         let affixes = [];
         if (isElite) {
-            affixes = pickAffixes(getAffixCount(), { bossOnly: 'any' });
+            affixes = pickAffixes(getAffixCount(), { bossOnly: 'any', kind: 'elite' });
         }
         if (affixes.includes('giant')) { hp *= 2;
             radius *= 1.5; }
@@ -664,7 +668,7 @@ const Combat = (function () {
             // v9.25: 只有 BOSS 能抽到 bossOnly 的那 8 个（'any' = 14 个全池）。
             // 排除 dash 与 swarm——BOSS 已经是 alwaysMoving，本体也已经有专属的爪牙
             // 召唤器，这两条对它属于「已经有的东西的弱化版」，白占槽位。
-            affixes: pickAffixes(affixCount, { exclude: ['dash', 'swarm'], bossOnly: 'any' }),
+            affixes: pickAffixes(affixCount, { exclude: ['dash', 'swarm'], bossOnly: 'any', kind: 'boss' }),
             // v9.28: BOSS 也补上这组状态字段——原来它整个没有 frozen/stunned/slowTimer，
             // E14 能生效只是各处读的时候都写了 `|| 0`。
             frozen: 0, stunned: 0, slowTimer: 0, passiveFreeze: 0, passiveSlow: 0, passiveDotTimer: 0,

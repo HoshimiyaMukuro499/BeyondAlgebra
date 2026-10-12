@@ -228,6 +228,9 @@ const UI = (function () {
 
     // ---------- v9.4 遗物系统 ----------
     function dropRelic() {
+        // 4.0: 守入口，两个掉落点（BOSS :838 / 精英 :895）一起失效。选遗物本身不受影响，
+        // 见 gainEvokerKey——唤魔之钥是独立藏品，不在这个池子里。
+        if (!G.flags.relics) return;
         // v9.28: hidden 的遗物（唤魔之钥）不进随机池——它只能从唤魔者 BOSS 身上掉。
         const available = RELICS.filter(r => !r.hidden && !G.relics.find(r2 => r2.id === r.id));
         if (available.length === 0) return;
@@ -406,6 +409,8 @@ const UI = (function () {
     // ---------- v9.4 地图选择 ----------
     // ---------- v9.7 可视化蜿蜒地图 ----------
     function showNodeMap() {
+        // 4.0: 关掉地图节点就每层直推。两条进入路径（选完属性 / 休整完）都被这一个守卫兜住。
+        if (!G.flags.mapNodes) { advanceFloor(); return; }
         G.selectingActive = true; G.mapMode = true;
         // v9.26: 走统一入口——手机端不碰 .canvas-wrap（摇杆的输入面），见 setCanvasPointer 的注释
         setCanvasPointer(true);
@@ -450,6 +455,12 @@ const UI = (function () {
         const overlay = document.getElementById('classOverlay');
         const row = document.getElementById('classRow');
         if (!overlay || !row) return;
+        // 4.0: 关掉职业选择就直接用第 0 个职业（轨迹编织者——遮罩上本来就推荐给新手的那
+        // 一个）开局。selectClass() 自己会摘遮罩、置 selectingActive、startFloor()，
+        // 所以这里不必再补任何一步。
+        // ⚠️ 这个开关**只在开局读得到**：boot() 求值时职业就定了，中途改要等下一局。
+        // 面板里对 classes 的提示如实写了「下一局生效」。
+        if (!G.flags.classes) { selectClass(0); return; }
         G.selectingActive = true; G.paused = true;
         overlay.classList.add('active');
         row.innerHTML = CLASSES.map((c, i) =>
@@ -475,14 +486,18 @@ const UI = (function () {
         }
 
         // 教程：开局遮罩上的说明 + 跳过教程（只看没看过教程的那一次）
+        // 4.0: `G.flags.tutorial` 关掉时这一整段都不该出现——没教程可讲，也没教程可跳。
+        const noTutorial = Tutorial.seen || !G.flags.tutorial;
         const h2 = overlay.querySelector('h2');
         if (h2) {
             // v9.24: 教程结束后会再弹一次这个遮罩（就是「正式开局」），
             // 标题必须跟着变，否则看起来像什么都没发生。
             if (!_classOverlayTitle) _classOverlayTitle = h2.textContent;
-            h2.textContent = Tutorial.seen ? '正式开局 · 再选一次职业' : _classOverlayTitle;
+            // 4.0: 没教程时不说「再选一次」——那是第一次开局，没有「再」。
+            h2.textContent = !G.flags.tutorial ? '开场 · 选一个流派'
+                : (Tutorial.seen ? '正式开局 · 再选一次职业' : _classOverlayTitle);
         }
-        if (Tutorial.seen) {
+        if (noTutorial) {
             const h = document.getElementById('tutorialClassHint');
             const s = document.getElementById('tutorialSkipBtn');
             if (h) h.remove();
@@ -539,7 +554,9 @@ const UI = (function () {
         // 把教学节奏冲掉（而且反正 Tutorial 结束时会 restartRunAfterTutorial()
         // 整体重来）。判定沿用 Tutorial.seen —— 它只在这一局的教程真正结束 / 被跳过后
         // 才立起来，所以「重选职业 → 发牌」正好只发生在正式开局那一次。
-        if (Tutorial.seen) grantCards(START_CARDS, '开局补给', '#f5c542');
+        // 4.0: 教程关掉时也走这一支——`Tutorial.seen` 永远是 false 了，但这一局**不是**
+        // 教程沙盒，开局那 6 张密文版必须照发。
+        if (Tutorial.seen || !G.flags.tutorial) grantCards(START_CARDS, '开局补给', '#f5c542');
         updateUI();
     }
 
@@ -621,6 +638,15 @@ const UI = (function () {
     // ---------- v9.10 属性提升选择（替代密文版三选一）----------
     // v9.18: STAT_CHOICES 挪到 00-data.js——商店也开始卖同一套，见那里的注释。
     function showStatChoice() {
+        // 4.0: 关掉属性三选一就没什么好选的，直接推进下一层。守卫放在函数**入口**而不是
+        // 各个调用点——调用点有三处（清层、模拟、以及以后的），守入口只需要守一次。
+        // ⚠️ 但**不能**在这里直接 advanceFloor()：9.x 的节点地图本来就是挂在这后面的
+        // （selectStat → showNodeMap），每 5 层才出现一次。在三选一这一环推进，
+        // 等于连 mapNodes 一起关掉了——那两个开关在面板上是分开的。
+        if (!G.flags.statChoice) {
+            if (G.flags.mapNodes) showNodeMap(); else advanceFloor();
+            return;
+        }
         if (G.selectingActive) return;
         G.selectingActive = true;
         // 随机选3个
@@ -744,7 +770,10 @@ const UI = (function () {
         if (G.floor === 30) { showNotification('📢 精英双词缀！', '#ffaa44', 300); }
         if (G.floor === 40) { G.maxSlots = 6; G.ultimateChargeMult = 1.5; showNotification('📢 槽位+1 充能加速！', '#ffdd44', 360); }
         if (G.floor === 60) { G.maxSlots = 7; showNotification('📢 被动槽位+1！', '#ffdd44', 240); }
-        if (G.floor > 0 && G.floor % 10 === 0) {
+        // 4.0: fate 关掉时**不能**在 showFateChoice 里兜底回 advanceFloor()——那时候
+        // G.floor 已经加过了，再进一次 advanceFloor() 会一直加下去。所以守在这里的
+        // 条件上，直接落到下面的 startFloor()。
+        if (G.floor > 0 && G.floor % 10 === 0 && G.flags.fate) {
             if (G.simMode) { Sim.simAutoFateChoice(); }
             else { showFateChoice(); }
         }

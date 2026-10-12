@@ -289,6 +289,8 @@ const Trail = (function () {
 
     // ---------- v9.1 终极技能 ----------
     function activateUltimate() {
+        // 4.0: 关掉终极技就整个失效。守卫放函数入口，Q 键、模拟、以后的调用点一处就够。
+        if (!G.flags.ultimate) return;
         G.ultimateGauge = 0;
         G.ultimateActive = true;
         G.ultimateTimer = 60;
@@ -378,6 +380,8 @@ const Trail = (function () {
     // v9.25: 「消除」的入口。按键（R / 手机端 🧹 圆钮）走这里，卡牌不再有这条路径。
     // 冷却中按下去给一句反馈而不是静默忽略——不然玩家会以为按键没生效。
     function tryEliminate() {
+        // 4.0: 关掉消除就按 R 没反应（也给一句反馈，免得玩家以为按键坏了）
+        if (!G.flags.eliminate) { UI.setFeedback('🧹 消除已被关闭（功能开关）', '#8aa3c0'); return; }
         if (G.gameOver || G.paused || G.selectingActive) return;
         if (G.eliminateCooldown > 0) {
             UI.setFeedback(`🧹 消除冷却中 · 还要 ${(G.eliminateCooldown / 60).toFixed(1)}s`, '#8ab3d0');
@@ -417,6 +421,8 @@ const Trail = (function () {
     // 也顺带覆盖「槽位刚刚变满」那一刻。每帧只宣读一组，所以不会同一帧把 20 张手牌
     // 连锁清空、玩家什么都看不见。
     function tryAutoUpgrade() {
+        // 4.0: 关掉自动宣读就是手牌只攒不花——非升级的组合仍然要玩家自己排。
+        if (!G.flags.autoUpgrade) return false;
         const pick = findAutoUpgrade();
         if (!pick) return false;
         // doCombine 只写被动、不碰手牌（手牌的口径归 fillSlot / grantCards 管），
@@ -445,6 +451,13 @@ const Trail = (function () {
         // 在放牌时早已把它们从手牌里摘掉；executeBatch()（暂停排队）同理。
         // 旧写法走 addPassive，会白占一个被动槽，而且 T14 永远不会被触发到。
         if (triggerId === 'T14') {
+            // 4.0: 关掉唤魔者就是宣读无效——牌还在手里（随机池那边也不再抽得到它），
+            // 但宣读不会召 BOSS，白占的那一次宣读照旧消耗掉。
+            if (!G.flags.evoker) {
+                logEvent('card_combine', { trigger: triggerId, effect: effectId, chairHit: null, oneShot: true, evokerDisabled: true });
+                UI.setFeedback('👹 唤魔者已被关闭（功能开关），本次宣读无效', '#8aa3c0');
+                return true;
+            }
             triggerEvoker();
             logEvent('card_combine', { trigger: triggerId, effect: effectId, chairHit: null, oneShot: true });
             UI.setFeedback('👹 唤魔者宣读！全场清空 + 三词条 BOSS 现身', '#a01f2e');
@@ -461,7 +474,9 @@ const Trail = (function () {
         addPassive(triggerId, effectId);
         logEvent('card_combine', { trigger: triggerId, effect: effectId, chairHit: null });
         let chairHit = null;
-        for (const combo of CHAIR_COMBOS) {
+        // 4.0: 关掉轮椅组合就是抽不到那几组保底——组合本身照常生效，只是没有额外 bonus
+        // 与专属轨迹皮肤。
+        for (const combo of (G.flags.chair ? CHAIR_COMBOS : [])) {
             if (combo.trigger === triggerId && combo.effect === effectId) {
                 combo.bonus(G); G.chairBonuses++;
                 G.activeTrailType = combo.trailType;

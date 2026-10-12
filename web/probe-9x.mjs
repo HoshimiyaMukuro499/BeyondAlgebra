@@ -48,7 +48,10 @@ const documentStub = {
   body: makeEl(), documentElement: makeEl(),
 };
 const windowStub = {
-  location: { search: '', href: 'file:///x.html' },
+  // 4.0: 用网址参数在**加载期**把开关全开。这是等价性验证的正确做法——boot() 在源码
+  // 求值时就跑完了，等拿到 api 再 setAll() 已经晚了（开局那一段是按默认配置跑的）。
+  // ?flags=all 同时也是给玩家试玩用的那个入口，探针走的就是玩家走的那条路。
+  location: { search: '?flags=all', href: 'file:///x.html?flags=all' },
   addEventListener: noop, removeEventListener: noop,
   innerWidth: 1280, innerHeight: 800, devicePixelRatio: 1,
   __SIM_MODE__: true, __SIM_TARGET__: 0, __SIM_SPEED__: 1,
@@ -73,9 +76,13 @@ const factory = new Function(
   // 9.x 产物没有命名空间（typeof Core === "undefined"），仍走下面那份老的对象字面量；
   // 老那份包在箭头函数里是必须的——直接在 4.x 上求值会 ReferenceError。
   // 摊平是安全的：286 个顶层符号零重名，所以每个属性只可能来自一个模块。
-  ' const __ns = (typeof Core !== "undefined") ? Object.assign({}, Core, Data, State, Combat, Tutor, Trail, Update, Render, UI, Main, Events, Sim) : null;' +
+  ' const __ns = (typeof Core !== "undefined") ? Object.assign({}, Core, Flags, Data, State, Combat, Tutor, Trail, Update, Render, UI, Main, Events, Sim) : null;' +
   ' if (__ns) {' +
   '   if (Tutor.Tutorial) __ns.Tutorial = Tutor.Tutorial;' +   // 命名空间叫 Tutor，导出的对象叫 Tutorial
+  // 同理：Object.assign 摊平的是各命名空间的**成员**，`__ns.Flags` 并不会自动出现
+  // （除非 Flags 自己导出一个叫 Flags 的成员）。而 HAS_V40 就是拿 `api.Flags` 判的——
+  // 少了这一行整个 26 节都不跑，而且不报错，只是静默变成「没有这一节」。
+  '   __ns.Flags = Flags;' +
   '   __ns.deletedSymbols = { KILL_BURSTS: typeof KILL_BURSTS !== "undefined", MAP_NODES: typeof MAP_NODES !== "undefined",' +
   '     startVacuum: typeof startVacuum !== "undefined", skipVacuum: typeof skipVacuum !== "undefined",' +
   '     updateVacuumUI: typeof updateVacuumUI !== "undefined", showCardSelection: typeof showCardSelection !== "undefined",' +
@@ -285,6 +292,12 @@ const api = factory(
   windowStub, documentStub, noop, noop, noop, noop, noop, noop,
   { now: () => 0 }, { userAgent: 'node' }, { getItem: () => null, setItem: noop }, noop
 );
+
+// 4.0: 功能开关默认全关（只留教程与调试台）。下面 600 多条断言写的都是 9.x 的行为，
+// 所以先把开关全开——这正是「等价性」要证明的那件事：**4.0 全开必须与 9.32 逐条一致**。
+// 开关自己的行为（默认配置下哪些系统真的消失了）由末尾的 HAS_V40 一节单独测。
+const HAS_V40 = !!(api.Flags && api.G && api.G.flags);
+if (HAS_V40) api.Flags.setAll(true);
 
 const { G, resetGame, update, draw, checkTrailLoop, nearestTurret, autoShoot } = api;
 const { getEssenceCap, addCombatEssence, getMerchantStock, getShopRefreshCost,
@@ -3744,6 +3757,181 @@ if (!HAS_V932) {
     `${getDiffAtFloor(50)} / ${getMonsterScaleAtFloor(50)}`);
 
   G.floor = keepFloor;
+}
+
+// ============================================================
+//  26. v4.0 —— 「减法」：默认配置真的只剩核心循环
+// ============================================================
+// 上面 25 节跑的都是 ?flags=all（等价性：全开必须与 9.32 逐条一致）。
+// 这一节问的是另一个问题，而且必须用**另一个配置**问：默认全关时，那些系统是不是
+// 真的消失了、核心链路是不是还在。
+//
+// 做法是把同一份源码换一套 windowStub 再求值一次。new Function 的产物全是局部的，
+// 换一套桩就是干干净净的一局；配置写成网址参数，和玩家按 F 全关走的是同一条路
+// （?flags=none 是穷举式的，不受上一次点过什么影响）。
+if (HAS_V40) {
+  section('26. v4.0 减法（?flags=none：默认只剩 移动→轨迹→闭环→图腾→组合）');
+
+  const evalWith = (search, sim = true) => factory(
+    Object.assign({}, windowStub, { location: { search, href: 'file:///x.html' + search },
+      __SIM_MODE__: sim }),
+    documentStub, noop, noop, noop, noop, noop, noop,
+    { now: () => 0 }, { userAgent: 'node' }, { getItem: () => null, setItem: noop }, noop);
+
+  // 等价性那一侧的配置本身
+  ok(Object.values(G.flags).every(v => v === true),
+    '?flags=all：22 个开关全为 true', JSON.stringify(G.flags));
+
+  let A2 = null, bootErr = '';
+  try { A2 = evalWith('?flags=none'); } catch (e) { bootErr = String((e && e.message) || e); }
+  ok(!!A2, '默认配置（?flags=none）能求值到底——boot 不炸', bootErr);
+
+  // ---------- 26b 真实开局（玩家那条分支，不是模拟器那条） ----------
+  // ⚠️ 这一小段必须用 __SIM_MODE__: false 再求值一次：boot() 在模拟模式下走的是
+  // simAutoSelectClass()，**根本不过 initClassSelection()**——「关掉职业选择」「关掉教程」
+  // 这两条守卫在模拟分支里验不到（那里本来就没有遮罩）。不单独跑一遍的话，本节会一边
+  // 报「开局补给 0 张」一边看起来像个 4.0 的 bug，其实是验错了路径。
+  let A0 = null, err0 = '';
+  try { A0 = evalWith('?flags=none', false); } catch (e) { err0 = String((e && e.message) || e); }
+  ok(!!A0, '玩家配置（非模拟）能求值到底——boot 不炸', err0);
+  if (A0) {
+    const G0 = A0.G;
+    ok(G0.playerClass === A0.CLASSES[0], '职业选择关掉 → 开局直接是 CLASSES[0]',
+      `${G0.playerClass && G0.playerClass.name}`);
+    ok(G0.hand.length === A0.START_CARDS,
+      `教程关掉但开局补给照发 ${A0.START_CARDS} 张（Tutorial.seen 那条耦合没漏）`,
+      `got ${G0.hand.length}`);
+    ok(A0.Tutorial.active === false && A0.Tutorial.cfg === null,
+      '教程关掉 → 没有教程脚本在播，也不会有「古老的石板」提示');
+    ok(G0.floor === 1, '开局进到第 1 层', `got ${G0.floor}`);
+  }
+
+  if (A2) {
+    const G2 = A2.G;
+
+    // ---------- 26a 开关表本身 ----------
+    ok(Object.keys(G2.flags).length === 22, '开关表 22 条', `got ${Object.keys(G2.flags).length}`);
+    ok(Object.values(G2.flags).every(v => v === false),
+      '?flags=none：22 个开关全为 false',
+      JSON.stringify(Object.entries(G2.flags).filter(kv => kv[1])));
+
+    // ---------- 26c 核心链路：闭环 → 出塔 ----------
+    G2.turrets = []; G2.turretLoops = {}; G2.turretHpBonus = 0;
+    for (let i = 0; i < 40; i++) { G2.frame = 1; A2.checkTrailLoop(); }   // 排空判环冷却
+    G2.frame = 0;
+    G2.trails = [];
+    for (let i = 0; i <= 40; i++) {
+      const a = (i / 40) * Math.PI * 2;
+      const x = 400 + Math.cos(a) * 20, y = 280 + Math.sin(a) * 20;
+      G2.trails.push({ x1: x, y1: y, x2: x, y2: y, life: 360, layer: 1, trailType: 'basic' });
+    }
+    G2.frame = 6; A2.checkTrailLoop();
+    ok(G2.turrets.length === 1, '核心链路仍在：闭环 → 出塔', `got ${G2.turrets.length}`);
+
+    // ---------- 26d 核心链路：两张牌 → 宣读 → 成被动 ----------
+    G2.hand = [];
+    A2.grantCards(A2.START_CARDS, '组合测试', '#8ab3d0');
+    const ti = G2.hand.findIndex(c => c.type === 'trigger');
+    ok(ti >= 0 && G2.hand.some(c => c.type === 'effect'),
+      '开局手牌里触发板与效果板都有（dropBalancedCard 仍然平衡）',
+      `hand=${G2.hand.map(c => c.id).join(',')}`);
+    if (ti >= 0) {
+      A2.fillSlot(ti);
+      // fillSlot() 会把牌从手里 splice 掉，所以效果板的**下标要重新找**——
+      // 沿用填触发板之前的那个下标会指到别的牌上（或者指空）。
+      const ei = G2.hand.findIndex(c => c.type === 'effect');
+      if (ei >= 0) A2.fillSlot(ei);
+      ok(!!G2.triggerSlot && !!G2.effectSlot, '两个槽位都填上了',
+        `trigger=${G2.triggerSlot && G2.triggerSlot.id} effect=${G2.effectSlot && G2.effectSlot.id}`);
+      G2.combineCooldown = false;      // setTimeout 在探针里是 noop，得手动清
+      A2.combineCards();
+      ok(Object.keys(G2.passives).length > 0, '核心链路仍在：两张牌 → 宣读 → 成被动',
+        `passives=${JSON.stringify(G2.passives)}`);
+    }
+
+    // ---------- 26e 核心链路：真的能玩（连跑 360 帧） ----------
+    G2.floor = 1; G2.gameOver = false;
+    G2.player.x = 390; G2.player.y = 280;
+    G2.monsters = []; G2.monstersToSpawn = 0;
+    const px0 = G2.player.x, py0 = G2.player.y;
+    G2.keys.w = true;
+    let frames = 0, threw = '';
+    try { for (; frames < 360; frames++) A2.update(); } catch (e) { threw = String((e && e.message) || e); }
+    G2.keys.w = false;
+    ok(frames === 360 && !threw, '默认配置下连跑 360 帧不抛异常', threw);
+    ok(Math.hypot(G2.player.x - px0, G2.player.y - py0) > 20, '按 W 真的会动',
+      `位移 ${Math.hypot(G2.player.x - px0, G2.player.y - py0).toFixed(1)}`);
+    ok(G2.trails.length > 0, '移动真的留下轨迹', `trails=${G2.trails.length}`);
+    ok(G2.monsters.length > 0 || G2.floorKills > 0, '第 1 层真的出怪了');
+    ok(G2.gameOver === false, '360 帧之内没被打死（第 1 层在默认配置下是能玩的）');
+
+    // ---------- 26f 逐个系统：关掉之后真的不出现 ----------
+    G2.floor = 200;   // 先把各系统的解锁层数都跨过去，否则「没出现」可能只是因为没解锁
+    ok(A2.rareChance() === 0, '稀有卡关掉 → rareChance() 恒 0（200 层也不放）', `got ${A2.rareChance()}`);
+    ok(A2.pickAffixes(3, { bossOnly: 'any', kind: 'elite' }).length === 0, '精英词缀关掉 → 空表');
+    ok(A2.pickAffixes(3, { bossOnly: 'any', kind: 'boss' }).length === 0, 'BOSS 词缀关掉 → 空表');
+    // 不带 kind 的 'any'（只有探针会这么调）：两个开关都关也要作废
+    ok(A2.pickAffixes(3, { bossOnly: 'any' }).length === 0, "两个都没带 kind 的 'any' 调用也作废");
+    ok(A2.playerCap(100) === 100 && A2.playerCap(4000) === 4000,
+      '软上限关掉 → playerCap() 恒等于基准值', `${A2.playerCap(100)} / ${A2.playerCap(4000)}`);
+
+    G2.terrain = [{ x: 1, y: 1 }, { x: 2, y: 2 }];
+    A2.generateTerrain();
+    ok(G2.terrain.length === 0, '地形关掉 → generateTerrain() 先清空、再返回空表',
+      `got ${G2.terrain.length}`);
+
+    let shooters = 0, spawned = 0;
+    G2.monsters = [];
+    for (let i = 0; i < 200; i++) {
+      const before = G2.monsters.length;
+      A2.spawnMonster();
+      if (G2.monsters.length > before) { spawned++; if (G2.monsters[G2.monsters.length - 1].isShooter) shooters++; }
+    }
+    ok(spawned > 0 && shooters === 0,
+      `射击怪关掉 → 随机生成 ${spawned} 只，0 只是射击怪`, `shooters=${shooters}`);
+
+    G2.ultimateActive = false; G2.ultimateGauge = G2.ultimateMax;
+    A2.activateUltimate();
+    ok(G2.ultimateActive === false && G2.ultimateGauge === G2.ultimateMax,
+      '终极技关掉 → 按 Q 毫无反应（连充能都不清）', `active=${G2.ultimateActive} gauge=${G2.ultimateGauge}`);
+
+    G2.eliminateCooldown = 0;
+    A2.tryEliminate();
+    ok(G2.eliminateCooldown === 0, '消除关掉 → 按 R 不进冷却（即没生效）',
+      `cd=${G2.eliminateCooldown}`);
+
+    G2.relics.length = 0;
+    A2.dropRelic();
+    ok(G2.relics.length === 0, '遗物关掉 → dropRelic() 一件都不掉');
+    const stock2 = A2.getMerchantStock();
+    ok(!stock2.some(s => s.type === 'relic'), '遗物关掉 → 商人不出售遗物',
+      JSON.stringify(stock2.map(s => s.type)));
+    ok(!stock2.some(s => s.card && s.card.rare),
+      '稀有卡关掉 → 商人的效果板里也不会冒出一张 E15/E16/E17',
+      JSON.stringify(stock2.filter(s => s.card).map(s => s.card.id)));
+
+    // 危险区：40 层起，先人工塞一个再跑一帧，确认会被当场清掉
+    G2.floor = 60;
+    G2.hazardZones.push({ x: 100, y: 100, r: 55, life: 600, maxLife: 600 });
+    A2.update();
+    ok(G2.hazardZones.length === 0, '危险区关掉 → 已经落地的圈当场清掉（不留不会消散的残留）',
+      `got ${G2.hazardZones.length}`);
+
+    // ---------- 26g 开关之间不许连坐 ----------
+    // 5 层的节点地图挂在属性三选一后面（selectStat → showNodeMap），所以「只开地图、
+    // 关掉三选一」是这一节最该验的组合：三选一的守卫不能顺手把地图也推进掉。
+    let A3 = null, err3 = '';
+    try { A3 = evalWith('?flags=mapNodes'); } catch (e) { err3 = String((e && e.message) || e); }
+    ok(!!A3, '?flags=mapNodes 能求值到底', err3);
+    if (A3) {
+      const G3 = A3.G;
+      G3.floor = 5; G3.selectingActive = false; G3.mapMode = false;
+      A3.showStatChoice();
+      ok(G3.mapMode === true && G3.selectingActive === true,
+        'statChoice 关掉时，mapNodes 仍然照常出图（不连坐）',
+        `mapMode=${G3.mapMode} selectingActive=${G3.selectingActive} floor=${G3.floor}`);
+    }
+  }
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} 通过 / ${fail} 失败`);
