@@ -80,6 +80,7 @@ BeyondAlgebra/
 │   ├── README.md              # 策划案精简版：规则 / 怪物 / 公式 / 密文板全表
 │   ├── VALUES_REFERENCE.md    # 数值参考手册：查数的地方（公式、表、出处）
 │   ├── VALUES_DESIGN.md       # 数值设计笔记：理解的地方（问题 → 设计 → 陷阱）
+│   ├── VALUES_LEGACY.md       # 旧版数值总表（v9.31 状态，存档不再维护）
 │   ├── EDITION.md             # 版本记录（按时间倒序）
 │   └── CLAUDE.md              # 代码结构索引与更新指南
 ├── 策划案.pdf / *.docx         # 策划文档
@@ -131,3 +132,4 @@ npx wrangler login
 - [策划案精简版](BeyondAlgebra/README.md) — 核心规则、8 种怪物数值表、密文板全表、得分系统
 - [版本记录](BeyondAlgebra/EDITION.md) — 从 v2.0 到 v9.32 的完整改动史
 - [CLAUDE.md](BeyondAlgebra/CLAUDE.md) — 单文件代码结构索引、数值改动联动检查清单
+- [数值总表（旧·存档）](BeyondAlgebra/VALUES_LEGACY.md) — v9.31 状态的速查表，已被上面两份取代，**不要照着它改代码**

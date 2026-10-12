@@ -1294,7 +1294,9 @@ triggerPassive(tid, target)   // T03/T06/T07/T08 传被命中的那只怪
 
 ### 6. 文档与测试
 
-新增 [VALUES.md](VALUES.md)——全部数值与公式速查。`web/probe-9x.mjs` 新增第
+新增 `VALUES.md`——全部数值与公式速查（v9.32 拆成 VALUES_REFERENCE.md +
+VALUES_DESIGN.md，原文件改名存档为 [VALUES_LEGACY.md](VALUES_LEGACY.md)）。
+`web/probe-9x.mjs` 新增第
 15/16 节（轨迹迟缓、绕障、终极技定速、死代码消失断言，以及教程 1–5 层逐层脚本
 回归：7/8/13/11/6 步按序播完）。
 
