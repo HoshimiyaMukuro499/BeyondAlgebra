@@ -1,3 +1,20 @@
+// ============================================================
+//  10-sim —— 对局记录导出 / 自动模拟模式 / 启动引导
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Sim`。边界见 web/scope-check.mjs。
+const Sim = (function () {
+
+    const { G, angleTo, diffScaleAt, dist, formatDiff, getDifficultyMultiplier } = Core;
+    const { logEvent, snapshotStats, sumPassiveLayers } = State;
+    const { tutorialCheckBalance } = Tutor;
+    const { doCombine, startFloor, updateBatchUI } = Trail;
+    const { update } = Update;
+    const { draw } = Render;
+    const { advanceFloor, initClassSelection, setFeedback, updateUI } = UI;
+    const { gameLoop } = Main;
+    const { addScore, fmtScore } = Combat;
+    const { CLASSES, FATE_CHOICES, NODE_POOL, STAT_CHOICES, TURRET_SLOT_CHOICE, getMerchantStock, randomEffect, randomTrigger } = Data;
+
     // ---------- v9.10 导出对局记录 ----------
     // v9.31: 版本号不再硬编码。这里原来写死 'v9.10'（那是**格式版本**，不是游戏版本），
     // 于是 v9.28 的对局记录头上还印着 v9.10。改成读构建期占位符——
@@ -536,24 +553,40 @@
     // ============================================================
     //  v9.10 启动
     // ============================================================
-    if (G.simMode) {
-        // 关闭所有遮罩层
-        ['classOverlay','pauseOverlay','pauseWorkshop','selectionOverlay',
-         'mapOverlay','merchantOverlay'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.classList.remove('active');
-        });
-        simAutoSelectClass();
-    } else {
-        updateUI(); updateBatchUI();
-        setFeedback('🧙 选择你的密文法师职业以开始冒险', '#f5c542');
-        initClassSelection();
+    // 4.0: 这段从「模块体顶层」挪进了 boot()，由文件末尾调用。原因：gameLoop() 在
+    // 模拟模式下会同步回调 Sim.simLoop()，而 `const Sim = (function(){…})()` 要等
+    // 这个 IIFE 返回才赋值——写在体内的话，那一刻 Sim 还在 TDZ 里（ReferenceError）。
+    // 挪出来之后，顺序变成「11 个模块全部装配完 → 再点启动」，也就是本来就该有的顺序。
+    function boot() {
+        if (G.simMode) {
+            // 关闭所有遮罩层
+            ['classOverlay','pauseOverlay','pauseWorkshop','selectionOverlay',
+             'mapOverlay','merchantOverlay'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.remove('active');
+            });
+            simAutoSelectClass();
+        } else {
+            updateUI(); updateBatchUI();
+            setFeedback('🧙 选择你的密文法师职业以开始冒险', '#f5c542');
+            initClassSelection();
+        }
+
+        // 启动游戏循环
+        tutorialCheckBalance();
+        gameLoop();
+
+        // v9.25: 启动已跑完——之后再抛的错都是运行期问题，不该再触发底部那条
+        // 自检条（它只负责「启动失败」，见 template.html 的 __bootError）。
+        window.__booted = true;
     }
 
-    // 启动游戏循环
-    tutorialCheckBalance();
-    gameLoop();
+    return {
+        LOG_FORMAT_VERSION, autoPilot, boot, buildGameLogJSONL, exportGameLog, getDiffAtFloor,
+        getMonsterScaleAtFloor, handleSimGameOver, simAutoCombine, simAutoFateChoice,
+        simAutoSelectClass, simAutoStatChoice, simDoBuy, simLoop,
+    };
+})();
 
-    // v9.25: 启动已跑完——之后再抛的错都是运行期问题，不该再触发底部那条
-    // 自检条（它只负责「启动失败」，见 template.html 的 __bootError）。
-    window.__booted = true;
+// 启动引导（见上面 boot() 的说明）。必须在 IIFE 之外。
+Sim.boot();

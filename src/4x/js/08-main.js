@@ -1,3 +1,18 @@
+// ============================================================
+//  08-main —— 主循环 / 重开一局
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Main`。边界见 web/scope-check.mjs。
+// 本模块只有两个入口：gameLoop()（rAF 主循环：update/draw 派发 + FPS 叠层）与 resetGame()（重开一局，逐字段复位 G 并收起各浮层）。
+const Main = (function () {
+
+    const { G } = Core;
+    const { ctx } = State;
+    const { Tutorial } = Tutor;
+    const { updateBatchUI } = Trail;
+    const { update } = Update;
+    const { draw } = Render;
+    const { initClassSelection, syncGameOverUI, updateRelicUI, updateUI } = UI;
+
     // ---------- 重置 ----------
     function resetGame() {
         G.player.x = 390; G.player.y = 280;
@@ -45,7 +60,7 @@
         // ——ID 是旧局留下的数字，不清掉的话新局第一根手指会被当成「不是摇杆那根」。
         G.affixZones.length = 0; G.bossBanner = null; G.eliminateCooldown = 0;
         G.stickBase = null; G._stickTouchId = null;
-        resetJoystickVisual();
+        Events.resetJoystickVisual();
         Tutorial.reset();
         document.getElementById('pauseOverlay').classList.remove('active');
         document.getElementById('pauseWorkshop').classList.remove('active');
@@ -123,7 +138,7 @@
     let _timeAcc = 0;
     function gameLoop() {
         if (G.simMode) {
-            simLoop();
+            Sim.simLoop();
             return;
         }
         const _t0 = performance.now();
@@ -145,4 +160,9 @@
         }
         requestAnimationFrame(gameLoop);
     }
+
+    return {
+        gameLoop, resetGame,
+    };
+})();
 

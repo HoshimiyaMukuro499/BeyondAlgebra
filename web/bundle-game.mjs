@@ -9,7 +9,9 @@
 // 拼装产物是纯静态单文件，仍可直接双击运行，也仍是 web/build.mjs 的输入。
 import fs from 'node:fs';
 import path from 'node:path';
+import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
+import { analyzeModules } from './scope-check.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -34,7 +36,41 @@ const files = fs.readdirSync(jsDir).filter((f) => f.endsWith('.js'))
   .sort((a, b) => parseInt(a, 10) - parseInt(b, 10) || a.localeCompare(b));
 if (files.length === 0) throw new Error(`src/${SRC_DIR}/js 下没有任何模块`);
 
-const js = files.map((f) => read(path.join(jsDir, f))).join('\n');
+const modules = files.map((f) => ({ name: f, code: read(path.join(jsDir, f)) }));
+
+// 4.0: 模块边界的机器检查。详见 web/scope-check.mjs 顶部的说明。
+// `--scope-report` 只打印（用来反查每个文件该导出什么、以及有哪些前向引用），
+// `--check` 会把它当成构建失败条件。
+if (process.argv.includes('--scope-report')) {
+  const { modules: mods, problems, needed } = analyzeModules(modules);
+  for (const mod of mods) {
+    console.log(`\n=== ${mod.name}  →  命名空间 ${mod.ns || '(无)'} ===`);
+    console.log(`  需导出（别的模块引用了它）: ${[...needed[mod.index]].sort().join(', ') || '(无)'}`);
+    const line = (label, map) => {
+      const parts = [...map.entries()].map(([ns, set]) => `${ns}.{ ${[...set].sort().join(', ')} }`);
+      console.log(`  ${label}: ${parts.join('  ') || '(无)'}`);
+    };
+    line('需解构（前面模块）', mod.importsNeeded);
+    line('需点号调用（后面模块）', mod.forwardNeeded);
+    console.log(`  导出了但没人用: ${mod.unusedExports.sort().join(', ') || '(无)'}`);
+  }
+  const fwd = problems.filter((p) => p.msg.startsWith('前向裸引用'));
+  console.log(`\n前向裸引用 ${fwd.length} 处：`);
+  for (const p of fwd) console.log(`  ${p.file}: ${p.msg}`);
+  process.exit(0);
+}
+
+const js = modules.map((m) => m.code).join('\n');
+
+// 拼接本身不会解析代码——`return { a, b,, }` 这种手滑，字节比对和边界检查都看不见，
+// 要等浏览器（或探针）加载时才炸。这里按**经典脚本**编译一遍，和 <script> 的加载方式一致。
+// 只编译不执行，所以 document/window 之类的浏览器全局不会有事。
+try {
+  new vm.Script(js, { filename: `src/${SRC_DIR}/js (拼接后)` });
+} catch (e) {
+  console.error(`✗ 拼装后的 JS 有语法错误：${e.message}`);
+  process.exit(1);
+}
 
 for (const slot of ['{{CSS}}', '{{BODY}}', '{{JS}}']) {
   if (!template.includes(slot)) throw new Error(`模板缺少槽位 ${slot}`);
@@ -68,6 +104,17 @@ if (process.argv.includes('--check')) {
     process.exit(1);
   }
   console.log(`✓ ${path.basename(outFile)} 与 src/${SRC_DIR}/ 一致`);
+
+  // 模块边界检查（见 web/scope-check.mjs）。9.x 还没包 IIFE，跳过。
+  if (SRC_DIR === '4x') {
+    const { problems } = analyzeModules(modules);
+    if (problems.length) {
+      console.error(`✗ 模块边界检查未通过（${problems.length} 条）：`);
+      for (const p of problems) console.error(`   ${p.file}: ${p.msg}`);
+      process.exit(1);
+    }
+    console.log(`✓ 模块边界检查通过（${files.length} 个模块）`);
+  }
 } else {
   fs.writeFileSync(outFile, out);
   const kb = (Buffer.byteLength(out) / 1024).toFixed(0);

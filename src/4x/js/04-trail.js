@@ -1,3 +1,18 @@
+// ============================================================
+//  04-trail —— 行走轨迹 / 图腾 / 组合宣读 / 技能
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Trail`。边界见 web/scope-check.mjs。
+// 轨迹在这里既产生伤害、也用来判环出图腾；射击、终极技、消除技能与密文宣读同样归它管。
+const Trail = (function () {
+
+    const { G, PARTICLE_MAX, angleTo, clamp, dist, getDifficultyMultiplier, getMonsterScale,
+            rand, showFloatingText, showNotification } = Core;
+    const { CHAIR_COMBOS, ELIMINATE_COOLDOWN, PLAYER_FIRE_RATE_MUL, STAGE_TYPES, TURRET_RATIO_NORM,
+            generateTerrain } = Data;
+    const { getMonsterCount, getSpawnInterval, logEvent, snapshotStats } = State;
+    const { addPassive, addScore, spawnBoss, triggerEvoker, triggerPassive } = Combat;
+    const { Tutorial } = Tutor;
+
     // ---------- 核心游戏逻辑 ----------
     function startFloor() {
         // v9.24: 词条留下的场地残留逐层清空。敌图腾与「封印」都是挂在上一层的
@@ -15,7 +30,7 @@
             G.bossPending = false; G.bossSpawned = false;
             addScore(G.floor * 5);
             logEvent('floor_start', { stageType: 'tutorial', monsterCount: G.monstersToSpawn, isBoss: false, snapshot: snapshotStats() });
-            setFeedback(`🌊 第 ${G.floor} 层 · 教程 (${G.monstersToSpawn}只)`, '#7bb3ff');
+            UI.setFeedback(`🌊 第 ${G.floor} 层 · 教程 (${G.monstersToSpawn}只)`, '#7bb3ff');
             return;
         }
         const st = STAGE_TYPES.find(s => s.id === G.stageType) || STAGE_TYPES[0];
@@ -34,9 +49,9 @@
         addScore(G.floor * 5);
         if (isBoss) {
             spawnBoss(); G.bossPending = true; G.bossSpawned = true;
-            setFeedback(`👑 第${G.floor}层 ${st.icon}${st.label} BOSS! (${count}只) 难度×${diff.toFixed(2)}`, '#ff3366');
+            UI.setFeedback(`👑 第${G.floor}层 ${st.icon}${st.label} BOSS! (${count}只) 难度×${diff.toFixed(2)}`, '#ff3366');
         } else {
-            setFeedback(`${st.icon} 第${G.floor}层 ${st.label} (${count}只) 难度×${diff.toFixed(2)}`, '#ffb347');
+            UI.setFeedback(`${st.icon} 第${G.floor}层 ${st.label} (${count}只) 难度×${diff.toFixed(2)}`, '#ffb347');
         }
     }
 
@@ -86,7 +101,7 @@
         // v9.24: 「削减区」词条——玩家站在怪身边开火时子弹伤害打折。
         // 这里是子弹伤害唯一的出口，改这一处就覆盖主弹与额外弹丸（额外弹丸在下面按 atk 的 0.6 派生）。
         // 只压子弹，不压轨迹——轨迹是玩家的核心输出手段，一起压会让这条词条变成纯粹的数值墙。
-        atk *= getPlayerAtkZoneMul();
+        atk *= Update.getPlayerAtkZoneMul();
         // v9.4: 低血量狂暴
         if (G.relicBuffs.lowHpBerserk && G.player.hp < G.player.maxHp * 0.3) atk *= 2;
         // v9.4: 暴击
@@ -218,7 +233,7 @@
         if (G.turrets.length >= G.maxTurrets) {
             if (G.frame - (G.turretCapHintFrame || -999) > 120) {
                 G.turretCapHintFrame = G.frame;
-                setFeedback(`🗼 图腾已满 ${G.turrets.length}/${G.maxTurrets}——碎裂或扩容后才能再召唤`, '#88aacc');
+                UI.setFeedback(`🗼 图腾已满 ${G.turrets.length}/${G.maxTurrets}——碎裂或扩容后才能再召唤`, '#88aacc');
             }
             return;
         }
@@ -244,7 +259,7 @@
         _loopCD = 30;
         triggerPassive('T12'); addScore(Math.floor(area / 100));
         Tutorial.emit('loop', { tier: tier.t, area: Math.floor(area) });
-        setFeedback('⭕' + tier.b + '!' + Math.floor(area) + 'px²', '#ffaa00');
+        UI.setFeedback('⭕' + tier.b + '!' + Math.floor(area) + 'px²', '#ffaa00');
         spawnParticles(cx, cy, '#ffaa00', 18);
         showFloatingText(cx, cy - 10, tier.b, '#ffaa00');
         logEvent('turret', { type: turType, tier: tier.t });
@@ -294,7 +309,7 @@
         }
         G.trails = [];
         G.fireTrails = [];
-        setFeedback('⚡ 轨迹风暴！全场爆炸 + 眩晕2秒', '#ffdd44');
+        UI.setFeedback('⚡ 轨迹风暴！全场爆炸 + 眩晕2秒', '#ffdd44');
         addScore(50);
         Tutorial.emit('ultimate');
     }
@@ -326,7 +341,7 @@
         G.triggerSlot = null; G.effectSlot = null;
         G.combineCooldown = true;
         setTimeout(() => { G.combineCooldown = false; }, 300);
-        updateUI();
+        UI.updateUI();
     }
 
     // v9.21: T13「消除」——v9.25 起不再是密文版，改成玩家的固定技能。
@@ -356,7 +371,7 @@
         }
         spawnParticles(G.player.x, G.player.y, '#ffdd66', 24);
         showNotification('🧹 消除！', '#ffdd66', 200);
-        setFeedback(`🧹 消除：全场${hitCount}只怪各受${dmg}点伤害` + (cleared ? '，最早一座图腾被拆掉' : '（场上无图腾可拆）'), '#ffdd66');
+        UI.setFeedback(`🧹 消除：全场${hitCount}只怪各受${dmg}点伤害` + (cleared ? '，最早一座图腾被拆掉' : '（场上无图腾可拆）'), '#ffdd66');
         logEvent('eliminate', { damage: dmg, monsters: hitCount, turretCleared: cleared });
     }
 
@@ -365,7 +380,7 @@
     function tryEliminate() {
         if (G.gameOver || G.paused || G.selectingActive) return;
         if (G.eliminateCooldown > 0) {
-            setFeedback(`🧹 消除冷却中 · 还要 ${(G.eliminateCooldown / 60).toFixed(1)}s`, '#8ab3d0');
+            UI.setFeedback(`🧹 消除冷却中 · 还要 ${(G.eliminateCooldown / 60).toFixed(1)}s`, '#8ab3d0');
             return;
         }
         G.eliminateCooldown = ELIMINATE_COOLDOWN;
@@ -416,7 +431,7 @@
             G.hand.push(pick.trigger, pick.effect);
             return false;
         }
-        setFeedback(`🔮 ${pick.trigger.label}+${pick.effect.label} 自动升级`, '#ffb347');
+        UI.setFeedback(`🔮 ${pick.trigger.label}+${pick.effect.label} 自动升级`, '#ffb347');
         return true;
     }
 
@@ -432,7 +447,7 @@
         if (triggerId === 'T14') {
             triggerEvoker();
             logEvent('card_combine', { trigger: triggerId, effect: effectId, chairHit: null, oneShot: true });
-            setFeedback('👹 唤魔者宣读！全场清空 + 三词条 BOSS 现身', '#a01f2e');
+            UI.setFeedback('👹 唤魔者宣读！全场清空 + 三词条 BOSS 现身', '#a01f2e');
             Tutorial.emit('combine', { chair: null });
             return true;
         }
@@ -441,7 +456,7 @@
         for (const tid of Object.keys(G.passives)) usedSlots += G.passives[tid].length;
         const isUpgrade = G.passives[triggerId] && G.passives[triggerId].some(p => p.effectId === effectId);
         if (!isUpgrade && usedSlots >= G.maxSlots) {
-            setFeedback(`⚠️ 槽位已满(${usedSlots}/${G.maxSlots})`, '#ff6644'); return false;
+            UI.setFeedback(`⚠️ 槽位已满(${usedSlots}/${G.maxSlots})`, '#ff6644'); return false;
         }
         addPassive(triggerId, effectId);
         logEvent('card_combine', { trigger: triggerId, effect: effectId, chairHit: null });
@@ -466,7 +481,7 @@
         // v9.28: T01/T02 删掉了，宣读那一刻的即时触发只剩 T10（残血）。
         // v9.31: T14（唤魔者）挪到函数开头单独处理——它不再产生被动，所以走不到这里。
         if (triggerId === 'T10' && G.player.hp < G.player.maxHp * 0.3) { triggerPassive('T10'); }
-        setFeedback(msg, chairHit ? '#ff8844' : '#ffb347');
+        UI.setFeedback(msg, chairHit ? '#ff8844' : '#ffb347');
         Tutorial.emit('combine', { chair: chairHit ? chairHit.id : null });
         if (Tutorial.combos >= 2) Tutorial.emit('combine2');
         if (chairHit) Tutorial.emit('chair', { id: chairHit.id });
@@ -479,8 +494,8 @@
         G.batchQueue.push({ trigger: { ...G.triggerSlot }, effect: { ...G.effectSlot } });
         G.triggerSlot = null; G.effectSlot = null;
         updateBatchUI();
-        updateUI();
-        setFeedback(`📦 排队 ${G.batchQueue.length} 组密文组合`, '#ffb347');
+        UI.updateUI();
+        UI.setFeedback(`📦 排队 ${G.batchQueue.length} 组密文组合`, '#ffb347');
     }
 
     function executeBatch() {
@@ -490,10 +505,10 @@
             if (doCombine(item.trigger, item.effect)) count++;
         }
         G.batchQueue = [];
-        setFeedback(`📜 批量宣读完成！${count}组被动已激活`, '#ffb347');
+        UI.setFeedback(`📜 批量宣读完成！${count}组被动已激活`, '#ffb347');
         spawnParticles(G.player.x, G.player.y, '#ffb347', 20);
         updateBatchUI();
-        updateUI();
+        UI.updateUI();
     }
 
     function updateBatchUI() {
@@ -516,4 +531,14 @@
                 G.batchQueue.splice(parseInt(this.dataset.bi), 1); updateBatchUI(); });
         });
     }
+
+    return {
+        ULT_BASE_FRAMES,
+        activateEliminate, activateUltimate, addTrail, autoShoot, checkTrailLoop, combineCards,
+        doCombine, executeBatch, explodeTrails, findAutoUpgrade, getPlayerAttackPower,
+        getTrailDamage, getTrailWidth, getTurretAttackPower, getUltimateChargeFrames,
+        nearestTurret, queueBatchCombine, spawnParticles, startFloor, tryAutoUpgrade,
+        tryEliminate, updateBatchUI,
+    };
+})();
 

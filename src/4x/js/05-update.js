@@ -1,3 +1,22 @@
+// ============================================================
+//  05-update —— 每帧主更新（移动 / 碰撞 / 词条 / 楼层推进）
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Update`。边界见 web/scope-check.mjs。
+const Update = (function () {
+
+    const { G, angleTo, clamp, dist, getMonsterScale, rand,
+            showFloatingText, showNotification } = Core;
+    const { AFFIX_ZONE_MAX_PER_KIND, AFFIX_ZONE_R_MUL, BOSS_CARD_STEP,
+            ENEMY_SHOOTER_INTERVAL, ENEMY_SHOOTER_RANGE, ENEMY_SHOT_LIFE,
+            affixDef, bossSummonInterval, getFloorClearCards, rollBossCardCount } = Data;
+    const { addCombatEssence, getSpawnInterval, logEvent, snapshotStats } = State;
+    const { addScore, applyHealing, breakKillStreak, registerKill, spawnBossMinion,
+            spawnMonster, splitMonster, tickKillStreak, triggerPassive } = Combat;
+    const { Tutorial, restartRunAfterTutorial, tutorialSyncPointer } = Tutor;
+    const { addTrail, autoShoot, checkTrailLoop, getPlayerAttackPower, getTrailDamage,
+            getTrailWidth, getTurretAttackPower, getUltimateChargeFrames, nearestTurret,
+            spawnParticles, tryAutoUpgrade } = Trail;
+
     // v9.22: 怪物踩到轨迹后挂多少帧迟缓（3 秒 @60fps）。
     // 减速倍数不在这里——沿用 slowTimer 那个 0.8，和 E14「延缓」共用。
     const TRAIL_SLOW_FRAMES = 180;
@@ -40,7 +59,7 @@
                 spawnParticles(G.player.x, G.player.y, color, opts.particles || 6);
                 if (!opts.noText) showFloatingText(G.player.x, G.player.y - G.player.r, '-' + Math.floor(dmg), color);
             }
-            if (G.player.hp <= 0) setFeedback('🛡️ 护盾耗尽！核心暴露！', '#ff4444');
+            if (G.player.hp <= 0) UI.setFeedback('🛡️ 护盾耗尽！核心暴露！', '#ff4444');
             return 'shield';
         }
         G.core.hp = Math.max(0, G.core.hp - dmg);
@@ -453,7 +472,7 @@
             // 一帧跨两道坎（重击 / 消除直接带走一大截）就补两次，不漏发
             for (let k = done; k < passed; k++) {
                 const n = rollBossCardCount();
-                grantCards(n, `BOSS 磨血 ${Math.round((k + 1) * 25)}%`, '#ff6688');
+                UI.grantCards(n, `BOSS 磨血 ${Math.round((k + 1) * 25)}%`, '#ff6688');
                 showFloatingText(m.x, m.y - m.r - 20, '📥+' + n, '#ff88aa');
             }
         }
@@ -485,7 +504,7 @@
         tickKillStreak();
 
         // v9.10: 自动驾驶
-        if (G.simMode) { autoPilot(); }
+        if (G.simMode) { Sim.autoPilot(); }
 
         const p = G.player;
 
@@ -791,7 +810,7 @@
                         if (G.core.hp <= 0) {
                             G.core.hp = 0;
                             G.gameOver = true;
-                            setFeedback('💀 核心被毁 · 游戏结束', '#d44');
+                            UI.setFeedback('💀 核心被毁 · 游戏结束', '#d44');
                         }
                     }
                 }
@@ -816,14 +835,14 @@
                     // v9.31: 撤掉 `G.relics.length < 8`。遗物**没有上限**了——真正的
                     // 天花板是 RELICS 的表长，dropRelic() 自己那道「同名只能拿一次」
                     // 的去重仍然留着。
-                    if (Math.random() < 0.3 * (G.fateBuffs.dropRateMul || 1)) dropRelic();
+                    if (Math.random() < 0.3 * (G.fateBuffs.dropRateMul || 1)) UI.dropRelic();
                     if (G.fateBuffs.vampHeal > 0) {
                         G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.fateBuffs.vampHeal * 3);
                     }
                     // v9.28: 唤魔者 BOSS 额外掉一把「唤魔之钥」。它是真 BOSS——上面那套
                     // 普通掉落（精华 / 遗物 / 卡牌 / T08 / 连杀分）照常吃，只是多掉一个。
                     // 钥匙**不走** dropRelic()——它是独立来源，不该混进随机池。
-                    if (m.isEvokerBoss) gainEvokerKey();
+                    if (m.isEvokerBoss) UI.gainEvokerKey();
                     triggerPassive('T08', m); addScore(G.killStreak * 5);
                     // v9.28: bossPending/bossSpawned 是「每 10 层一只」的楼层排程，
                     // 打死唤魔者招出来的那只不该顺手把它们清掉。
@@ -831,10 +850,10 @@
                     // v9.22: 卡牌数也吃 dropRateMul；飘字改用实际到手的 bossGot
                     // （原来说的是未受本层精华上限钳制的 10+层，跟真掉的对不上）
                     const drops = Math.round((2 + Math.floor(Math.random() * 2)) * (G.fateBuffs.dropRateMul || 1));
-                    for (let d = 0; d < drops; d++) dropBalancedCard();
+                    for (let d = 0; d < drops; d++) UI.dropBalancedCard();
                     onAffixDeath(m);
                     G.monsters.splice(i, 1);
-                    setFeedback(`👑 BOSS击杀！+${Math.floor(m.scoreValue)}分 · 掉落${drops}张牌 · 💎+${bossGot}`, '#ff3366');
+                    UI.setFeedback(`👑 BOSS击杀！+${Math.floor(m.scoreValue)}分 · 掉落${drops}张牌 · 💎+${bossGot}`, '#ff3366');
                     continue;
                 }
                 spawnParticles(m.x, m.y, '#ffaa44', 12);
@@ -873,7 +892,7 @@
                 // v9.4: 遗物掉落（精英）。v9.22: 删掉 G.relicDropWave——只读不写的死字段。
                 // v9.31: 与 BOSS 那条一样，撤掉 `G.relics.length < 8`（遗物不再有上限）。
                 if (m.isElite && Math.random() < 0.08 * (G.fateBuffs.dropRateMul || 1)) {
-                    dropRelic();
+                    UI.dropRelic();
                 }
                 // v9.2: 命运吸血
                 if (G.fateBuffs.vampHeal > 0) {
@@ -1081,7 +1100,7 @@
                 G.notifications = [];
             }
             if (G.frame % 30 === 0 && G.hand.length >= 2 && !G.selectingActive) {
-                simAutoCombine();
+                Sim.simAutoCombine();
             }
             // 目标楼层检测（在floor clear逻辑之前）
             if (G.simTargetFloor > 0 && G.floor >= G.simTargetFloor
@@ -1089,7 +1108,7 @@
                 && !G.selectingActive && !G.bossPending) {
                 G.gameOver = true;
                 logEvent('game_over', { reason: 'target_floor_reached', snapshot: snapshotStats() });
-                handleSimGameOver();
+                Sim.handleSimGameOver();
                 return;
             }
         }
@@ -1133,18 +1152,18 @@
             // 从来没暴露出来）。
             else if (G.floor % 5 === 0) {
                 const n = getFloorClearCards();
-                for (let c = 0; c < n; c++) dropBalancedCard();
+                for (let c = 0; c < n; c++) UI.dropBalancedCard();
                 logEvent('floor_clear', { floorKills: G.floorKills, cardsRewarded: n,
                     floorCards: G.floorCardsObtained, stageEnd: true, snapshot: snapshotStats() });
-                if (G.simMode) { simAutoStatChoice(); } else { showStatChoice(); }
+                if (G.simMode) { Sim.simAutoStatChoice(); } else { UI.showStatChoice(); }
             } else {
                 logEvent('floor_clear', { floorKills: G.floorKills, cardsRewarded: 0,
                     floorCards: G.floorCardsObtained, stageEnd: false, snapshot: snapshotStats() });
-                advanceFloor();
+                UI.advanceFloor();
             }
         }
 
-        updateUI();
+        UI.updateUI();
         if (G.core.hp <= 0) {
             G.core.hp = 0;
             // v9.4: 凤凰羽毛复活
@@ -1153,12 +1172,12 @@
                 G.core.hp = G.core.maxHp * 0.5;
                 G.player.hp = G.player.maxHp * 0.5;
                 G.relicBuffs.revive = false;
-                setFeedback('🪶 凤凰羽毛发动！核心与护盾恢复50%！', '#ff8844');
+                UI.setFeedback('🪶 凤凰羽毛发动！核心与护盾恢复50%！', '#ff8844');
                 showNotification('🪶 凤凰涅槃！', '#ff8844', 240);
             } else {
                 G.gameOver = true;
                 logEvent('game_over', { reason: 'core_destroyed', snapshot: snapshotStats() });
-                setFeedback('💀 核心被毁 · 游戏结束', '#d44');
+                UI.setFeedback('💀 核心被毁 · 游戏结束', '#d44');
             }
         }
     }
@@ -1197,4 +1216,14 @@
             }
         }
     }
+
+    return {
+        ENEMY_TOTEM_LIFE, ENEMY_TOTEM_RANGE, FIRE_TURRET_DMG_PER_FRAME, FIRE_ZONE_DMG_PER_TICK,
+        FIRE_ZONE_TICK, SEAL_FRAMES, TRAIL_SLOW_FRAMES,
+        applyVortexPull, damagePlayerSide, fireEnemyShot, getAffixZoneMul, getPlayerAtkZoneMul,
+        getPlayerSpeedZoneMul, getShooterRange, getTurretAtkZoneMul, getTurretRateZoneMul,
+        onAffixCoreHit, onAffixDeath, spawnAffixZone, tickAffixZones, tickAffixes,
+        tickBossCardMilestones, update, updateEnemyTotems, updateSeals,
+    };
+})();
 

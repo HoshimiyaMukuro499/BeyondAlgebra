@@ -1,3 +1,20 @@
+// ============================================================
+//  09-events —— 输入事件（键盘 / 鼠标 / 触摸）与手机端适配
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Events`。边界见 web/scope-check.mjs。
+// 本模块既挂桌面端的键鼠监听，又装手机端的整块适配（摇杆 / 屏幕按钮 / 全屏 /
+// 转屏 / 抽屉）。这两半共用同一批入口（G.keys、activateUltimate…），所以放一起。
+const Events = (function () {
+
+    const { G, clamp, dist } = Core;
+    const { CODEX_PAGES, Tutorial } = Tutor;
+    const { activateUltimate, combineCards, executeBatch, queueBatchCombine, tryEliminate } = Trail;
+    const { selectNode, setFeedback } = UI;
+    const { resetGame } = Main;
+    const { DEBUG_TYPE_KEYS, spawnDebugMonster } = Combat;
+    const { canvas } = State;
+    const { JOYSTICK } = Data;
+
     // ---------- 事件 ----------
     // 键位归一化：优先读 e.code（物理键位）。
     // 中文输入法激活时浏览器把 e.key 报成 'Process'，只认 e.key 会让 WASD 整个失效。
@@ -119,7 +136,7 @@
     if (logBtn) {
         logBtn.addEventListener('mousedown', function(e) {
             e.preventDefault(); e.stopPropagation();
-            exportGameLog();
+            Sim.exportGameLog();
         });
     }
     const resetBtn = document.getElementById('resetBtn');
@@ -427,4 +444,10 @@
         if (window.__bootError) window.__bootError('手机端初始化失败：' + (err && err.message));
         if (window.console && console.error) console.error('[boot/mobile]', err);
     }
+
+    return {
+        resetJoystickVisual, setDrawer,
+        detectMobileMode, joyRadiusPx, releaseStick, setStickFromTouch,
+    };
+})();
 

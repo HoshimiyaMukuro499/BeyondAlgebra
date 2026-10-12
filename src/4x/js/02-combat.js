@@ -1,3 +1,18 @@
+// ============================================================
+//  02-combat —— 战斗结算 / 被动效果 / 怪物生成
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Combat`。边界见 web/scope-check.mjs。
+const Combat = (function () {
+
+    const { DIFF_KNEE, G, dist, getDifficultyMultiplier, getMonsterScale, rand, randInt,
+            showFloatingText, showNotification } = Core;
+    const { AFFIXES, ATK_OVERFLOW_GUARD, EARLY_NORMAL_MUL, ENEMY_SHOOTER_INTERVAL, EVOKER_SUM_MUL,
+            FREEZE_MAX_FRAMES, HP_OVERFLOW_GUARD, KILL_CARD_CHANCE, KILL_CARD_EVERY, MONSTER_STAT_MUL,
+            MONSTER_TYPES, MONSTER_TYPE_LIST, RARE_E15_CAP, RARE_E16_CAP, RARE_E17_CAP, STAGE_TYPES,
+            T03_EFFECT_MUL, affixDef, bossEarlyMul, bossSummonInterval, getBossHp, getTrailWidthCap,
+            pickAffixes, playerCap } = Data;
+    const { getAffixCount, getEliteChance, logEvent } = State;
+
     // ---------- 被动系统 ----------
 
     // v9.28: 层数语义只有两种，写在这里而不是散在 switch 里——
@@ -25,7 +40,7 @@
         else G.passives[triggerId].push({ effectId: effectId, count: 1 });
         // 组合那一刻只生效一层（不传 count → layers = 1），层数由后续触发累加。
         applyPassiveEffect(triggerId, effectId, true);
-        updatePassiveUI();
+        UI.updatePassiveUI();
         addScore(10);
     }
 
@@ -105,24 +120,24 @@
                 // v9.32: 攻击力不再封顶（原 playerCap(250)）——上限这个概念整个删掉。
                 // 玩家数值现在一路涨，与三次曲线同台竞争。
                 G.buffs.atkUp += val;
-                if (!isInitial) spawnParticles(p.x, p.y, '#ff8844', 5);
-                setFeedback(`⚔️ 攻击+${val} (累计+${Math.round(G.buffs.atkUp)})`, '#ff8844');
+                if (!isInitial) Trail.spawnParticles(p.x, p.y, '#ff8844', 5);
+                UI.setFeedback(`⚔️ 攻击+${val} (累计+${Math.round(G.buffs.atkUp)})`, '#ff8844');
                 break;
             }
             case 'E02': {
                 const val = 0.25 * vmul;   // 重复路径：layers 恒为 1，只乘 vmul
                 // v9.32: 倍率同样不封顶（原 playerCap(49)）。
                 G.buffs.multUp += val;
-                if (!isInitial) spawnParticles(p.x, p.y, '#ffdd44', 5);
-                setFeedback(`💥 倍率+${val.toFixed(2)} (累计x${(1 + G.buffs.multUp).toFixed(1)})`, '#ffdd44');
+                if (!isInitial) Trail.spawnParticles(p.x, p.y, '#ffdd44', 5);
+                UI.setFeedback(`💥 倍率+${val.toFixed(2)} (累计x${(1 + G.buffs.multUp).toFixed(1)})`, '#ffdd44');
                 break;
             }
             case 'E03': {
                 const val = (isHighFreq ? 5 : 20) * layers * vmul;
                 p.hp = Math.min(p.maxHp, p.hp + val);
-                spawnParticles(p.x, p.y, '#44ff88', 8);
+                Trail.spawnParticles(p.x, p.y, '#44ff88', 8);
                 showFloatingText(p.x, p.y - p.r, '+' + Math.round(val), '#44ff88');
-                setFeedback(`💚 回复${Math.round(val)}生命`, '#44ff88');
+                UI.setFeedback(`💚 回复${Math.round(val)}生命`, '#44ff88');
                 break;
             }
             // v9.23: E04「移速减慢」删除——和 E14「延缓」、轨迹迟缓三套减速重叠。
@@ -133,14 +148,14 @@
                 // 拿「轨迹拓宽」会被 Math.min(151, 60) 一路砍回 60。
                 G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1 * vmul, playerCap(100));
                 G.buffs.trailWidth = Math.min(G.buffs.trailWidth + 2 * vmul, getTrailWidthCap());
-                if (!isInitial) setFeedback(`⬆️ 轨迹伤害+${(1 * vmul).toFixed(1)}，宽度+${(2 * vmul).toFixed(1)}`, '#66ddff');
+                if (!isInitial) UI.setFeedback(`⬆️ 轨迹伤害+${(1 * vmul).toFixed(1)}，宽度+${(2 * vmul).toFixed(1)}`, '#66ddff');
                 break;
             case 'E07':
                 if (!isInitial) {
                     // v9.28: 层数走**伤害倍率**而不是重复调用——explodeTrails() 会把
                     // 半径内的轨迹一段段 splice 掉，第二遍就是对着空数组跑，白调用。
-                    const hit = explodeTrails(p.x, p.y, 200, layers * vmul);
-                    setFeedback(`💣 引爆${hit}段轨迹`, '#ff6633');
+                    const hit = Trail.explodeTrails(p.x, p.y, 200, layers * vmul);
+                    UI.setFeedback(`💣 引爆${hit}段轨迹`, '#ff6633');
                     if (hit > 0) addScore(hit * 2);
                 }
                 break;
@@ -149,10 +164,10 @@
                     const dmg = Math.floor(60 * (2 + getMonsterScale()) / 3 * vmul);
                     G.monsters.forEach(m => {
                         m.hp = Math.max(0, m.hp - dmg);
-                        spawnParticles(m.x, m.y, '#ff6644', 4);
+                        Trail.spawnParticles(m.x, m.y, '#ff6644', 4);
                         showFloatingText(m.x, m.y - m.r, '-' + dmg, '#ff6644');
                     });
-                    setFeedback(`🔄 怪物反噬！全场${G.monsters.length}只怪物各受${dmg}点伤害`, '#ff6644');
+                    UI.setFeedback(`🔄 怪物反噬！全场${G.monsters.length}只怪物各受${dmg}点伤害`, '#ff6644');
                 }
                 break;
             case 'E11':
@@ -160,7 +175,7 @@
                 // 移速已经 ×17.7，而它旁边的攻击/轨伤/轨宽全都撞死在死数字上。基准取 6：
                 // 软上限在 211 层是 ×25，够不着现状，纯粹是个安全阀。
                 G.buffs.speedUp = Math.min(G.buffs.speedUp + 0.35 * vmul, playerCap(6));
-                if (!isInitial) setFeedback(`💨 移速+${Math.round(0.35 * vmul * 100)}% (累计x${G.buffs.speedUp.toFixed(1)})`, '#88ddff');
+                if (!isInitial) UI.setFeedback(`💨 移速+${Math.round(0.35 * vmul * 100)}% (累计x${G.buffs.speedUp.toFixed(1)})`, '#88ddff');
                 break;
             case 'E12':
                 // ⚠️ 有意保留链冷却闸门：E12 不在用户的「时长 ×n」名单里，
@@ -170,7 +185,7 @@
                     const origin = G.monsters.reduce((a, b) => dist(G.player, a) < dist(G.player, b) ? a : b);
                     const chainDmg = Math.floor((20 + G.buffs.atkUp * 0.6 + G.floor * 2) * vmul);
                     origin.hp -= chainDmg;
-                    spawnParticles(origin.x, origin.y, '#88ccff', 8);
+                    Trail.spawnParticles(origin.x, origin.y, '#88ccff', 8);
                     showFloatingText(origin.x, origin.y - origin.r, '-' + chainDmg, '#88ccff');
                     // v9.22: 闪电链不再给终极技充能（改固定时间回复）
                     let chained = 0;
@@ -179,12 +194,12 @@
                         if (dist(origin, m) < 180) {
                             const cd = Math.floor(chainDmg * (1 - chained * 0.25));
                             m.hp -= cd;
-                            spawnParticles(m.x, m.y, '#88ccff', 4);
+                            Trail.spawnParticles(m.x, m.y, '#88ccff', 4);
                             showFloatingText(m.x, m.y - m.r, '-' + cd, '#88ccff');
                             chained++;
                         }
                     }
-                    setFeedback(`⚡ 闪电链！主目标${chainDmg}伤害，连锁${chained}只`, '#88ccff');
+                    UI.setFeedback(`⚡ 闪电链！主目标${chainDmg}伤害，连锁${chained}只`, '#88ccff');
                 }
                 break;
             case 'E13': {
@@ -204,11 +219,11 @@
                         // 见 05-update.js 的怪物循环。标记记的是**实际加进去的帧数**，
                         // 所以它和 m.frozen 同步到期，不会出现「冻早化了还在掉血」。
                         if (layers > 1 && added > 0) m.passiveFreeze = Math.max(m.passiveFreeze || 0, added);
-                        spawnParticles(m.x, m.y, '#aaddff', 4);
+                        Trail.spawnParticles(m.x, m.y, '#aaddff', 4);
                         frozenCount++;
                     }
                     if (frozenCount > 0) {
-                        setFeedback(`❄️ 冰冻${frozenCount}只怪物 ${(freezeDuration / 60).toFixed(1)}秒`, '#aaddff');
+                        UI.setFeedback(`❄️ 冰冻${frozenCount}只怪物 ${(freezeDuration / 60).toFixed(1)}秒`, '#aaddff');
                     }
                 }
                 break;
@@ -229,8 +244,8 @@
                         if (layers > 1) m.passiveSlow = Math.max(m.passiveSlow || 0, slowDuration);
                     }
                     if (targets.length > 0) {
-                        setFeedback(`⏳ 延缓${targets.length}只怪物 ${(slowDuration / 60).toFixed(1)}秒`, '#c9b3ff');
-                        spawnParticles(targets[0].x, targets[0].y, '#c9b3ff', 14);
+                        UI.setFeedback(`⏳ 延缓${targets.length}只怪物 ${(slowDuration / 60).toFixed(1)}秒`, '#c9b3ff');
+                        Trail.spawnParticles(targets[0].x, targets[0].y, '#c9b3ff', 14);
                     }
                 }
                 break;
@@ -245,8 +260,8 @@
                 const gained = G.turretHpBonus - before;
                 if (gained > 0) {
                     for (const t of G.turrets) { t.maxHp += gained; t.hp += gained; }   // 已有的塔一起加厚
-                    if (!isInitial) spawnParticles(p.x, p.y, '#88aacc', 6);
-                    setFeedback(`🗿 图腾血量+${gained.toFixed(1)}（累计+${G.turretHpBonus.toFixed(1)}）`, '#88aacc');
+                    if (!isInitial) Trail.spawnParticles(p.x, p.y, '#88aacc', 6);
+                    UI.setFeedback(`🗿 图腾血量+${gained.toFixed(1)}（累计+${G.turretHpBonus.toFixed(1)}）`, '#88aacc');
                 }
                 break;
             }
@@ -256,9 +271,9 @@
                 const gained = p.maxHp - before;
                 if (gained > 0) {
                     p.hp = Math.min(p.maxHp, p.hp + gained);   // 上限涨了，当前护盾跟着补上
-                    if (!isInitial) spawnParticles(p.x, p.y, '#66ddff', 8);
+                    if (!isInitial) Trail.spawnParticles(p.x, p.y, '#66ddff', 8);
                     showFloatingText(p.x, p.y - p.r, '+' + Math.round(gained), '#66ddff');
-                    setFeedback(`🔰 护盾上限+${Math.round(gained)}（累计 ${Math.round(p.maxHp)}）`, '#66ddff');
+                    UI.setFeedback(`🔰 护盾上限+${Math.round(gained)}（累计 ${Math.round(p.maxHp)}）`, '#66ddff');
                 }
                 break;
             }
@@ -267,13 +282,13 @@
                 G.buffs.fireRateMul = Math.min(before + 0.08 * layers * vmul, RARE_E17_CAP);
                 const gained = G.buffs.fireRateMul - before;
                 if (gained > 0) {
-                    if (!isInitial) spawnParticles(p.x, p.y, '#ffdd44', 6);
-                    setFeedback(`⏩ 射速+${Math.round(gained * 100)}%（累计 ×${G.buffs.fireRateMul.toFixed(2)}）`, '#ffdd44');
+                    if (!isInitial) Trail.spawnParticles(p.x, p.y, '#ffdd44', 6);
+                    UI.setFeedback(`⏩ 射速+${Math.round(gained * 100)}%（累计 ×${G.buffs.fireRateMul.toFixed(2)}）`, '#ffdd44');
                 }
                 break;
             }
         }
-        updateUI();
+        UI.updateUI();
     }
 
     // ---------- 得分系统 ----------
@@ -290,7 +305,7 @@
         // 现在得分就是得分，连杀另有 G.killStreak 负责，且真的会断。
         G.score += Math.floor(amount);
         // v9.22: 连杀爆发的检测块整块删除，见 00-data.js 的说明。
-        updateUI();
+        UI.updateUI();
     }
 
     // v9.15: 连杀 = 连续击杀。3 秒没有击杀、或核心挨打就断。
@@ -315,9 +330,9 @@
         // v9.25: 每击杀 20 个怪物掷一次 30% —— 拿到就 1 张密文版。
         // 挂在这个统一入口上，三个击杀分支（普通 / BOSS / 自爆连带）自动都算数。
         // 教程局不发：那是个沙盒，脚本自己发牌，多出来的随机牌会盖掉教学节奏。
-        if (!Tutorial.tookOver && G.killCount % KILL_CARD_EVERY === 0
+        if (!Tutor.Tutorial.tookOver && G.killCount % KILL_CARD_EVERY === 0
             && Math.random() < KILL_CARD_CHANCE) {
-            grantCards(1, `击杀 ${KILL_CARD_EVERY} 只`, '#8ab3d0');
+            UI.grantCards(1, `击杀 ${KILL_CARD_EVERY} 只`, '#8ab3d0');
         }
     }
 
@@ -544,9 +559,9 @@
             _affixZones: [],    // 本帧生效的区域，只给渲染用（见 06-render.js）
         };
         G.monsters.push(monster);
-        spawnParticles(monster.x, monster.y, type.color, 8);
+        Trail.spawnParticles(monster.x, monster.y, type.color, 8);
         const affixInfo = affixes.length > 0 ? ' [' + affixes.map(a => AFFIXES.find(af => af.id === a).emoji).join('') + ']' : '';
-        setFeedback(`🐛 调试：生成 ${type.emoji} ${type.label} (HP${Math.floor(monster.hp)})${affixInfo}`, '#88ccff');
+        UI.setFeedback(`🐛 调试：生成 ${type.emoji} ${type.label} (HP${Math.floor(monster.hp)})${affixInfo}`, '#88ccff');
     }
 
     // ---------- 分裂逻辑 ----------
@@ -591,9 +606,9 @@
                 _affixTimer: 0, _dash: null, _swarmCount: 0, _affixZones: [],
             };
             G.monsters.push(child);
-            spawnParticles(child.x, child.y, '#88cc66', 4);
+            Trail.spawnParticles(child.x, child.y, '#88cc66', 4);
         }
-        Tutorial.emit('split');
+        Tutor.Tutorial.emit('split');
     }
 
     // ---------- BOSS ----------
@@ -656,8 +671,8 @@
             _affixTimer: 0, _dash: null, _swarmCount: 0, _affixZones: [],
         };
         G.monsters.push(boss);
-        spawnParticles(x, y, isEvoker ? '#a01f2e' : '#ff2266', 35);
-        setFeedback(`👑 ${isEvoker ? '唤魔者' : 'BOSS'}登场！HP ${Math.floor(hp)} · 第${G.floor}波`, '#ff3366');
+        Trail.spawnParticles(x, y, isEvoker ? '#a01f2e' : '#ff2266', 35);
+        UI.setFeedback(`👑 ${isEvoker ? '唤魔者' : 'BOSS'}登场！HP ${Math.floor(hp)} · 第${G.floor}波`, '#ff3366');
         // v9.25: 战斗界面顶部横幅，把这一局抽到的词条直接念给玩家听。
         // 词条只在怪身上画一圈色环，战斗中根本读不出来。
         G.bossBanner = {
@@ -682,13 +697,13 @@
         const bossHp = Math.max(getBossHp(), sumHp * EVOKER_SUM_MUL);
         const bossAtk = Math.max(getBossAtk(), sumAtk * EVOKER_SUM_MUL);
         for (const m of G.monsters) {
-            spawnParticles(m.x, m.y, '#ff3355', 8);
+            Trail.spawnParticles(m.x, m.y, '#ff3355', 8);
             showFloatingText(m.x, m.y - m.r, '☠', '#ff3355');
         }
         G.monsters.length = 0;
         spawnBoss({ hp: bossHp, atk: bossAtk, affixCount: 3, isEvoker: true });
         showNotification('👹 唤魔者降临！', '#a01f2e', 220);
-        setFeedback(`👹 唤魔者：清空全场 ${cleared} 只怪，招出 HP ${Math.floor(bossHp)} / ATK ${Math.floor(bossAtk)} 的三词条 BOSS`, '#a01f2e');
+        UI.setFeedback(`👹 唤魔者：清空全场 ${cleared} 只怪，招出 HP ${Math.floor(bossHp)} / ATK ${Math.floor(bossAtk)} 的三词条 BOSS`, '#a01f2e');
         logEvent('evoker', { cleared, bossHp: Math.floor(bossHp), bossAtk: Math.floor(bossAtk) });
     }
 
@@ -721,7 +736,7 @@
             _affixTimer: 0, _dash: null, _swarmCount: 0, _affixZones: [],
         };
         G.monsters.push(m);
-        spawnParticles(m.x, m.y, '#ff4466', 3);
+        Trail.spawnParticles(m.x, m.y, '#ff4466', 3);
     }
 
     // ---------- 治疗逻辑 ----------
@@ -735,12 +750,12 @@
                     if (other === m) continue;
                     if (dist(m, other) < 180) {
                         other.hp = Math.min(other.maxHp, other.hp + m.healAmount);
-                        spawnParticles(other.x, other.y, '#44ff88', 1);
+                        Trail.spawnParticles(other.x, other.y, '#44ff88', 1);
                         showFloatingText(other.x, other.y - other.r, '+' + Math.floor(m.healAmount), '#44ff88');
                     }
                 }
                 m.hp = Math.min(m.maxHp, m.hp + m.healAmount * 0.5);
-                spawnParticles(m.x, m.y, '#44ff88', 2);
+                Trail.spawnParticles(m.x, m.y, '#44ff88', 2);
                 showFloatingText(m.x, m.y - m.r, '+' + Math.floor(m.healAmount * 0.5), '#44ff88');
             }
         }
@@ -759,4 +774,15 @@
     const TUTORIAL_TIMEOUT = 25 * 60; // 25s：先给更直白的提示
     const TUTORIAL_FORCE = 20 * 60;   // 再 20s：自动放行，绝不卡流程
     const TUTORIAL_FONT = '"Courier New","PingFang SC","Microsoft YaHei",monospace';
+
+    return {
+        DEBUG_TYPE_KEYS, TUTORIAL_FONT, TUTORIAL_FORCE, TUTORIAL_TIMEOUT,
+        addPassive, addScore, applyHealing, applyPassiveEffect, breakKillStreak,
+        fmtScore, getPassiveValueMul, getSealedFrames, registerKill, spawnBoss,
+        spawnBossMinion, spawnDebugMonster, spawnMonster, splitMonster,
+        tickKillStreak, triggerEvoker, triggerPassive,
+        EFFECT_AOE_RADIUS, PASSIVE_REPEAT_EFFECTS, effectAoeTargets, getBossAtk,
+        isPassiveSealed, nearestMonsterTo,
+    };
+})();
 

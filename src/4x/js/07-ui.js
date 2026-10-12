@@ -1,3 +1,19 @@
+// ============================================================
+//  07-ui —— DOM 界面 / 楼层推进 / 商店 / 地图节点
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `UI`。边界见 web/scope-check.mjs。
+// 本模块负责 DOM 面板的绘制与交互：手牌 / 被动 / 遗物 / 商店 / 选职业 / 选路 / 选属性，外加楼层推进。
+const UI = (function () {
+
+    const { G, formatDiff, getDifficultyMultiplier, showNotification } = Core;
+    const { addScore, applyPassiveEffect, fmtScore, getPassiveValueMul, getSealedFrames } = Combat;
+    const { getEssenceCap, logEvent, snapshotStats, updateHandCount } = State;
+    const { CLASSES, EFFECTS, FATE_CHOICES, NODE_POOL, RARE_CARD_MIN_FLOOR, RELICS,
+            START_CARDS, STAT_CHOICES, TRIGGERS, TURRET_SLOT_CHOICE, getMerchantStock,
+            randomEffect, randomTrigger } = Data;
+    const { Tutorial, setCanvasPointer } = Tutor;
+    const { spawnParticles, startFloor } = Trail;
+
     // ---------- UI ----------
     function updateUI() {
         if (G.simMode) return;
@@ -729,7 +745,7 @@
         if (G.floor === 40) { G.maxSlots = 6; G.ultimateChargeMult = 1.5; showNotification('📢 槽位+1 充能加速！', '#ffdd44', 360); }
         if (G.floor === 60) { G.maxSlots = 7; showNotification('📢 被动槽位+1！', '#ffdd44', 240); }
         if (G.floor > 0 && G.floor % 10 === 0) {
-            if (G.simMode) { simAutoFateChoice(); }
+            if (G.simMode) { Sim.simAutoFateChoice(); }
             else { showFateChoice(); }
         }
         else { addScore(G.floor * 5); startFloor(); }
@@ -756,4 +772,12 @@
         G.stageType = node.stageType || 'mixed';
         advanceFloor();
     }
+
+    return {
+        advanceFloor, dropBalancedCard, dropRelic, fillSlot, gainEvokerKey, getShopRefreshCost,
+        grantCards, initClassSelection, refreshMerchantStock, removePassive, selectClass,
+        selectNode, selectStat, setFeedback, showNodeMap, showStatChoice, syncGameOverUI,
+        updatePassiveUI, updateRelicUI, updateUI,
+    };
+})();
 

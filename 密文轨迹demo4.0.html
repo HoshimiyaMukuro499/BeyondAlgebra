@@ -1186,6 +1186,250 @@
 </div>
 
 <script>
+// ============================================================
+//  00-core —— 全局状态与基础工具（4.0 新增）
+// ============================================================
+// 4.0 给每个模块加了真正的边界（IIFE + 命名空间，见 web/scope-check.mjs）。
+// 边界带来一个直接后果：**模块只能用它前面加载的模块**。而 G 和几个纯数学
+// 辅助是「谁都要用」的——原来它们躺在 01-state.js 里，就意味着 00-data 用
+// G 属于前向引用（G 那时还没定义），改成 `State.G.floor` 要动 00-data 里近百处。
+//
+// 所以把这一层单独提到最前面，命名空间 `Core`：
+//   · 全局状态 G（原 01-state.js:2-99）
+//   · detectSimMode()（原 01-state.js:102-119）
+//   · 纯数学辅助与特效上限（原 01-state.js:157-166）
+//   · 浮字 / 通知（原 01-state.js:169-178、277-283）
+//   · 难度曲线（原 01-state.js:180-226）
+//
+// 这样往后每个模块对 G 的引用都是**向后**引用，前言里一行
+// `const { G } = Core;` 就能拿到，调用点一处不改。
+// 注意：`G` 是 const 且**从不重新赋值**（resetGame() 只改它的字段）——
+// 各模块解构到的是同一个对象，所以重开一局照常生效。见 EDITION.md v4.0 段。
+const Core = (function () {
+
+    // ---------- 游戏状态 ----------
+    const G = {
+        // v9.22: player.mult 删除——只被 resetGame() 写入，从没有任何读取点
+        // （对局记录里的「倍」是 snapshotStats() 用 1 + G.buffs.multUp 现算的）。
+        player: { x: 390, y: 280, r: 14, hp: 100, maxHp: 100, speed: 2.8, atk: 10, shootCooldown: 0 },
+        core: { x: 390, y: 280, r: 22, hp: 100, maxHp: 100 },
+        bullets: [], monsters: [], trails: [], particles: [],
+        hand: [], triggerSlot: null, effectSlot: null,
+        floor: 1, stage: 1, monstersToSpawn: 0, spawnTimer: 0,
+        combineCooldown: false,
+        passives: {},
+        // v9.28: fireRateMul 是稀有效果板 E17「急速装填」的累加器（初值 1 = 不变）。
+        // ⚠️ 它和 G.fireRate 是**两道独立的闸门**，见 05-update.js 的开火闸与
+        //    04-trail.js 的 shootCooldown——两边都要除它，只改一处等于没改。
+        buffs: { atkUp: 0, multUp: 0, trailDmg: 1, trailWidth: 6, speedUp: 1, slowAll: 0, fireRateMul: 1 },
+        keys: { w: false, a: false, s: false, d: false, shift: false }, mouse: { x: 390, y: 280 },
+        // v9.19: fireRate 是「几帧打一发」。10 → 40（射速变成原来的 1/4），
+        // 与 autoShoot() 里的 p.shootCooldown 是两道独立闸门，两处都得改才生效。
+        frame: 0, gameOver: false, fireRate: 40, fireCounter: 0, target: null,
+        killCount: 0, killStreak: 0, score: 0, maxCombo: 0, lastKillFrame: 0, difficulty: 1,
+        handTriggerCount: 0, handEffectCount: 0,
+        selectingActive: false, selectionCards: [],
+        bossPending: false, bossSpawned: false, floatingTexts: [], debug: false,
+        fireTrails: [], damageFlows: [],   // v9.19: 火焰伤害「玩家→核心」的转移动画
+        enemyShots: [],                    // v9.28: 射击小怪的弹道拖尾（纯渲染，命中是即时的）
+        // v9.22: 终结技不再靠「造成伤害」充能，改为固定时间回复。
+        // 回满一槽需要 ULT_BASE_FRAMES / (1 + 层数/50) 帧，见 05-update.js 的 getUltimateChargeFrames()。
+        // ultimateChargeMult 保留下来当「充能速度」乘数（命运·超载 ×2 / 奥术学者 ×1.5 / 第 40 层 ×1.5），
+        // 乘的是速率而不是总量——这样那三处奖励的文案仍然成立。
+        ultimateGauge: 0, ultimateMax: 100, ultimateChargeMult: 1.0,
+        ultimateActive: false, ultimateTimer: 0, screenFlash: 0, notifications: [], chainCooldown: 0,
+        paused: false, maxSlots: 4, hazardZones: [], hazardTimer: 0,
+        fateBuffs: { trailDmgMul: 1, bulletDmgMul: 1, speedMul: 1, dropRateMul: 1, monsterCountMul: 1, vampHeal: 0, atkMul: 1, damageTakenMul: 1 },
+        fateChoosing: false, fateOptions: [],
+        playerClass: null, essence: 0, relics: [], relicBuffs: {},
+        terrain: [], trailLifeBonus: 0, extraBullets: 0, essenceBonus: 0,
+        merchantStock: [], shopSoldOut: [], mapChoices: [],
+        // v9.6 新字段
+        stageType: 'mixed', batchQueue: [], activeTrailType: 'basic', chairBonuses: 0,
+        // v9.7 新字段
+        pathHistory: [],          // [{dir:'left'|'center'|'right', nodeId, floor}]
+        sprintActive: false,      // 冲刺轨迹开关
+        sprintTrails: [],         // 冲刺轨迹（更宽更亮）
+        enclosureBonus: 0,
+        turrets: [],              // v9.17: 图腾改血量制
+        maxTurrets: 10,           // v9.21: 图腾数量上限（v9.23: 15 → 10）。满了之后闭环不再出塔（环保持已武装），
+                                  // 等有位置了自动补上；每层奖励有极小概率 +1（见 TURRET_SLOT_CHOICE）
+        turretCapHintFrame: -999, // v9.21: 上次提示「图腾已满」的帧号，用来节流
+        turretLoops: {},          // v9.17: 已出过塔的环 key——塔碎后删除，环重新武装
+        turretHpBonus: 0,         // v9.17: 图腾血量加成（商店/每层奖励购买）
+        // v9.18 经济（essence 本身在上面的 playerClass 行里）
+        essenceThisFloor: 0,      // 本层战斗已掉落的精华，用来卡 getEssenceCap()
+        shopRefreshCount: 1,      // 本次进店已刷新次数——刷新费 = 2 × 层 × 次数
+        mapMode: false,           // 地图模式（canvas绘制地图）
+        canvasWidth: 780, canvasHeight: 560,
+        // v9.10: 对局记录
+        gameLog: [],              // [{floor, type, data, timestamp}]
+        floorKills: 0,            // 当前楼层击杀数
+        floorCardsObtained: 0,    // 当前楼层获得密文板数
+        // v9.10: 自动模拟模式
+        simMode: false,           // 模拟模式开关
+        simTargetFloor: 0,        // 0=无限直到死亡, >0=到此层后主动结束
+        simSpeed: 3,              // 每tick跑几个update()
+        simSkipDraw: true,        // 跳过渲染
+        simSkipEffects: true,     // 跳过粒子/浮动文字
+
+        // ---------- v9.24 ----------
+        // 词条钩子用到的运行时状态。全部在 resetGame() 里一并重置。
+        // 敌图腾**不复用 G.turrets**——混进玩家数组会连带污染图腾上限、
+        // turretLoops 判环、以及 v9.23 的「火焰烧塔」。另开一条独立数组。
+        enemyTotems: [],
+        // 被「封印」词条暂时压住的被动：{ tid, eid, timer }。timer 归零即解封，
+        // 被动本身不删除，只是 triggerPassive() 会跳过它。
+        sealedPassives: [],
+        // 移动端：摇杆模拟量，模长 0..1。非 0 时优先于 G.keys 的四向输入。
+        stick: { x: 0, y: 0 },
+        // v9.25: 动态摇杆的底座位置（**屏幕坐标**，clientX/clientY 口径）。
+        // null = 没按下，此时画的是左下角的闲置提示环。按下那一刻由
+        // 09-events.js 的 setStickFromTouch() 定下来，move 时不再挪动。
+        stickBase: null,
+        stickActive: false,
+        mobileMode: false,        // 设备识别结果，见 09-events.js 的 detectMobileMode()
+        drawerOpen: false,        // 手机端左侧抽屉（密文版/被动）是否展开
+        timeScale: 1,             // 抽屉展开时压到 0.5（子弹时间），见 08-main.js 的 gameLoop()
+
+        // ---------- v9.25 ----------
+        // 词条落地后的圈层（削减区/减速区/火焰区）。与怪解绑——怪死了圈还在，
+        // 圈到点自己消失。{ x, y, r, kind, life, maxLife, color, tick }
+        affixZones: [],
+        // BOSS 登场横幅：{ text, life, maxLife }。画在 canvas 顶部，
+        // 因为 setFeedback() 写的是右侧面板里的 DOM——手机端那个在抽屉里，
+        // 战斗时根本看不见。
+        bossBanner: null,
+        // 「消除」技能冷却（帧）。按 R 触发后置为 ELIMINATE_COOLDOWN，逐帧递减。
+        eliminateCooldown: 0,
+        // 手机端「死亡后重开」按钮的当前显示状态。只在值真的翻转时才动 DOM，
+        // 见 08-main.js 的 gameLoop()。
+        _gameOverUIShown: false,
+    };
+
+    // ---------- v9.10 自动模拟检测 ----------
+    (function detectSimMode() {
+        try {
+            const params = new URLSearchParams(window.location.search);
+            if (params.has('auto')) {
+                G.simMode = true;
+                G.simTargetFloor = parseInt(params.get('auto')) || 0;
+                G.simSpeed = parseInt(params.get('speed')) || 3;
+                G.simSkipDraw = params.get('draw') !== '1';
+                G.simSkipEffects = true;
+            }
+            // 同时检查全局注入（Node.js runner用）
+            if (typeof window !== 'undefined' && window.__SIM_MODE__) {
+                G.simMode = true;
+                G.simTargetFloor = window.__SIM_TARGET__ || 0;
+                G.simSpeed = window.__SIM_SPEED__ || 3;
+            }
+        } catch(e) { /* 非浏览器环境 */ }
+    })();
+
+    // ---------- 辅助 ----------
+    function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+    function rand(min, max) { return Math.random() * (max - min) + min; }
+    function randInt(min, max) { return Math.floor(rand(min, max + 1)); }
+    function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+    function angleTo(a, b) { return Math.atan2(b.y - a.y, b.x - a.x); }
+
+    // 特效数量上限：粒子/浮字是纯表现层，必须封顶。
+    // 生成速率随层数上升而寿命固定，不封顶的话每帧 draw 成本会一路涨到掉帧。
+    const PARTICLE_MAX = 300;
+    const FLOAT_MAX = 60;
+
+    // ---------- 浮动数值 ----------
+    function showFloatingText(x, y, text, color) {
+        if (G.floatingTexts.length >= FLOAT_MAX) G.floatingTexts.shift();
+        G.floatingTexts.push({
+            x, y, text, color,
+            life: 35,
+            maxLife: 35,
+            vy: -1.2 - Math.random() * 0.6,
+            vx: (Math.random() - 0.5) * 0.8,
+        });
+    }
+
+    // ============================================================
+    //  难度曲线
+    // ============================================================
+    // v9.32: 换回多项式，但这次是**一条三次曲线管到底**——没有拐点、没有分段、
+    // 也没有第二条标尺。x = 层数 − 1，所以第 1 层正好 ×1.00。
+    //
+    //   难度(x) = 1 + 0.3365x + 0.0566x² + 0.0063x³
+    //
+    // 取值：10 层 ×13.2 / 30 层 ×212 / 50 层 ×895 / 100 层 ×6.70e3 / 211 层 ×6.09e4。
+    // 比原来那条 1.56^(层-1) 平缓得多（211 层 6.1e4 而不是 3.6e40），所以
+    // HP_OVERFLOW_GUARD(1e15) / ATK_OVERFLOW_GUARD(1e9) 彻底变成纯兜底，
+    // 到 211 层也只用掉它们的千分之一。
+    //
+    // ⚠️ 难度显示与怪物数值现在是**同一个数**。以前那套「难度标尺 + 怪物软上限标尺」
+    //    的分家（MONSTER_SOFT_KNEE / MONSTER_SOFT_RATE）已经不需要了——曲线本身
+    //    就不爆炸，没必要再收一次口。对局记录里的 diff 与 ms 两列从此相等。
+    const DIFF_C1 = 0.3365;
+    const DIFF_C2 = 0.0566;
+    const DIFF_C3 = 0.0063;
+    // 把层数参数化：G.floor 是「当前」层，读历史某一层要用这个（对局记录回放）。
+    function diffScaleAt(f) {
+        const x = f - 1;
+        return 1 + DIFF_C1 * x + DIFF_C2 * x * x + DIFF_C3 * x * x * x;
+    }
+    // DIFF_KNEE 不是曲线拐点。它只是「前期 / 后期」的分界，精华上限
+    // （getEssenceCap）、清层卡数（getFloorClearCards）与 BOSS 血量尾巴还按它分档。
+    const DIFF_KNEE = 30;
+    function getDifficultyMultiplier() {
+        return diffScaleAt(G.floor);
+    }
+
+    // 怪物数值标尺。**现在与难度是同一个值**——保留这个函数名，是为了那八个消费方
+    // （spawnMonster / spawnDebugMonster / getBossAtk / spawnBossMinion / E10 反噬 /
+    // 终结技 / R 消除 / 爆裂词缀）不用改：它们要的是「这一层的强度标尺」，
+    // 而不是「哪条曲线」。
+    function getMonsterScale() {
+        return getDifficultyMultiplier();
+    }
+
+    // 难度系数在后期能到六位数。HUD 与结算界面上原来统一 toFixed(2)，
+    // 高位时会把版面撑破，所以按量级分档显示。
+    function formatDiff(v) {
+        if (!isFinite(v)) return '∞';
+        if (v < 10000) return v.toFixed(2);
+        if (v < 1e6) return Math.round(v).toLocaleString();
+        return v.toExponential(2).replace('e+', 'e');
+    }
+
+    // ---------- v9.1 通知 ----------
+    function showNotification(text, color, duration) {
+        G.notifications.push({
+            text, color,
+            life: duration || 180,
+            maxLife: duration || 180,
+        });
+    }
+
+    return {
+        G,
+        dist, rand, randInt, clamp, angleTo,
+        PARTICLE_MAX, FLOAT_MAX,
+        showFloatingText, showNotification,
+        diffScaleAt, DIFF_C1, DIFF_C2, DIFF_C3, DIFF_KNEE,
+        getDifficultyMultiplier, getMonsterScale, formatDiff,
+    };
+})();
+// ============================================================
+//  00-data —— 静态数据表（词条 / 密文板 / 怪物 / 遗物 / 地图节点…）
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Data`。边界见 web/scope-check.mjs。
+// 本模块大而杂，但它对外的**接口**很小：都是一张张表，加几个查表函数。
+// 表里嵌着行为（STAT_CHOICES[].apply 之类），那些行为引用 G 与 UI/Trail——
+// 因为 G 已提到 00-core，这些引用是向后的；只有 setFeedback / spawnParticles
+// 属于后加载模块，按规矩在调用点写 `UI.setFeedback(...)` / `Trail.spawnParticles(...)`。
+const Data = (function () {
+
+    const { G, rand, dist, DIFF_KNEE, diffScaleAt, getMonsterScale,
+            showFloatingText, showNotification } = Core;
+
     // ============================================================
     //  9.10 · 自动模拟模式+AI驾驶+自主优化Loop
     // ============================================================
@@ -1898,16 +2142,16 @@
         { id: 'atkUp',     label: '攻击强化', emoji: '⚔️', desc: '永久攻击+3',        color: '#ff8844', shopCost: 12,
           // v9.32: 不再封顶（原 playerCap(2000)）。与 E01 一起构成玩家攻击力的两条增长路径，
           // 两条现在都是无上限累加——玩家攻击力这件事上，「上限」已经不存在了。
-          apply() { G.buffs.atkUp += 3; setFeedback('⚔️ 攻击力永久+3！', '#ff8844'); } },
+          apply() { G.buffs.atkUp += 3; UI.setFeedback('⚔️ 攻击力永久+3！', '#ff8844'); } },
         { id: 'heal',      label: '生命复苏', emoji: '💚', desc: '回复30%最大护盾',   color: '#44ff88', shopCost: 10,
           apply() { const healAmt = Math.floor(G.player.maxHp * 0.3); G.player.hp = Math.min(G.player.maxHp, G.player.hp + healAmt);
-                    spawnParticles(G.player.x, G.player.y, '#44ff88', 12);
+                    Trail.spawnParticles(G.player.x, G.player.y, '#44ff88', 12);
                     showFloatingText(G.player.x, G.player.y - G.player.r, '+' + healAmt, '#44ff88');
-                    setFeedback('💚 回复' + healAmt + '护盾！', '#44ff88'); } },
+                    UI.setFeedback('💚 回复' + healAmt + '护盾！', '#44ff88'); } },
         { id: 'speedUp',   label: '疾步',     emoji: '💨', desc: '永久移速+5%',       color: '#88ddff', shopCost: 12,
-          apply() { G.buffs.speedUp = Math.min(G.buffs.speedUp + 0.05, playerCap(6)); setFeedback('💨 移速永久+5%！', '#88ddff'); } },
+          apply() { G.buffs.speedUp = Math.min(G.buffs.speedUp + 0.05, playerCap(6)); UI.setFeedback('💨 移速永久+5%！', '#88ddff'); } },
         { id: 'trailUp',   label: '轨迹淬炼', emoji: '🐾', desc: '永久轨迹伤害+1',    color: '#ffdd44', shopCost: 14,
-          apply() { G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1, playerCap(400)); setFeedback('🐾 轨迹伤害永久+1！', '#ffdd44'); } },
+          apply() { G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1, playerCap(400)); UI.setFeedback('🐾 轨迹伤害永久+1！', '#ffdd44'); } },
         // v9.18 新增两条
         { id: 'trailWidth', label: '轨迹拓宽', emoji: '📏', desc: '永久轨迹宽度+1',   color: '#66dd88', shopCost: 14,
           // v9.31: 原来这里封 60，而 E06 封 150——宽到 150 之后再拿这一项，
@@ -1916,13 +2160,13 @@
           // 而且写成**只增不减**，保证这条路径永远不会把已有的宽度吃掉。
           apply() { G.buffs.trailWidth = Math.max(G.buffs.trailWidth,
               Math.min(G.buffs.trailWidth + 1, getTrailWidthCap()));
-              setFeedback('📏 轨迹宽度永久+1！', '#66dd88'); } },
+              UI.setFeedback('📏 轨迹宽度永久+1！', '#66dd88'); } },
         // v9.20: 跟着基础血量一起缩到 30%（3 → 1）。不缩的话，塔基础血只剩
         // 2/4/6 而这一项还加 3，一次购买就能把小环从 2 顶到 5——比削弱前还硬。
         { id: 'turretHp',  label: '图腾加固', emoji: '🗼', desc: '图腾血量+1',        color: '#88aacc', shopCost: 14,
           apply() { G.turretHpBonus = (G.turretHpBonus || 0) + 1;
                     for (const t of G.turrets) { t.maxHp += 1; t.hp += 1; }   // 已有的塔一起加厚
-                    setFeedback('🗼 图腾血量+1！（含场上 ' + G.turrets.length + ' 座）', '#88aacc'); } },
+                    UI.setFeedback('🗼 图腾血量+1！（含场上 ' + G.turrets.length + ' 座）', '#88aacc'); } },
     ];
 
     // ---------- v9.21 图腾扩容 ----------
@@ -1934,7 +2178,7 @@
         color: '#ffdd66',
         apply() {
             G.maxTurrets = (G.maxTurrets || 10) + 1;
-            setFeedback('🗼 图腾上限 +1 → ' + G.maxTurrets + '！', '#ffdd66');
+            UI.setFeedback('🗼 图腾上限 +1 → ' + G.maxTurrets + '！', '#ffdd66');
             showNotification('🗼 图腾上限 +1', '#ffdd66', 200);
         },
     };
@@ -2001,125 +2245,35 @@
         }
     }
 
-    // ---------- 游戏状态 ----------
-    const G = {
-        // v9.22: player.mult 删除——只被 resetGame() 写入，从没有任何读取点
-        // （对局记录里的「倍」是 snapshotStats() 用 1 + G.buffs.multUp 现算的）。
-        player: { x: 390, y: 280, r: 14, hp: 100, maxHp: 100, speed: 2.8, atk: 10, shootCooldown: 0 },
-        core: { x: 390, y: 280, r: 22, hp: 100, maxHp: 100 },
-        bullets: [], monsters: [], trails: [], particles: [],
-        hand: [], triggerSlot: null, effectSlot: null,
-        floor: 1, stage: 1, monstersToSpawn: 0, spawnTimer: 0,
-        combineCooldown: false,
-        passives: {},
-        // v9.28: fireRateMul 是稀有效果板 E17「急速装填」的累加器（初值 1 = 不变）。
-        // ⚠️ 它和 G.fireRate 是**两道独立的闸门**，见 05-update.js 的开火闸与
-        //    04-trail.js 的 shootCooldown——两边都要除它，只改一处等于没改。
-        buffs: { atkUp: 0, multUp: 0, trailDmg: 1, trailWidth: 6, speedUp: 1, slowAll: 0, fireRateMul: 1 },
-        keys: { w: false, a: false, s: false, d: false, shift: false }, mouse: { x: 390, y: 280 },
-        // v9.19: fireRate 是「几帧打一发」。10 → 40（射速变成原来的 1/4），
-        // 与 autoShoot() 里的 p.shootCooldown 是两道独立闸门，两处都得改才生效。
-        frame: 0, gameOver: false, fireRate: 40, fireCounter: 0, target: null,
-        killCount: 0, killStreak: 0, score: 0, maxCombo: 0, lastKillFrame: 0, difficulty: 1,
-        handTriggerCount: 0, handEffectCount: 0,
-        selectingActive: false, selectionCards: [],
-        bossPending: false, bossSpawned: false, floatingTexts: [], debug: false,
-        fireTrails: [], damageFlows: [],   // v9.19: 火焰伤害「玩家→核心」的转移动画
-        enemyShots: [],                    // v9.28: 射击小怪的弹道拖尾（纯渲染，命中是即时的）
-        // v9.22: 终结技不再靠「造成伤害」充能，改为固定时间回复。
-        // 回满一槽需要 ULT_BASE_FRAMES / (1 + 层数/50) 帧，见 05-update.js 的 getUltimateChargeFrames()。
-        // ultimateChargeMult 保留下来当「充能速度」乘数（命运·超载 ×2 / 奥术学者 ×1.5 / 第 40 层 ×1.5），
-        // 乘的是速率而不是总量——这样那三处奖励的文案仍然成立。
-        ultimateGauge: 0, ultimateMax: 100, ultimateChargeMult: 1.0,
-        ultimateActive: false, ultimateTimer: 0, screenFlash: 0, notifications: [], chainCooldown: 0,
-        paused: false, maxSlots: 4, hazardZones: [], hazardTimer: 0,
-        fateBuffs: { trailDmgMul: 1, bulletDmgMul: 1, speedMul: 1, dropRateMul: 1, monsterCountMul: 1, vampHeal: 0, atkMul: 1, damageTakenMul: 1 },
-        fateChoosing: false, fateOptions: [],
-        playerClass: null, essence: 0, relics: [], relicBuffs: {},
-        terrain: [], trailLifeBonus: 0, extraBullets: 0, essenceBonus: 0,
-        merchantStock: [], shopSoldOut: [], mapChoices: [],
-        // v9.6 新字段
-        stageType: 'mixed', batchQueue: [], activeTrailType: 'basic', chairBonuses: 0,
-        // v9.7 新字段
-        pathHistory: [],          // [{dir:'left'|'center'|'right', nodeId, floor}]
-        sprintActive: false,      // 冲刺轨迹开关
-        sprintTrails: [],         // 冲刺轨迹（更宽更亮）
-        enclosureBonus: 0,
-        turrets: [],              // v9.17: 图腾改血量制
-        maxTurrets: 10,           // v9.21: 图腾数量上限（v9.23: 15 → 10）。满了之后闭环不再出塔（环保持已武装），
-                                  // 等有位置了自动补上；每层奖励有极小概率 +1（见 TURRET_SLOT_CHOICE）
-        turretCapHintFrame: -999, // v9.21: 上次提示「图腾已满」的帧号，用来节流
-        turretLoops: {},          // v9.17: 已出过塔的环 key——塔碎后删除，环重新武装
-        turretHpBonus: 0,         // v9.17: 图腾血量加成（商店/每层奖励购买）
-        // v9.18 经济（essence 本身在上面的 playerClass 行里）
-        essenceThisFloor: 0,      // 本层战斗已掉落的精华，用来卡 getEssenceCap()
-        shopRefreshCount: 1,      // 本次进店已刷新次数——刷新费 = 2 × 层 × 次数
-        mapMode: false,           // 地图模式（canvas绘制地图）
-        canvasWidth: 780, canvasHeight: 560,
-        // v9.10: 对局记录
-        gameLog: [],              // [{floor, type, data, timestamp}]
-        floorKills: 0,            // 当前楼层击杀数
-        floorCardsObtained: 0,    // 当前楼层获得密文板数
-        // v9.10: 自动模拟模式
-        simMode: false,           // 模拟模式开关
-        simTargetFloor: 0,        // 0=无限直到死亡, >0=到此层后主动结束
-        simSpeed: 3,              // 每tick跑几个update()
-        simSkipDraw: true,        // 跳过渲染
-        simSkipEffects: true,     // 跳过粒子/浮动文字
-
-        // ---------- v9.24 ----------
-        // 词条钩子用到的运行时状态。全部在 resetGame() 里一并重置。
-        // 敌图腾**不复用 G.turrets**——混进玩家数组会连带污染图腾上限、
-        // turretLoops 判环、以及 v9.23 的「火焰烧塔」。另开一条独立数组。
-        enemyTotems: [],
-        // 被「封印」词条暂时压住的被动：{ tid, eid, timer }。timer 归零即解封，
-        // 被动本身不删除，只是 triggerPassive() 会跳过它。
-        sealedPassives: [],
-        // 移动端：摇杆模拟量，模长 0..1。非 0 时优先于 G.keys 的四向输入。
-        stick: { x: 0, y: 0 },
-        // v9.25: 动态摇杆的底座位置（**屏幕坐标**，clientX/clientY 口径）。
-        // null = 没按下，此时画的是左下角的闲置提示环。按下那一刻由
-        // 09-events.js 的 setStickFromTouch() 定下来，move 时不再挪动。
-        stickBase: null,
-        stickActive: false,
-        mobileMode: false,        // 设备识别结果，见 09-events.js 的 detectMobileMode()
-        drawerOpen: false,        // 手机端左侧抽屉（密文版/被动）是否展开
-        timeScale: 1,             // 抽屉展开时压到 0.5（子弹时间），见 08-main.js 的 gameLoop()
-
-        // ---------- v9.25 ----------
-        // 词条落地后的圈层（削减区/减速区/火焰区）。与怪解绑——怪死了圈还在，
-        // 圈到点自己消失。{ x, y, r, kind, life, maxLife, color, tick }
-        affixZones: [],
-        // BOSS 登场横幅：{ text, life, maxLife }。画在 canvas 顶部，
-        // 因为 setFeedback() 写的是右侧面板里的 DOM——手机端那个在抽屉里，
-        // 战斗时根本看不见。
-        bossBanner: null,
-        // 「消除」技能冷却（帧）。按 R 触发后置为 ELIMINATE_COOLDOWN，逐帧递减。
-        eliminateCooldown: 0,
-        // 手机端「死亡后重开」按钮的当前显示状态。只在值真的翻转时才动 DOM，
-        // 见 08-main.js 的 gameLoop()。
-        _gameOverUIShown: false,
+    return {
+        TRIGGERS, EFFECTS, MONSTER_TYPES, MONSTER_TYPE_LIST, AFFIXES, affixDef,
+        FATE_CHOICES, STAGE_TYPES, CHAIR_COMBOS, NODE_POOL, CLASSES, RELICS,
+        STAT_CHOICES, TURRET_SLOT_CHOICE, TRAIL_STYLES, START_CARDS, JOYSTICK,
+        T03_EFFECT_MUL, TURRET_RATIO_NORM, BOSS_CARD_STEP, KILL_CARD_CHANCE,
+        KILL_CARD_EVERY, RARE_CARD_MIN_FLOOR, RARE_E15_CAP, RARE_E16_CAP, RARE_E17_CAP,
+        RARE_CARD_MIN_CHANCE, RARE_CARD_MAX_CHANCE, rareChance, PLAYER_CAP_RATE,
+        ELITE_BOSS_AFFIX_WEIGHT, ENEMY_SHOOTER_UNLOCK_FLOOR,
+        BOSS_EARLY_MUL_START, BOSS_EARLY_RAMP_END,
+        FREEZE_MAX_FRAMES, ELIMINATE_COOLDOWN, EVOKER_SUM_MUL, ENEMY_SHOT_LIFE,
+        ENEMY_SHOOTER_RANGE, ENEMY_SHOOTER_INTERVAL, PLAYER_FIRE_RATE_MUL,
+        MONSTER_STAT_MUL, EARLY_NORMAL_MUL, HP_OVERFLOW_GUARD, ATK_OVERFLOW_GUARD,
+        AFFIX_ZONE_R_MUL, AFFIX_ZONE_MAX_PER_KIND,
+        pickAffixes, randomTrigger, randomEffect, rollBossCardCount, bossEarlyMul,
+        bossSummonInterval, getBossHp, getFloorClearCards, getMerchantStock,
+        generateTerrain, playerCap, getTrailWidthCap,
     };
+})();
 
-    // ---------- v9.10 自动模拟检测 ----------
-    (function detectSimMode() {
-        try {
-            const params = new URLSearchParams(window.location.search);
-            if (params.has('auto')) {
-                G.simMode = true;
-                G.simTargetFloor = parseInt(params.get('auto')) || 0;
-                G.simSpeed = parseInt(params.get('speed')) || 3;
-                G.simSkipDraw = params.get('draw') !== '1';
-                G.simSkipEffects = true;
-            }
-            // 同时检查全局注入（Node.js runner用）
-            if (typeof window !== 'undefined' && window.__SIM_MODE__) {
-                G.simMode = true;
-                G.simTargetFloor = window.__SIM_TARGET__ || 0;
-                G.simSpeed = window.__SIM_SPEED__ || 3;
-            }
-        } catch(e) { /* 非浏览器环境 */ }
-    })();
+// ============================================================
+//  01-state —— 状态派生值 / 对局记录 / 精华经济
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `State`。边界见 web/scope-check.mjs。
+// 本模块原先还装着 G、数学辅助、难度曲线、浮字与通知——那些在 4.0 移到了
+// 00-core（它们「谁都要用」，放在这里会让 00-data 变成前向引用）。
+const State = (function () {
+
+    const { G, DIFF_KNEE, getDifficultyMultiplier } = Core;
+    const { STAGE_TYPES } = Data;
 
     // ---------- v9.10 对局记录系统 ----------
     function snapshotStats() {
@@ -2129,8 +2283,8 @@
             coreHp: Math.round(G.core.hp), coreMaxHp: G.core.maxHp,
             atk: Math.round(G.player.atk + G.buffs.atkUp),
             mult: +(1 + G.buffs.multUp).toFixed(1),
-            trailDmg: +getTrailDamage().toFixed(1),
-            trailWidth: getTrailWidth(),
+            trailDmg: +Trail.getTrailDamage().toFixed(1),
+            trailWidth: Trail.getTrailWidth(),
             speed: +(G.player.speed * G.buffs.speedUp * G.fateBuffs.speedMul).toFixed(1),
             slowAll: Math.round(G.buffs.slowAll * 100),
             kills: G.killCount,
@@ -2155,78 +2309,6 @@
     // ---------- DOM ----------
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
-
-    // ---------- 辅助 ----------
-    function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
-    function rand(min, max) { return Math.random() * (max - min) + min; }
-    function randInt(min, max) { return Math.floor(rand(min, max + 1)); }
-    function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-    function angleTo(a, b) { return Math.atan2(b.y - a.y, b.x - a.x); }
-
-    // 特效数量上限：粒子/浮字是纯表现层，必须封顶。
-    // 生成速率随层数上升而寿命固定，不封顶的话每帧 draw 成本会一路涨到掉帧。
-    const PARTICLE_MAX = 300;
-    const FLOAT_MAX = 60;
-
-    // ---------- 浮动数值 ----------
-    function showFloatingText(x, y, text, color) {
-        if (G.floatingTexts.length >= FLOAT_MAX) G.floatingTexts.shift();
-        G.floatingTexts.push({
-            x, y, text, color,
-            life: 35,
-            maxLife: 35,
-            vy: -1.2 - Math.random() * 0.6,
-            vx: (Math.random() - 0.5) * 0.8,
-        });
-    }
-
-    // ============================================================
-    //  难度曲线
-    // ============================================================
-    // v9.32: 换回多项式，但这次是**一条三次曲线管到底**——没有拐点、没有分段、
-    // 也没有第二条标尺。x = 层数 − 1，所以第 1 层正好 ×1.00。
-    //
-    //   难度(x) = 1 + 0.3365x + 0.0566x² + 0.0063x³
-    //
-    // 取值：10 层 ×13.2 / 30 层 ×212 / 50 层 ×895 / 100 层 ×6.70e3 / 211 层 ×6.09e4。
-    // 比原来那条 1.56^(层-1) 平缓得多（211 层 6.1e4 而不是 3.6e40），所以
-    // HP_OVERFLOW_GUARD(1e15) / ATK_OVERFLOW_GUARD(1e9) 彻底变成纯兜底，
-    // 到 211 层也只用掉它们的千分之一。
-    //
-    // ⚠️ 难度显示与怪物数值现在是**同一个数**。以前那套「难度标尺 + 怪物软上限标尺」
-    //    的分家（MONSTER_SOFT_KNEE / MONSTER_SOFT_RATE）已经不需要了——曲线本身
-    //    就不爆炸，没必要再收一次口。对局记录里的 diff 与 ms 两列从此相等。
-    const DIFF_C1 = 0.3365;
-    const DIFF_C2 = 0.0566;
-    const DIFF_C3 = 0.0063;
-    // 把层数参数化：G.floor 是「当前」层，读历史某一层要用这个（对局记录回放）。
-    function diffScaleAt(f) {
-        const x = f - 1;
-        return 1 + DIFF_C1 * x + DIFF_C2 * x * x + DIFF_C3 * x * x * x;
-    }
-    // DIFF_KNEE 不是曲线拐点。它只是「前期 / 后期」的分界，精华上限
-    // （getEssenceCap）、清层卡数（getFloorClearCards）与 BOSS 血量尾巴还按它分档。
-    const DIFF_KNEE = 30;
-    function getDifficultyMultiplier() {
-        return diffScaleAt(G.floor);
-    }
-
-    // 怪物数值标尺。**现在与难度是同一个值**——保留这个函数名，是为了那八个消费方
-    // （spawnMonster / spawnDebugMonster / getBossAtk / spawnBossMinion / E10 反噬 /
-    // 终结技 / R 消除 / 爆裂词缀）不用改：它们要的是「这一层的强度标尺」，
-    // 而不是「哪条曲线」。
-    function getMonsterScale() {
-        return getDifficultyMultiplier();
-    }
-
-    // 难度系数在后期能到六位数。HUD 与结算界面上原来统一 toFixed(2)，
-    // 高位时会把版面撑破，所以按量级分档显示。
-    function formatDiff(v) {
-        if (!isFinite(v)) return '∞';
-        if (v < 10000) return v.toFixed(2);
-        if (v < 1e6) return Math.round(v).toLocaleString();
-        return v.toExponential(2).replace('e+', 'e');
-    }
 
     function getMonsterCount() {
         return Math.floor(Math.min(4 + Math.floor(3 * Math.pow(1.10, G.floor)), 50) * G.fateBuffs.monsterCountMul);
@@ -2263,7 +2345,7 @@
         return base;
     }
 
-    // ---------- v9.1 词缀与通知 ----------
+    // ---------- v9.1 词缀数量 ----------
     function getAffixCount() {
         if (G.floor < 5) return 0;
         if (G.floor < 15) return Math.random() < 0.30 ? 1 : 0;
@@ -2277,14 +2359,6 @@
         return count;
     }
 
-    function showNotification(text, color, duration) {
-        G.notifications.push({
-            text, color,
-            life: duration || 180,
-            maxLife: duration || 180,
-        });
-    }
-
     // ---------- 手牌平衡 ----------
     function updateHandCount() {
         if (G.simMode) return;
@@ -2293,6 +2367,29 @@
         const el = document.getElementById('handCountDisplay');
         if (el) el.textContent = `触发:${G.handTriggerCount} 效果:${G.handEffectCount}`;
     }
+
+    return {
+        snapshotStats, sumPassiveLayers, logEvent,
+        canvas, ctx,
+        getMonsterCount, getEliteChance,
+        getEssenceCap, addCombatEssence,
+        getSpawnInterval, getAffixCount, updateHandCount,
+    };
+})();
+// ============================================================
+//  02-combat —— 战斗结算 / 被动效果 / 怪物生成
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Combat`。边界见 web/scope-check.mjs。
+const Combat = (function () {
+
+    const { DIFF_KNEE, G, dist, getDifficultyMultiplier, getMonsterScale, rand, randInt,
+            showFloatingText, showNotification } = Core;
+    const { AFFIXES, ATK_OVERFLOW_GUARD, EARLY_NORMAL_MUL, ENEMY_SHOOTER_INTERVAL, EVOKER_SUM_MUL,
+            FREEZE_MAX_FRAMES, HP_OVERFLOW_GUARD, KILL_CARD_CHANCE, KILL_CARD_EVERY, MONSTER_STAT_MUL,
+            MONSTER_TYPES, MONSTER_TYPE_LIST, RARE_E15_CAP, RARE_E16_CAP, RARE_E17_CAP, STAGE_TYPES,
+            T03_EFFECT_MUL, affixDef, bossEarlyMul, bossSummonInterval, getBossHp, getTrailWidthCap,
+            pickAffixes, playerCap } = Data;
+    const { getAffixCount, getEliteChance, logEvent } = State;
 
     // ---------- 被动系统 ----------
 
@@ -2321,7 +2418,7 @@
         else G.passives[triggerId].push({ effectId: effectId, count: 1 });
         // 组合那一刻只生效一层（不传 count → layers = 1），层数由后续触发累加。
         applyPassiveEffect(triggerId, effectId, true);
-        updatePassiveUI();
+        UI.updatePassiveUI();
         addScore(10);
     }
 
@@ -2401,24 +2498,24 @@
                 // v9.32: 攻击力不再封顶（原 playerCap(250)）——上限这个概念整个删掉。
                 // 玩家数值现在一路涨，与三次曲线同台竞争。
                 G.buffs.atkUp += val;
-                if (!isInitial) spawnParticles(p.x, p.y, '#ff8844', 5);
-                setFeedback(`⚔️ 攻击+${val} (累计+${Math.round(G.buffs.atkUp)})`, '#ff8844');
+                if (!isInitial) Trail.spawnParticles(p.x, p.y, '#ff8844', 5);
+                UI.setFeedback(`⚔️ 攻击+${val} (累计+${Math.round(G.buffs.atkUp)})`, '#ff8844');
                 break;
             }
             case 'E02': {
                 const val = 0.25 * vmul;   // 重复路径：layers 恒为 1，只乘 vmul
                 // v9.32: 倍率同样不封顶（原 playerCap(49)）。
                 G.buffs.multUp += val;
-                if (!isInitial) spawnParticles(p.x, p.y, '#ffdd44', 5);
-                setFeedback(`💥 倍率+${val.toFixed(2)} (累计x${(1 + G.buffs.multUp).toFixed(1)})`, '#ffdd44');
+                if (!isInitial) Trail.spawnParticles(p.x, p.y, '#ffdd44', 5);
+                UI.setFeedback(`💥 倍率+${val.toFixed(2)} (累计x${(1 + G.buffs.multUp).toFixed(1)})`, '#ffdd44');
                 break;
             }
             case 'E03': {
                 const val = (isHighFreq ? 5 : 20) * layers * vmul;
                 p.hp = Math.min(p.maxHp, p.hp + val);
-                spawnParticles(p.x, p.y, '#44ff88', 8);
+                Trail.spawnParticles(p.x, p.y, '#44ff88', 8);
                 showFloatingText(p.x, p.y - p.r, '+' + Math.round(val), '#44ff88');
-                setFeedback(`💚 回复${Math.round(val)}生命`, '#44ff88');
+                UI.setFeedback(`💚 回复${Math.round(val)}生命`, '#44ff88');
                 break;
             }
             // v9.23: E04「移速减慢」删除——和 E14「延缓」、轨迹迟缓三套减速重叠。
@@ -2429,14 +2526,14 @@
                 // 拿「轨迹拓宽」会被 Math.min(151, 60) 一路砍回 60。
                 G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1 * vmul, playerCap(100));
                 G.buffs.trailWidth = Math.min(G.buffs.trailWidth + 2 * vmul, getTrailWidthCap());
-                if (!isInitial) setFeedback(`⬆️ 轨迹伤害+${(1 * vmul).toFixed(1)}，宽度+${(2 * vmul).toFixed(1)}`, '#66ddff');
+                if (!isInitial) UI.setFeedback(`⬆️ 轨迹伤害+${(1 * vmul).toFixed(1)}，宽度+${(2 * vmul).toFixed(1)}`, '#66ddff');
                 break;
             case 'E07':
                 if (!isInitial) {
                     // v9.28: 层数走**伤害倍率**而不是重复调用——explodeTrails() 会把
                     // 半径内的轨迹一段段 splice 掉，第二遍就是对着空数组跑，白调用。
-                    const hit = explodeTrails(p.x, p.y, 200, layers * vmul);
-                    setFeedback(`💣 引爆${hit}段轨迹`, '#ff6633');
+                    const hit = Trail.explodeTrails(p.x, p.y, 200, layers * vmul);
+                    UI.setFeedback(`💣 引爆${hit}段轨迹`, '#ff6633');
                     if (hit > 0) addScore(hit * 2);
                 }
                 break;
@@ -2445,10 +2542,10 @@
                     const dmg = Math.floor(60 * (2 + getMonsterScale()) / 3 * vmul);
                     G.monsters.forEach(m => {
                         m.hp = Math.max(0, m.hp - dmg);
-                        spawnParticles(m.x, m.y, '#ff6644', 4);
+                        Trail.spawnParticles(m.x, m.y, '#ff6644', 4);
                         showFloatingText(m.x, m.y - m.r, '-' + dmg, '#ff6644');
                     });
-                    setFeedback(`🔄 怪物反噬！全场${G.monsters.length}只怪物各受${dmg}点伤害`, '#ff6644');
+                    UI.setFeedback(`🔄 怪物反噬！全场${G.monsters.length}只怪物各受${dmg}点伤害`, '#ff6644');
                 }
                 break;
             case 'E11':
@@ -2456,7 +2553,7 @@
                 // 移速已经 ×17.7，而它旁边的攻击/轨伤/轨宽全都撞死在死数字上。基准取 6：
                 // 软上限在 211 层是 ×25，够不着现状，纯粹是个安全阀。
                 G.buffs.speedUp = Math.min(G.buffs.speedUp + 0.35 * vmul, playerCap(6));
-                if (!isInitial) setFeedback(`💨 移速+${Math.round(0.35 * vmul * 100)}% (累计x${G.buffs.speedUp.toFixed(1)})`, '#88ddff');
+                if (!isInitial) UI.setFeedback(`💨 移速+${Math.round(0.35 * vmul * 100)}% (累计x${G.buffs.speedUp.toFixed(1)})`, '#88ddff');
                 break;
             case 'E12':
                 // ⚠️ 有意保留链冷却闸门：E12 不在用户的「时长 ×n」名单里，
@@ -2466,7 +2563,7 @@
                     const origin = G.monsters.reduce((a, b) => dist(G.player, a) < dist(G.player, b) ? a : b);
                     const chainDmg = Math.floor((20 + G.buffs.atkUp * 0.6 + G.floor * 2) * vmul);
                     origin.hp -= chainDmg;
-                    spawnParticles(origin.x, origin.y, '#88ccff', 8);
+                    Trail.spawnParticles(origin.x, origin.y, '#88ccff', 8);
                     showFloatingText(origin.x, origin.y - origin.r, '-' + chainDmg, '#88ccff');
                     // v9.22: 闪电链不再给终极技充能（改固定时间回复）
                     let chained = 0;
@@ -2475,12 +2572,12 @@
                         if (dist(origin, m) < 180) {
                             const cd = Math.floor(chainDmg * (1 - chained * 0.25));
                             m.hp -= cd;
-                            spawnParticles(m.x, m.y, '#88ccff', 4);
+                            Trail.spawnParticles(m.x, m.y, '#88ccff', 4);
                             showFloatingText(m.x, m.y - m.r, '-' + cd, '#88ccff');
                             chained++;
                         }
                     }
-                    setFeedback(`⚡ 闪电链！主目标${chainDmg}伤害，连锁${chained}只`, '#88ccff');
+                    UI.setFeedback(`⚡ 闪电链！主目标${chainDmg}伤害，连锁${chained}只`, '#88ccff');
                 }
                 break;
             case 'E13': {
@@ -2500,11 +2597,11 @@
                         // 见 05-update.js 的怪物循环。标记记的是**实际加进去的帧数**，
                         // 所以它和 m.frozen 同步到期，不会出现「冻早化了还在掉血」。
                         if (layers > 1 && added > 0) m.passiveFreeze = Math.max(m.passiveFreeze || 0, added);
-                        spawnParticles(m.x, m.y, '#aaddff', 4);
+                        Trail.spawnParticles(m.x, m.y, '#aaddff', 4);
                         frozenCount++;
                     }
                     if (frozenCount > 0) {
-                        setFeedback(`❄️ 冰冻${frozenCount}只怪物 ${(freezeDuration / 60).toFixed(1)}秒`, '#aaddff');
+                        UI.setFeedback(`❄️ 冰冻${frozenCount}只怪物 ${(freezeDuration / 60).toFixed(1)}秒`, '#aaddff');
                     }
                 }
                 break;
@@ -2525,8 +2622,8 @@
                         if (layers > 1) m.passiveSlow = Math.max(m.passiveSlow || 0, slowDuration);
                     }
                     if (targets.length > 0) {
-                        setFeedback(`⏳ 延缓${targets.length}只怪物 ${(slowDuration / 60).toFixed(1)}秒`, '#c9b3ff');
-                        spawnParticles(targets[0].x, targets[0].y, '#c9b3ff', 14);
+                        UI.setFeedback(`⏳ 延缓${targets.length}只怪物 ${(slowDuration / 60).toFixed(1)}秒`, '#c9b3ff');
+                        Trail.spawnParticles(targets[0].x, targets[0].y, '#c9b3ff', 14);
                     }
                 }
                 break;
@@ -2541,8 +2638,8 @@
                 const gained = G.turretHpBonus - before;
                 if (gained > 0) {
                     for (const t of G.turrets) { t.maxHp += gained; t.hp += gained; }   // 已有的塔一起加厚
-                    if (!isInitial) spawnParticles(p.x, p.y, '#88aacc', 6);
-                    setFeedback(`🗿 图腾血量+${gained.toFixed(1)}（累计+${G.turretHpBonus.toFixed(1)}）`, '#88aacc');
+                    if (!isInitial) Trail.spawnParticles(p.x, p.y, '#88aacc', 6);
+                    UI.setFeedback(`🗿 图腾血量+${gained.toFixed(1)}（累计+${G.turretHpBonus.toFixed(1)}）`, '#88aacc');
                 }
                 break;
             }
@@ -2552,9 +2649,9 @@
                 const gained = p.maxHp - before;
                 if (gained > 0) {
                     p.hp = Math.min(p.maxHp, p.hp + gained);   // 上限涨了，当前护盾跟着补上
-                    if (!isInitial) spawnParticles(p.x, p.y, '#66ddff', 8);
+                    if (!isInitial) Trail.spawnParticles(p.x, p.y, '#66ddff', 8);
                     showFloatingText(p.x, p.y - p.r, '+' + Math.round(gained), '#66ddff');
-                    setFeedback(`🔰 护盾上限+${Math.round(gained)}（累计 ${Math.round(p.maxHp)}）`, '#66ddff');
+                    UI.setFeedback(`🔰 护盾上限+${Math.round(gained)}（累计 ${Math.round(p.maxHp)}）`, '#66ddff');
                 }
                 break;
             }
@@ -2563,13 +2660,13 @@
                 G.buffs.fireRateMul = Math.min(before + 0.08 * layers * vmul, RARE_E17_CAP);
                 const gained = G.buffs.fireRateMul - before;
                 if (gained > 0) {
-                    if (!isInitial) spawnParticles(p.x, p.y, '#ffdd44', 6);
-                    setFeedback(`⏩ 射速+${Math.round(gained * 100)}%（累计 ×${G.buffs.fireRateMul.toFixed(2)}）`, '#ffdd44');
+                    if (!isInitial) Trail.spawnParticles(p.x, p.y, '#ffdd44', 6);
+                    UI.setFeedback(`⏩ 射速+${Math.round(gained * 100)}%（累计 ×${G.buffs.fireRateMul.toFixed(2)}）`, '#ffdd44');
                 }
                 break;
             }
         }
-        updateUI();
+        UI.updateUI();
     }
 
     // ---------- 得分系统 ----------
@@ -2586,7 +2683,7 @@
         // 现在得分就是得分，连杀另有 G.killStreak 负责，且真的会断。
         G.score += Math.floor(amount);
         // v9.22: 连杀爆发的检测块整块删除，见 00-data.js 的说明。
-        updateUI();
+        UI.updateUI();
     }
 
     // v9.15: 连杀 = 连续击杀。3 秒没有击杀、或核心挨打就断。
@@ -2611,9 +2708,9 @@
         // v9.25: 每击杀 20 个怪物掷一次 30% —— 拿到就 1 张密文版。
         // 挂在这个统一入口上，三个击杀分支（普通 / BOSS / 自爆连带）自动都算数。
         // 教程局不发：那是个沙盒，脚本自己发牌，多出来的随机牌会盖掉教学节奏。
-        if (!Tutorial.tookOver && G.killCount % KILL_CARD_EVERY === 0
+        if (!Tutor.Tutorial.tookOver && G.killCount % KILL_CARD_EVERY === 0
             && Math.random() < KILL_CARD_CHANCE) {
-            grantCards(1, `击杀 ${KILL_CARD_EVERY} 只`, '#8ab3d0');
+            UI.grantCards(1, `击杀 ${KILL_CARD_EVERY} 只`, '#8ab3d0');
         }
     }
 
@@ -2840,9 +2937,9 @@
             _affixZones: [],    // 本帧生效的区域，只给渲染用（见 06-render.js）
         };
         G.monsters.push(monster);
-        spawnParticles(monster.x, monster.y, type.color, 8);
+        Trail.spawnParticles(monster.x, monster.y, type.color, 8);
         const affixInfo = affixes.length > 0 ? ' [' + affixes.map(a => AFFIXES.find(af => af.id === a).emoji).join('') + ']' : '';
-        setFeedback(`🐛 调试：生成 ${type.emoji} ${type.label} (HP${Math.floor(monster.hp)})${affixInfo}`, '#88ccff');
+        UI.setFeedback(`🐛 调试：生成 ${type.emoji} ${type.label} (HP${Math.floor(monster.hp)})${affixInfo}`, '#88ccff');
     }
 
     // ---------- 分裂逻辑 ----------
@@ -2887,9 +2984,9 @@
                 _affixTimer: 0, _dash: null, _swarmCount: 0, _affixZones: [],
             };
             G.monsters.push(child);
-            spawnParticles(child.x, child.y, '#88cc66', 4);
+            Trail.spawnParticles(child.x, child.y, '#88cc66', 4);
         }
-        Tutorial.emit('split');
+        Tutor.Tutorial.emit('split');
     }
 
     // ---------- BOSS ----------
@@ -2952,8 +3049,8 @@
             _affixTimer: 0, _dash: null, _swarmCount: 0, _affixZones: [],
         };
         G.monsters.push(boss);
-        spawnParticles(x, y, isEvoker ? '#a01f2e' : '#ff2266', 35);
-        setFeedback(`👑 ${isEvoker ? '唤魔者' : 'BOSS'}登场！HP ${Math.floor(hp)} · 第${G.floor}波`, '#ff3366');
+        Trail.spawnParticles(x, y, isEvoker ? '#a01f2e' : '#ff2266', 35);
+        UI.setFeedback(`👑 ${isEvoker ? '唤魔者' : 'BOSS'}登场！HP ${Math.floor(hp)} · 第${G.floor}波`, '#ff3366');
         // v9.25: 战斗界面顶部横幅，把这一局抽到的词条直接念给玩家听。
         // 词条只在怪身上画一圈色环，战斗中根本读不出来。
         G.bossBanner = {
@@ -2978,13 +3075,13 @@
         const bossHp = Math.max(getBossHp(), sumHp * EVOKER_SUM_MUL);
         const bossAtk = Math.max(getBossAtk(), sumAtk * EVOKER_SUM_MUL);
         for (const m of G.monsters) {
-            spawnParticles(m.x, m.y, '#ff3355', 8);
+            Trail.spawnParticles(m.x, m.y, '#ff3355', 8);
             showFloatingText(m.x, m.y - m.r, '☠', '#ff3355');
         }
         G.monsters.length = 0;
         spawnBoss({ hp: bossHp, atk: bossAtk, affixCount: 3, isEvoker: true });
         showNotification('👹 唤魔者降临！', '#a01f2e', 220);
-        setFeedback(`👹 唤魔者：清空全场 ${cleared} 只怪，招出 HP ${Math.floor(bossHp)} / ATK ${Math.floor(bossAtk)} 的三词条 BOSS`, '#a01f2e');
+        UI.setFeedback(`👹 唤魔者：清空全场 ${cleared} 只怪，招出 HP ${Math.floor(bossHp)} / ATK ${Math.floor(bossAtk)} 的三词条 BOSS`, '#a01f2e');
         logEvent('evoker', { cleared, bossHp: Math.floor(bossHp), bossAtk: Math.floor(bossAtk) });
     }
 
@@ -3017,7 +3114,7 @@
             _affixTimer: 0, _dash: null, _swarmCount: 0, _affixZones: [],
         };
         G.monsters.push(m);
-        spawnParticles(m.x, m.y, '#ff4466', 3);
+        Trail.spawnParticles(m.x, m.y, '#ff4466', 3);
     }
 
     // ---------- 治疗逻辑 ----------
@@ -3031,12 +3128,12 @@
                     if (other === m) continue;
                     if (dist(m, other) < 180) {
                         other.hp = Math.min(other.maxHp, other.hp + m.healAmount);
-                        spawnParticles(other.x, other.y, '#44ff88', 1);
+                        Trail.spawnParticles(other.x, other.y, '#44ff88', 1);
                         showFloatingText(other.x, other.y - other.r, '+' + Math.floor(m.healAmount), '#44ff88');
                     }
                 }
                 m.hp = Math.min(m.maxHp, m.hp + m.healAmount * 0.5);
-                spawnParticles(m.x, m.y, '#44ff88', 2);
+                Trail.spawnParticles(m.x, m.y, '#44ff88', 2);
                 showFloatingText(m.x, m.y - m.r, '+' + Math.floor(m.healAmount * 0.5), '#44ff88');
             }
         }
@@ -3055,6 +3152,28 @@
     const TUTORIAL_TIMEOUT = 25 * 60; // 25s：先给更直白的提示
     const TUTORIAL_FORCE = 20 * 60;   // 再 20s：自动放行，绝不卡流程
     const TUTORIAL_FONT = '"Courier New","PingFang SC","Microsoft YaHei",monospace';
+
+    return {
+        DEBUG_TYPE_KEYS, TUTORIAL_FONT, TUTORIAL_FORCE, TUTORIAL_TIMEOUT,
+        addPassive, addScore, applyHealing, applyPassiveEffect, breakKillStreak,
+        fmtScore, getPassiveValueMul, getSealedFrames, registerKill, spawnBoss,
+        spawnBossMinion, spawnDebugMonster, spawnMonster, splitMonster,
+        tickKillStreak, triggerEvoker, triggerPassive,
+        EFFECT_AOE_RADIUS, PASSIVE_REPEAT_EFFECTS, effectAoeTargets, getBossAtk,
+        isPassiveSealed, nearestMonsterTo,
+    };
+})();
+
+// ============================================================
+//  03-tutorial —— 新手教程「古老的石板」与机制图鉴
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Tutor`。边界见 web/scope-check.mjs。
+const Tutor = (function () {
+
+    const { G, clamp } = Core;
+    const { EFFECTS, TRIGGERS } = Data;
+    const { TUTORIAL_FONT, TUTORIAL_FORCE, TUTORIAL_TIMEOUT } = Combat;
+    const { canvas, ctx } = State;
 
     // ============================================================
     //  v9.26 五块石板：移动方式 → 图腾生成 → 密文版 → 敌人 → 核心
@@ -3513,7 +3632,7 @@
             }
             // 预设终极技能直接充满
             if (cfg.ultFull) G.ultimateGauge = G.ultimateMax;
-            updateUI();
+            UI.updateUI();
         },
 
         // startFloor 的开场钩子：返回 true 表示出怪被教程接管
@@ -3593,8 +3712,8 @@
             if (!t || !e) return;
             G.triggerSlot = { ...t };
             G.effectSlot = { ...e };
-            updateUI();
-            setFeedback(`🎓 教程已帮你填好 ${t.emoji}${t.label} + ${e.emoji}${e.label}，按 空格 宣读`, '#f5c542');
+            UI.updateUI();
+            UI.setFeedback(`🎓 教程已帮你填好 ${t.emoji}${t.label} + ${e.emoji}${e.label}，按 空格 宣读`, '#f5c542');
         },
 
         // ---------- 步骤调度 ----------
@@ -3627,9 +3746,9 @@
             // v9.24: 手机上这些节点（手牌 / 宣读按钮 / 槽位）都在左侧抽屉里，
             // 默认是收起来的——讲到它们时自动把抽屉拉开。抽屉顺带把时间压到 50%，
             // 正好配合教程的阅读节奏；这一步播完由 advance() 收起。
-            if (typeof setDrawer === 'function' && G.mobileMode
+            if (typeof Events.setDrawer === 'function' && G.mobileMode
                 && (s.point === 'hand' || s.point === 'combine' || s.point === 'slot')) {
-                setDrawer(true);
+                Events.setDrawer(true);
                 // 只记「是我们自己拉开的」——玩家手动开的抽屉不该被教程关掉
                 this.drawerAutoOpened = true;
             }
@@ -3654,8 +3773,8 @@
             const cur = this.text && this.text.step;
             if (cur && cur.gate && this.gateLeft > 0) this.gateLeft--;
             // v9.24: 收起教程自动拉开的抽屉（手机上），把画面还回战斗
-            if (typeof setDrawer === 'function' && G.mobileMode && this.drawerAutoOpened) {
-                setDrawer(false);
+            if (typeof Events.setDrawer === 'function' && G.mobileMode && this.drawerAutoOpened) {
+                Events.setDrawer(false);
             }
             this.drawerAutoOpened = false;
             this.text = null;
@@ -3752,8 +3871,8 @@
         replay() {
             this.seen = false;
             this.finished = false;
-            resetGame();   // reset() 会把 restarted 一并清掉
-            setFeedback('🎓 重新开始教程 · 古老的石板 1', '#7bb3ff');
+            Main.resetGame();   // reset() 会把 restarted 一并清掉
+            UI.setFeedback('🎓 重新开始教程 · 古老的石板 1', '#7bb3ff');
         },
 
         handleClick(x, y) {
@@ -3793,11 +3912,11 @@
         // （Tutorial.reset() 本身不清 seen，所以 resetGame() 走完之后它仍然是 true。）
         Tutorial.seen = true;
         Tutorial.pendingRestart = false;
-        resetGame();
+        Main.resetGame();
         // resetGame() 会调 Tutorial.reset()（那里面会把这个标记清回 false），
         // 所以必须放在它之后。
         Tutorial.restarted = true;
-        setFeedback('🎓 教程结束 · 从第 1 层重新开始', '#f5c542');
+        UI.setFeedback('🎓 教程结束 · 从第 1 层重新开始', '#f5c542');
     }
 
     // 脚本掉落：按 id 直接发放
@@ -3809,11 +3928,11 @@
         if (G.hand.length >= 20) G.hand.shift();
         G.hand.push({ ...card, type: t ? 'trigger' : 'effect' });
         if (!silent) {
-            setFeedback(`📥 拾取 ${card.emoji} ${card.label}`, '#8ab3d0');
+            UI.setFeedback(`📥 拾取 ${card.emoji} ${card.label}`, '#8ab3d0');
             Tutorial.emit('pickup', card);
             if (cardId === 'T12' || cardId === 'E12') Tutorial.emit('pickup2', card);
         }
-        updateUI();
+        UI.updateUI();
     }
 
     // 开发期自检：脚本掉落必须 T/E 交替，否则玩家会抽不了牌
@@ -4124,6 +4243,27 @@
         drawTutorialCorners();
     }
 
+    return {
+        CODEX_PAGES, Tutorial, drawTutorial, restartRunAfterTutorial, setCanvasPointer, tutorialCheckBalance, tutorialSyncPointer,
+        TUTORIAL_FLOORS, TUTORIAL_NODEMAP, TUTORIAL_OUTRO,
+    };
+})();
+
+// ============================================================
+//  04-trail —— 行走轨迹 / 图腾 / 组合宣读 / 技能
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Trail`。边界见 web/scope-check.mjs。
+// 轨迹在这里既产生伤害、也用来判环出图腾；射击、终极技、消除技能与密文宣读同样归它管。
+const Trail = (function () {
+
+    const { G, PARTICLE_MAX, angleTo, clamp, dist, getDifficultyMultiplier, getMonsterScale,
+            rand, showFloatingText, showNotification } = Core;
+    const { CHAIR_COMBOS, ELIMINATE_COOLDOWN, PLAYER_FIRE_RATE_MUL, STAGE_TYPES, TURRET_RATIO_NORM,
+            generateTerrain } = Data;
+    const { getMonsterCount, getSpawnInterval, logEvent, snapshotStats } = State;
+    const { addPassive, addScore, spawnBoss, triggerEvoker, triggerPassive } = Combat;
+    const { Tutorial } = Tutor;
+
     // ---------- 核心游戏逻辑 ----------
     function startFloor() {
         // v9.24: 词条留下的场地残留逐层清空。敌图腾与「封印」都是挂在上一层的
@@ -4141,7 +4281,7 @@
             G.bossPending = false; G.bossSpawned = false;
             addScore(G.floor * 5);
             logEvent('floor_start', { stageType: 'tutorial', monsterCount: G.monstersToSpawn, isBoss: false, snapshot: snapshotStats() });
-            setFeedback(`🌊 第 ${G.floor} 层 · 教程 (${G.monstersToSpawn}只)`, '#7bb3ff');
+            UI.setFeedback(`🌊 第 ${G.floor} 层 · 教程 (${G.monstersToSpawn}只)`, '#7bb3ff');
             return;
         }
         const st = STAGE_TYPES.find(s => s.id === G.stageType) || STAGE_TYPES[0];
@@ -4160,9 +4300,9 @@
         addScore(G.floor * 5);
         if (isBoss) {
             spawnBoss(); G.bossPending = true; G.bossSpawned = true;
-            setFeedback(`👑 第${G.floor}层 ${st.icon}${st.label} BOSS! (${count}只) 难度×${diff.toFixed(2)}`, '#ff3366');
+            UI.setFeedback(`👑 第${G.floor}层 ${st.icon}${st.label} BOSS! (${count}只) 难度×${diff.toFixed(2)}`, '#ff3366');
         } else {
-            setFeedback(`${st.icon} 第${G.floor}层 ${st.label} (${count}只) 难度×${diff.toFixed(2)}`, '#ffb347');
+            UI.setFeedback(`${st.icon} 第${G.floor}层 ${st.label} (${count}只) 难度×${diff.toFixed(2)}`, '#ffb347');
         }
     }
 
@@ -4212,7 +4352,7 @@
         // v9.24: 「削减区」词条——玩家站在怪身边开火时子弹伤害打折。
         // 这里是子弹伤害唯一的出口，改这一处就覆盖主弹与额外弹丸（额外弹丸在下面按 atk 的 0.6 派生）。
         // 只压子弹，不压轨迹——轨迹是玩家的核心输出手段，一起压会让这条词条变成纯粹的数值墙。
-        atk *= getPlayerAtkZoneMul();
+        atk *= Update.getPlayerAtkZoneMul();
         // v9.4: 低血量狂暴
         if (G.relicBuffs.lowHpBerserk && G.player.hp < G.player.maxHp * 0.3) atk *= 2;
         // v9.4: 暴击
@@ -4344,7 +4484,7 @@
         if (G.turrets.length >= G.maxTurrets) {
             if (G.frame - (G.turretCapHintFrame || -999) > 120) {
                 G.turretCapHintFrame = G.frame;
-                setFeedback(`🗼 图腾已满 ${G.turrets.length}/${G.maxTurrets}——碎裂或扩容后才能再召唤`, '#88aacc');
+                UI.setFeedback(`🗼 图腾已满 ${G.turrets.length}/${G.maxTurrets}——碎裂或扩容后才能再召唤`, '#88aacc');
             }
             return;
         }
@@ -4370,7 +4510,7 @@
         _loopCD = 30;
         triggerPassive('T12'); addScore(Math.floor(area / 100));
         Tutorial.emit('loop', { tier: tier.t, area: Math.floor(area) });
-        setFeedback('⭕' + tier.b + '!' + Math.floor(area) + 'px²', '#ffaa00');
+        UI.setFeedback('⭕' + tier.b + '!' + Math.floor(area) + 'px²', '#ffaa00');
         spawnParticles(cx, cy, '#ffaa00', 18);
         showFloatingText(cx, cy - 10, tier.b, '#ffaa00');
         logEvent('turret', { type: turType, tier: tier.t });
@@ -4420,7 +4560,7 @@
         }
         G.trails = [];
         G.fireTrails = [];
-        setFeedback('⚡ 轨迹风暴！全场爆炸 + 眩晕2秒', '#ffdd44');
+        UI.setFeedback('⚡ 轨迹风暴！全场爆炸 + 眩晕2秒', '#ffdd44');
         addScore(50);
         Tutorial.emit('ultimate');
     }
@@ -4452,7 +4592,7 @@
         G.triggerSlot = null; G.effectSlot = null;
         G.combineCooldown = true;
         setTimeout(() => { G.combineCooldown = false; }, 300);
-        updateUI();
+        UI.updateUI();
     }
 
     // v9.21: T13「消除」——v9.25 起不再是密文版，改成玩家的固定技能。
@@ -4482,7 +4622,7 @@
         }
         spawnParticles(G.player.x, G.player.y, '#ffdd66', 24);
         showNotification('🧹 消除！', '#ffdd66', 200);
-        setFeedback(`🧹 消除：全场${hitCount}只怪各受${dmg}点伤害` + (cleared ? '，最早一座图腾被拆掉' : '（场上无图腾可拆）'), '#ffdd66');
+        UI.setFeedback(`🧹 消除：全场${hitCount}只怪各受${dmg}点伤害` + (cleared ? '，最早一座图腾被拆掉' : '（场上无图腾可拆）'), '#ffdd66');
         logEvent('eliminate', { damage: dmg, monsters: hitCount, turretCleared: cleared });
     }
 
@@ -4491,7 +4631,7 @@
     function tryEliminate() {
         if (G.gameOver || G.paused || G.selectingActive) return;
         if (G.eliminateCooldown > 0) {
-            setFeedback(`🧹 消除冷却中 · 还要 ${(G.eliminateCooldown / 60).toFixed(1)}s`, '#8ab3d0');
+            UI.setFeedback(`🧹 消除冷却中 · 还要 ${(G.eliminateCooldown / 60).toFixed(1)}s`, '#8ab3d0');
             return;
         }
         G.eliminateCooldown = ELIMINATE_COOLDOWN;
@@ -4542,7 +4682,7 @@
             G.hand.push(pick.trigger, pick.effect);
             return false;
         }
-        setFeedback(`🔮 ${pick.trigger.label}+${pick.effect.label} 自动升级`, '#ffb347');
+        UI.setFeedback(`🔮 ${pick.trigger.label}+${pick.effect.label} 自动升级`, '#ffb347');
         return true;
     }
 
@@ -4558,7 +4698,7 @@
         if (triggerId === 'T14') {
             triggerEvoker();
             logEvent('card_combine', { trigger: triggerId, effect: effectId, chairHit: null, oneShot: true });
-            setFeedback('👹 唤魔者宣读！全场清空 + 三词条 BOSS 现身', '#a01f2e');
+            UI.setFeedback('👹 唤魔者宣读！全场清空 + 三词条 BOSS 现身', '#a01f2e');
             Tutorial.emit('combine', { chair: null });
             return true;
         }
@@ -4567,7 +4707,7 @@
         for (const tid of Object.keys(G.passives)) usedSlots += G.passives[tid].length;
         const isUpgrade = G.passives[triggerId] && G.passives[triggerId].some(p => p.effectId === effectId);
         if (!isUpgrade && usedSlots >= G.maxSlots) {
-            setFeedback(`⚠️ 槽位已满(${usedSlots}/${G.maxSlots})`, '#ff6644'); return false;
+            UI.setFeedback(`⚠️ 槽位已满(${usedSlots}/${G.maxSlots})`, '#ff6644'); return false;
         }
         addPassive(triggerId, effectId);
         logEvent('card_combine', { trigger: triggerId, effect: effectId, chairHit: null });
@@ -4592,7 +4732,7 @@
         // v9.28: T01/T02 删掉了，宣读那一刻的即时触发只剩 T10（残血）。
         // v9.31: T14（唤魔者）挪到函数开头单独处理——它不再产生被动，所以走不到这里。
         if (triggerId === 'T10' && G.player.hp < G.player.maxHp * 0.3) { triggerPassive('T10'); }
-        setFeedback(msg, chairHit ? '#ff8844' : '#ffb347');
+        UI.setFeedback(msg, chairHit ? '#ff8844' : '#ffb347');
         Tutorial.emit('combine', { chair: chairHit ? chairHit.id : null });
         if (Tutorial.combos >= 2) Tutorial.emit('combine2');
         if (chairHit) Tutorial.emit('chair', { id: chairHit.id });
@@ -4605,8 +4745,8 @@
         G.batchQueue.push({ trigger: { ...G.triggerSlot }, effect: { ...G.effectSlot } });
         G.triggerSlot = null; G.effectSlot = null;
         updateBatchUI();
-        updateUI();
-        setFeedback(`📦 排队 ${G.batchQueue.length} 组密文组合`, '#ffb347');
+        UI.updateUI();
+        UI.setFeedback(`📦 排队 ${G.batchQueue.length} 组密文组合`, '#ffb347');
     }
 
     function executeBatch() {
@@ -4616,10 +4756,10 @@
             if (doCombine(item.trigger, item.effect)) count++;
         }
         G.batchQueue = [];
-        setFeedback(`📜 批量宣读完成！${count}组被动已激活`, '#ffb347');
+        UI.setFeedback(`📜 批量宣读完成！${count}组被动已激活`, '#ffb347');
         spawnParticles(G.player.x, G.player.y, '#ffb347', 20);
         updateBatchUI();
-        updateUI();
+        UI.updateUI();
     }
 
     function updateBatchUI() {
@@ -4642,6 +4782,35 @@
                 G.batchQueue.splice(parseInt(this.dataset.bi), 1); updateBatchUI(); });
         });
     }
+
+    return {
+        ULT_BASE_FRAMES,
+        activateEliminate, activateUltimate, addTrail, autoShoot, checkTrailLoop, combineCards,
+        doCombine, executeBatch, explodeTrails, findAutoUpgrade, getPlayerAttackPower,
+        getTrailDamage, getTrailWidth, getTurretAttackPower, getUltimateChargeFrames,
+        nearestTurret, queueBatchCombine, spawnParticles, startFloor, tryAutoUpgrade,
+        tryEliminate, updateBatchUI,
+    };
+})();
+
+// ============================================================
+//  05-update —— 每帧主更新（移动 / 碰撞 / 词条 / 楼层推进）
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Update`。边界见 web/scope-check.mjs。
+const Update = (function () {
+
+    const { G, angleTo, clamp, dist, getMonsterScale, rand,
+            showFloatingText, showNotification } = Core;
+    const { AFFIX_ZONE_MAX_PER_KIND, AFFIX_ZONE_R_MUL, BOSS_CARD_STEP,
+            ENEMY_SHOOTER_INTERVAL, ENEMY_SHOOTER_RANGE, ENEMY_SHOT_LIFE,
+            affixDef, bossSummonInterval, getFloorClearCards, rollBossCardCount } = Data;
+    const { addCombatEssence, getSpawnInterval, logEvent, snapshotStats } = State;
+    const { addScore, applyHealing, breakKillStreak, registerKill, spawnBossMinion,
+            spawnMonster, splitMonster, tickKillStreak, triggerPassive } = Combat;
+    const { Tutorial, restartRunAfterTutorial, tutorialSyncPointer } = Tutor;
+    const { addTrail, autoShoot, checkTrailLoop, getPlayerAttackPower, getTrailDamage,
+            getTrailWidth, getTurretAttackPower, getUltimateChargeFrames, nearestTurret,
+            spawnParticles, tryAutoUpgrade } = Trail;
 
     // v9.22: 怪物踩到轨迹后挂多少帧迟缓（3 秒 @60fps）。
     // 减速倍数不在这里——沿用 slowTimer 那个 0.8，和 E14「延缓」共用。
@@ -4685,7 +4854,7 @@
                 spawnParticles(G.player.x, G.player.y, color, opts.particles || 6);
                 if (!opts.noText) showFloatingText(G.player.x, G.player.y - G.player.r, '-' + Math.floor(dmg), color);
             }
-            if (G.player.hp <= 0) setFeedback('🛡️ 护盾耗尽！核心暴露！', '#ff4444');
+            if (G.player.hp <= 0) UI.setFeedback('🛡️ 护盾耗尽！核心暴露！', '#ff4444');
             return 'shield';
         }
         G.core.hp = Math.max(0, G.core.hp - dmg);
@@ -5098,7 +5267,7 @@
             // 一帧跨两道坎（重击 / 消除直接带走一大截）就补两次，不漏发
             for (let k = done; k < passed; k++) {
                 const n = rollBossCardCount();
-                grantCards(n, `BOSS 磨血 ${Math.round((k + 1) * 25)}%`, '#ff6688');
+                UI.grantCards(n, `BOSS 磨血 ${Math.round((k + 1) * 25)}%`, '#ff6688');
                 showFloatingText(m.x, m.y - m.r - 20, '📥+' + n, '#ff88aa');
             }
         }
@@ -5130,7 +5299,7 @@
         tickKillStreak();
 
         // v9.10: 自动驾驶
-        if (G.simMode) { autoPilot(); }
+        if (G.simMode) { Sim.autoPilot(); }
 
         const p = G.player;
 
@@ -5436,7 +5605,7 @@
                         if (G.core.hp <= 0) {
                             G.core.hp = 0;
                             G.gameOver = true;
-                            setFeedback('💀 核心被毁 · 游戏结束', '#d44');
+                            UI.setFeedback('💀 核心被毁 · 游戏结束', '#d44');
                         }
                     }
                 }
@@ -5461,14 +5630,14 @@
                     // v9.31: 撤掉 `G.relics.length < 8`。遗物**没有上限**了——真正的
                     // 天花板是 RELICS 的表长，dropRelic() 自己那道「同名只能拿一次」
                     // 的去重仍然留着。
-                    if (Math.random() < 0.3 * (G.fateBuffs.dropRateMul || 1)) dropRelic();
+                    if (Math.random() < 0.3 * (G.fateBuffs.dropRateMul || 1)) UI.dropRelic();
                     if (G.fateBuffs.vampHeal > 0) {
                         G.player.hp = Math.min(G.player.maxHp, G.player.hp + G.fateBuffs.vampHeal * 3);
                     }
                     // v9.28: 唤魔者 BOSS 额外掉一把「唤魔之钥」。它是真 BOSS——上面那套
                     // 普通掉落（精华 / 遗物 / 卡牌 / T08 / 连杀分）照常吃，只是多掉一个。
                     // 钥匙**不走** dropRelic()——它是独立来源，不该混进随机池。
-                    if (m.isEvokerBoss) gainEvokerKey();
+                    if (m.isEvokerBoss) UI.gainEvokerKey();
                     triggerPassive('T08', m); addScore(G.killStreak * 5);
                     // v9.28: bossPending/bossSpawned 是「每 10 层一只」的楼层排程，
                     // 打死唤魔者招出来的那只不该顺手把它们清掉。
@@ -5476,10 +5645,10 @@
                     // v9.22: 卡牌数也吃 dropRateMul；飘字改用实际到手的 bossGot
                     // （原来说的是未受本层精华上限钳制的 10+层，跟真掉的对不上）
                     const drops = Math.round((2 + Math.floor(Math.random() * 2)) * (G.fateBuffs.dropRateMul || 1));
-                    for (let d = 0; d < drops; d++) dropBalancedCard();
+                    for (let d = 0; d < drops; d++) UI.dropBalancedCard();
                     onAffixDeath(m);
                     G.monsters.splice(i, 1);
-                    setFeedback(`👑 BOSS击杀！+${Math.floor(m.scoreValue)}分 · 掉落${drops}张牌 · 💎+${bossGot}`, '#ff3366');
+                    UI.setFeedback(`👑 BOSS击杀！+${Math.floor(m.scoreValue)}分 · 掉落${drops}张牌 · 💎+${bossGot}`, '#ff3366');
                     continue;
                 }
                 spawnParticles(m.x, m.y, '#ffaa44', 12);
@@ -5518,7 +5687,7 @@
                 // v9.4: 遗物掉落（精英）。v9.22: 删掉 G.relicDropWave——只读不写的死字段。
                 // v9.31: 与 BOSS 那条一样，撤掉 `G.relics.length < 8`（遗物不再有上限）。
                 if (m.isElite && Math.random() < 0.08 * (G.fateBuffs.dropRateMul || 1)) {
-                    dropRelic();
+                    UI.dropRelic();
                 }
                 // v9.2: 命运吸血
                 if (G.fateBuffs.vampHeal > 0) {
@@ -5726,7 +5895,7 @@
                 G.notifications = [];
             }
             if (G.frame % 30 === 0 && G.hand.length >= 2 && !G.selectingActive) {
-                simAutoCombine();
+                Sim.simAutoCombine();
             }
             // 目标楼层检测（在floor clear逻辑之前）
             if (G.simTargetFloor > 0 && G.floor >= G.simTargetFloor
@@ -5734,7 +5903,7 @@
                 && !G.selectingActive && !G.bossPending) {
                 G.gameOver = true;
                 logEvent('game_over', { reason: 'target_floor_reached', snapshot: snapshotStats() });
-                handleSimGameOver();
+                Sim.handleSimGameOver();
                 return;
             }
         }
@@ -5778,18 +5947,18 @@
             // 从来没暴露出来）。
             else if (G.floor % 5 === 0) {
                 const n = getFloorClearCards();
-                for (let c = 0; c < n; c++) dropBalancedCard();
+                for (let c = 0; c < n; c++) UI.dropBalancedCard();
                 logEvent('floor_clear', { floorKills: G.floorKills, cardsRewarded: n,
                     floorCards: G.floorCardsObtained, stageEnd: true, snapshot: snapshotStats() });
-                if (G.simMode) { simAutoStatChoice(); } else { showStatChoice(); }
+                if (G.simMode) { Sim.simAutoStatChoice(); } else { UI.showStatChoice(); }
             } else {
                 logEvent('floor_clear', { floorKills: G.floorKills, cardsRewarded: 0,
                     floorCards: G.floorCardsObtained, stageEnd: false, snapshot: snapshotStats() });
-                advanceFloor();
+                UI.advanceFloor();
             }
         }
 
-        updateUI();
+        UI.updateUI();
         if (G.core.hp <= 0) {
             G.core.hp = 0;
             // v9.4: 凤凰羽毛复活
@@ -5798,12 +5967,12 @@
                 G.core.hp = G.core.maxHp * 0.5;
                 G.player.hp = G.player.maxHp * 0.5;
                 G.relicBuffs.revive = false;
-                setFeedback('🪶 凤凰羽毛发动！核心与护盾恢复50%！', '#ff8844');
+                UI.setFeedback('🪶 凤凰羽毛发动！核心与护盾恢复50%！', '#ff8844');
                 showNotification('🪶 凤凰涅槃！', '#ff8844', 240);
             } else {
                 G.gameOver = true;
                 logEvent('game_over', { reason: 'core_destroyed', snapshot: snapshotStats() });
-                setFeedback('💀 核心被毁 · 游戏结束', '#d44');
+                UI.setFeedback('💀 核心被毁 · 游戏结束', '#d44');
             }
         }
     }
@@ -5842,6 +6011,32 @@
             }
         }
     }
+
+    return {
+        ENEMY_TOTEM_LIFE, ENEMY_TOTEM_RANGE, FIRE_TURRET_DMG_PER_FRAME, FIRE_ZONE_DMG_PER_TICK,
+        FIRE_ZONE_TICK, SEAL_FRAMES, TRAIL_SLOW_FRAMES,
+        applyVortexPull, damagePlayerSide, fireEnemyShot, getAffixZoneMul, getPlayerAtkZoneMul,
+        getPlayerSpeedZoneMul, getShooterRange, getTurretAtkZoneMul, getTurretRateZoneMul,
+        onAffixCoreHit, onAffixDeath, spawnAffixZone, tickAffixZones, tickAffixes,
+        tickBossCardMilestones, update, updateEnemyTotems, updateSeals,
+    };
+})();
+
+// ============================================================
+//  06-render —— 绘制（背景 / 轨迹 / 怪物 / HUD 画布层）
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Render`。边界见 web/scope-check.mjs。
+// 本模块只画不写：读 G 与世界数据，把蜿蜒地图、轨迹、怪物、HUD、终结技条画到 canvas 上。
+const Render = (function () {
+
+    const { G, angleTo, clamp, dist, formatDiff, getDifficultyMultiplier } = Core;
+    const { AFFIXES, ELIMINATE_COOLDOWN, ENEMY_SHOT_LIFE, NODE_POOL,
+            STAGE_TYPES, TRAIL_STYLES } = Data;
+    const { ctx } = State;
+    const { fmtScore } = Combat;
+    const { drawTutorial } = Tutor;
+    const { getTrailWidth, getUltimateChargeFrames } = Trail;
+    const { ENEMY_TOTEM_RANGE } = Update;
 
     // ---------- v9.7 蜿蜒地图 ----------
     function drawWindingMap() {
@@ -6653,6 +6848,26 @@
         drawTutorial();
     }
 
+    return {
+        draw, getBackdrop,
+    };
+})();
+// ============================================================
+//  07-ui —— DOM 界面 / 楼层推进 / 商店 / 地图节点
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `UI`。边界见 web/scope-check.mjs。
+// 本模块负责 DOM 面板的绘制与交互：手牌 / 被动 / 遗物 / 商店 / 选职业 / 选路 / 选属性，外加楼层推进。
+const UI = (function () {
+
+    const { G, formatDiff, getDifficultyMultiplier, showNotification } = Core;
+    const { addScore, applyPassiveEffect, fmtScore, getPassiveValueMul, getSealedFrames } = Combat;
+    const { getEssenceCap, logEvent, snapshotStats, updateHandCount } = State;
+    const { CLASSES, EFFECTS, FATE_CHOICES, NODE_POOL, RARE_CARD_MIN_FLOOR, RELICS,
+            START_CARDS, STAT_CHOICES, TRIGGERS, TURRET_SLOT_CHOICE, getMerchantStock,
+            randomEffect, randomTrigger } = Data;
+    const { Tutorial, setCanvasPointer } = Tutor;
+    const { spawnParticles, startFloor } = Trail;
+
     // ---------- UI ----------
     function updateUI() {
         if (G.simMode) return;
@@ -7384,7 +7599,7 @@
         if (G.floor === 40) { G.maxSlots = 6; G.ultimateChargeMult = 1.5; showNotification('📢 槽位+1 充能加速！', '#ffdd44', 360); }
         if (G.floor === 60) { G.maxSlots = 7; showNotification('📢 被动槽位+1！', '#ffdd44', 240); }
         if (G.floor > 0 && G.floor % 10 === 0) {
-            if (G.simMode) { simAutoFateChoice(); }
+            if (G.simMode) { Sim.simAutoFateChoice(); }
             else { showFateChoice(); }
         }
         else { addScore(G.floor * 5); startFloor(); }
@@ -7411,6 +7626,29 @@
         G.stageType = node.stageType || 'mixed';
         advanceFloor();
     }
+
+    return {
+        advanceFloor, dropBalancedCard, dropRelic, fillSlot, gainEvokerKey, getShopRefreshCost,
+        grantCards, initClassSelection, refreshMerchantStock, removePassive, selectClass,
+        selectNode, selectStat, setFeedback, showNodeMap, showStatChoice, syncGameOverUI,
+        updatePassiveUI, updateRelicUI, updateUI,
+    };
+})();
+
+// ============================================================
+//  08-main —— 主循环 / 重开一局
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Main`。边界见 web/scope-check.mjs。
+// 本模块只有两个入口：gameLoop()（rAF 主循环：update/draw 派发 + FPS 叠层）与 resetGame()（重开一局，逐字段复位 G 并收起各浮层）。
+const Main = (function () {
+
+    const { G } = Core;
+    const { ctx } = State;
+    const { Tutorial } = Tutor;
+    const { updateBatchUI } = Trail;
+    const { update } = Update;
+    const { draw } = Render;
+    const { initClassSelection, syncGameOverUI, updateRelicUI, updateUI } = UI;
 
     // ---------- 重置 ----------
     function resetGame() {
@@ -7459,7 +7697,7 @@
         // ——ID 是旧局留下的数字，不清掉的话新局第一根手指会被当成「不是摇杆那根」。
         G.affixZones.length = 0; G.bossBanner = null; G.eliminateCooldown = 0;
         G.stickBase = null; G._stickTouchId = null;
-        resetJoystickVisual();
+        Events.resetJoystickVisual();
         Tutorial.reset();
         document.getElementById('pauseOverlay').classList.remove('active');
         document.getElementById('pauseWorkshop').classList.remove('active');
@@ -7537,7 +7775,7 @@
     let _timeAcc = 0;
     function gameLoop() {
         if (G.simMode) {
-            simLoop();
+            Sim.simLoop();
             return;
         }
         const _t0 = performance.now();
@@ -7559,6 +7797,28 @@
         }
         requestAnimationFrame(gameLoop);
     }
+
+    return {
+        gameLoop, resetGame,
+    };
+})();
+
+// ============================================================
+//  09-events —— 输入事件（键盘 / 鼠标 / 触摸）与手机端适配
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Events`。边界见 web/scope-check.mjs。
+// 本模块既挂桌面端的键鼠监听，又装手机端的整块适配（摇杆 / 屏幕按钮 / 全屏 /
+// 转屏 / 抽屉）。这两半共用同一批入口（G.keys、activateUltimate…），所以放一起。
+const Events = (function () {
+
+    const { G, clamp, dist } = Core;
+    const { CODEX_PAGES, Tutorial } = Tutor;
+    const { activateUltimate, combineCards, executeBatch, queueBatchCombine, tryEliminate } = Trail;
+    const { selectNode, setFeedback } = UI;
+    const { resetGame } = Main;
+    const { DEBUG_TYPE_KEYS, spawnDebugMonster } = Combat;
+    const { canvas } = State;
+    const { JOYSTICK } = Data;
 
     // ---------- 事件 ----------
     // 键位归一化：优先读 e.code（物理键位）。
@@ -7681,7 +7941,7 @@
     if (logBtn) {
         logBtn.addEventListener('mousedown', function(e) {
             e.preventDefault(); e.stopPropagation();
-            exportGameLog();
+            Sim.exportGameLog();
         });
     }
     const resetBtn = document.getElementById('resetBtn');
@@ -7989,6 +8249,29 @@
         if (window.__bootError) window.__bootError('手机端初始化失败：' + (err && err.message));
         if (window.console && console.error) console.error('[boot/mobile]', err);
     }
+
+    return {
+        resetJoystickVisual, setDrawer,
+        detectMobileMode, joyRadiusPx, releaseStick, setStickFromTouch,
+    };
+})();
+
+// ============================================================
+//  10-sim —— 对局记录导出 / 自动模拟模式 / 启动引导
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Sim`。边界见 web/scope-check.mjs。
+const Sim = (function () {
+
+    const { G, angleTo, diffScaleAt, dist, formatDiff, getDifficultyMultiplier } = Core;
+    const { logEvent, snapshotStats, sumPassiveLayers } = State;
+    const { tutorialCheckBalance } = Tutor;
+    const { doCombine, startFloor, updateBatchUI } = Trail;
+    const { update } = Update;
+    const { draw } = Render;
+    const { advanceFloor, initClassSelection, setFeedback, updateUI } = UI;
+    const { gameLoop } = Main;
+    const { addScore, fmtScore } = Combat;
+    const { CLASSES, FATE_CHOICES, NODE_POOL, STAT_CHOICES, TURRET_SLOT_CHOICE, getMerchantStock, randomEffect, randomTrigger } = Data;
 
     // ---------- v9.10 导出对局记录 ----------
     // v9.31: 版本号不再硬编码。这里原来写死 'v9.10'（那是**格式版本**，不是游戏版本），
@@ -8528,27 +8811,43 @@
     // ============================================================
     //  v9.10 启动
     // ============================================================
-    if (G.simMode) {
-        // 关闭所有遮罩层
-        ['classOverlay','pauseOverlay','pauseWorkshop','selectionOverlay',
-         'mapOverlay','merchantOverlay'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.classList.remove('active');
-        });
-        simAutoSelectClass();
-    } else {
-        updateUI(); updateBatchUI();
-        setFeedback('🧙 选择你的密文法师职业以开始冒险', '#f5c542');
-        initClassSelection();
+    // 4.0: 这段从「模块体顶层」挪进了 boot()，由文件末尾调用。原因：gameLoop() 在
+    // 模拟模式下会同步回调 Sim.simLoop()，而 `const Sim = (function(){…})()` 要等
+    // 这个 IIFE 返回才赋值——写在体内的话，那一刻 Sim 还在 TDZ 里（ReferenceError）。
+    // 挪出来之后，顺序变成「11 个模块全部装配完 → 再点启动」，也就是本来就该有的顺序。
+    function boot() {
+        if (G.simMode) {
+            // 关闭所有遮罩层
+            ['classOverlay','pauseOverlay','pauseWorkshop','selectionOverlay',
+             'mapOverlay','merchantOverlay'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.remove('active');
+            });
+            simAutoSelectClass();
+        } else {
+            updateUI(); updateBatchUI();
+            setFeedback('🧙 选择你的密文法师职业以开始冒险', '#f5c542');
+            initClassSelection();
+        }
+
+        // 启动游戏循环
+        tutorialCheckBalance();
+        gameLoop();
+
+        // v9.25: 启动已跑完——之后再抛的错都是运行期问题，不该再触发底部那条
+        // 自检条（它只负责「启动失败」，见 template.html 的 __bootError）。
+        window.__booted = true;
     }
 
-    // 启动游戏循环
-    tutorialCheckBalance();
-    gameLoop();
+    return {
+        LOG_FORMAT_VERSION, autoPilot, boot, buildGameLogJSONL, exportGameLog, getDiffAtFloor,
+        getMonsterScaleAtFloor, handleSimGameOver, simAutoCombine, simAutoFateChoice,
+        simAutoSelectClass, simAutoStatChoice, simDoBuy, simLoop,
+    };
+})();
 
-    // v9.25: 启动已跑完——之后再抛的错都是运行期问题，不该再触发底部那条
-    // 自检条（它只负责「启动失败」，见 template.html 的 __bootError）。
-    window.__booted = true;
+// 启动引导（见上面 boot() 的说明）。必须在 IIFE 之外。
+Sim.boot();
 </script>
 </body>
 </html>

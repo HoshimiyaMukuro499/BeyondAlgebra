@@ -55,11 +55,39 @@ const windowStub = {
   requestAnimationFrame: noop,
 };
 
+// 老接口里「符号没了 → null」的名单，从本文件源码里抠出来（见下面 __ns 分支的说明）。
+function nullMappedNames() {
+  const self = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const names = new Set();
+  for (const m of self.matchAll(/'\s*([A-Za-z_$][A-Za-z0-9_$]*):\s*\(typeof \1 !== "undefined"\)/g)) names.add(m[1]);
+  return [...names];
+}
+
 const factory = new Function(
   'window', 'document', 'requestAnimationFrame', 'cancelAnimationFrame', 'setTimeout',
   'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'navigator', 'localStorage', 'alert',
   // typeof 守卫：同一个探针也要能跑在 9.16 上做对照
-  src + '\n;return { G, resetGame, update, draw, checkTrailLoop, dist, autoShoot, addTrail, autoPilot, startFloor, simAutoSelectClass,' +
+  src + '\n;' +
+  // 4.0: 每个模块包成了 IIFE，顶层不再有 G / resetGame 这些名字——它们躺在各自的
+  // 命名空间里。所以在 4.x 产物上先把 12 个命名空间摊平成一个对象当接口。
+  // 9.x 产物没有命名空间（typeof Core === "undefined"），仍走下面那份老的对象字面量；
+  // 老那份包在箭头函数里是必须的——直接在 4.x 上求值会 ReferenceError。
+  // 摊平是安全的：286 个顶层符号零重名，所以每个属性只可能来自一个模块。
+  ' const __ns = (typeof Core !== "undefined") ? Object.assign({}, Core, Data, State, Combat, Tutor, Trail, Update, Render, UI, Main, Events, Sim) : null;' +
+  ' if (__ns) {' +
+  '   if (Tutor.Tutorial) __ns.Tutorial = Tutor.Tutorial;' +   // 命名空间叫 Tutor，导出的对象叫 Tutorial
+  '   __ns.deletedSymbols = { KILL_BURSTS: typeof KILL_BURSTS !== "undefined", MAP_NODES: typeof MAP_NODES !== "undefined",' +
+  '     startVacuum: typeof startVacuum !== "undefined", skipVacuum: typeof skipVacuum !== "undefined",' +
+  '     updateVacuumUI: typeof updateVacuumUI !== "undefined", showCardSelection: typeof showCardSelection !== "undefined",' +
+  '     selectCard: typeof selectCard !== "undefined" };' +
+  // 9.x 那份老接口把「已经删掉的符号」显式映射成 null（`NAME: (typeof NAME !== "undefined") ? NAME : null`），
+  // 于是「确认已删除」的判据可以写 `=== null`，和「探针没找到」的 undefined 区分开。
+  // 4.x 走的是命名空间摊平，删掉的符号在这个对象里根本不存在 —— 是 undefined，会让那几处
+  // 判据假失败（并且连带把整节 HAS_V932 关掉，退回去跑 9.31 的老断言）。
+  // 所以把那份 null 映射从探针自己的源码里抠出来，在 __ns 上补一遍：名单只有一个来源，不会漂。
+  ' for (const __k of ' + JSON.stringify(nullMappedNames()) + ') if (!(__k in __ns)) __ns[__k] = null;' +
+  ' }' +
+  ' const __legacy = () => ({ G, resetGame, update, draw, checkTrailLoop, dist, autoShoot, addTrail, autoPilot, startFloor, simAutoSelectClass,' +
   ' nearestTurret: (typeof nearestTurret !== "undefined") ? nearestTurret : null,' +
   // v9.18 经济——带 typeof 守卫，同一个探针仍能跑在 9.17 上做对照
   ' getEssenceCap: (typeof getEssenceCap !== "undefined") ? getEssenceCap : null,' +
@@ -250,7 +278,8 @@ const factory = new Function(
   '  skipVacuum: typeof skipVacuum !== "undefined",' +
   '  updateVacuumUI: typeof updateVacuumUI !== "undefined",' +
   '  showCardSelection: typeof showCardSelection !== "undefined",' +
-  '  selectCard: typeof selectCard !== "undefined" } };'
+  '  selectCard: typeof selectCard !== "undefined" } });' +
+  ' return __ns || __legacy();'
 );
 const api = factory(
   windowStub, documentStub, noop, noop, noop, noop, noop, noop,
@@ -3330,8 +3359,12 @@ if (!HAS_V931) {
     m211 && `hp=${m211.hp}`);
   if (HAS_V932) {
     // 三次曲线下第 211 层标尺 6.09e4，基础怪血量落在百万量级（旧指数式是 1e41 量级）。
-    ok(!!m211 && m211.hp > 1e5 && m211.hp < 1e7,
-      '第 211 层普通怪血量落在 1e5~1e7（跟三次曲线走，不是 1e41）',
+    // 上界写 1e8 而不是 1e7：spawnMonster() 不带参数会按 getEliteChance() 掷精英，
+    // 最大的那种怪×精英正好是 1.68e7 —— 上界卡 1e7 会让这条断言约 4% 的概率假失败
+    // （掷中精英 0.35 × 掷中那种怪 1/9）。量级判据留 1e8 仍然把「1e41」和「百万」
+    // 分得干干净净，但不再依赖那次随机。
+    ok(!!m211 && m211.hp > 1e5 && m211.hp < 1e8,
+      '第 211 层普通怪血量落在 1e5~1e8（跟三次曲线走，不是 1e41）',
       m211 && `hp=${m211.hp}`);
     // 血量确实跟当前标尺成正比：同层两只怪（人工调标尺）比值 = 标尺比
     fresh(); G.floor = 211; spawnMonsterProbe({ key: 'basic' });
@@ -3375,8 +3408,11 @@ if (!HAS_V931) {
     `got ${diffAssign}`);
   ok(html.includes("ctx.fillText(`${stIcon} 层${G.floor} 难度×${diff.toFixed(2)}`"),
     'HUD 的「难度×」显示仍然读 getDifficultyMultiplier()（玩家看到的难度没变）');
-  ok((html.match(/getMonsterScale\(\)/g) || []).length >= 11,
-    'getMonsterScale() 有 ≥11 个消费点', `got ${(html.match(/getMonsterScale\(\)/g) || []).length}`);
+  // 只数主脚本。原来数的是整个 html，于是 9.32 的版本说明注释（head 里那段 <!-- v9.32… -->）
+  // 恰好也写了两次 getMonsterScale()，把阈值垫到了 11 —— 换个版本说明（比如 4.0 的）就会假失败。
+  // 脚本里的消费点两个版本都是 10 个，一字不差。
+  const scaleUsers = (src.match(/getMonsterScale\(\)/g) || []).length;
+  ok(scaleUsers >= 10, 'getMonsterScale() 有 ≥10 个消费点', `got ${scaleUsers}`);
   for (const [fn, why] of [['spawnMonster', '怪物本体'], ['spawnDebugMonster', '调试生成'],
                            ['spawnBossMinion', 'BOSS 爪牙'], ['getBossAtk', 'BOSS 攻击']]) {
     const body = html.match(new RegExp('function ' + fn + '\\([^)]*\\)[\\s\\S]*?\\n    \\}'));

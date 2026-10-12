@@ -1,3 +1,19 @@
+// ============================================================
+//  06-render —— 绘制（背景 / 轨迹 / 怪物 / HUD 画布层）
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Render`。边界见 web/scope-check.mjs。
+// 本模块只画不写：读 G 与世界数据，把蜿蜒地图、轨迹、怪物、HUD、终结技条画到 canvas 上。
+const Render = (function () {
+
+    const { G, angleTo, clamp, dist, formatDiff, getDifficultyMultiplier } = Core;
+    const { AFFIXES, ELIMINATE_COOLDOWN, ENEMY_SHOT_LIFE, NODE_POOL,
+            STAGE_TYPES, TRAIL_STYLES } = Data;
+    const { ctx } = State;
+    const { fmtScore } = Combat;
+    const { drawTutorial } = Tutor;
+    const { getTrailWidth, getUltimateChargeFrames } = Trail;
+    const { ENEMY_TOTEM_RANGE } = Update;
+
     // ---------- v9.7 蜿蜒地图 ----------
     function drawWindingMap() {
         if (!G.mapMode) return;
@@ -808,3 +824,7 @@
         drawTutorial();
     }
 
+    return {
+        draw, getBackdrop,
+    };
+})();

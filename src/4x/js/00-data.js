@@ -1,3 +1,16 @@
+// ============================================================
+//  00-data —— 静态数据表（词条 / 密文板 / 怪物 / 遗物 / 地图节点…）
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Data`。边界见 web/scope-check.mjs。
+// 本模块大而杂，但它对外的**接口**很小：都是一张张表，加几个查表函数。
+// 表里嵌着行为（STAT_CHOICES[].apply 之类），那些行为引用 G 与 UI/Trail——
+// 因为 G 已提到 00-core，这些引用是向后的；只有 setFeedback / spawnParticles
+// 属于后加载模块，按规矩在调用点写 `UI.setFeedback(...)` / `Trail.spawnParticles(...)`。
+const Data = (function () {
+
+    const { G, rand, dist, DIFF_KNEE, diffScaleAt, getMonsterScale,
+            showFloatingText, showNotification } = Core;
+
     // ============================================================
     //  9.10 · 自动模拟模式+AI驾驶+自主优化Loop
     // ============================================================
@@ -710,16 +723,16 @@
         { id: 'atkUp',     label: '攻击强化', emoji: '⚔️', desc: '永久攻击+3',        color: '#ff8844', shopCost: 12,
           // v9.32: 不再封顶（原 playerCap(2000)）。与 E01 一起构成玩家攻击力的两条增长路径，
           // 两条现在都是无上限累加——玩家攻击力这件事上，「上限」已经不存在了。
-          apply() { G.buffs.atkUp += 3; setFeedback('⚔️ 攻击力永久+3！', '#ff8844'); } },
+          apply() { G.buffs.atkUp += 3; UI.setFeedback('⚔️ 攻击力永久+3！', '#ff8844'); } },
         { id: 'heal',      label: '生命复苏', emoji: '💚', desc: '回复30%最大护盾',   color: '#44ff88', shopCost: 10,
           apply() { const healAmt = Math.floor(G.player.maxHp * 0.3); G.player.hp = Math.min(G.player.maxHp, G.player.hp + healAmt);
-                    spawnParticles(G.player.x, G.player.y, '#44ff88', 12);
+                    Trail.spawnParticles(G.player.x, G.player.y, '#44ff88', 12);
                     showFloatingText(G.player.x, G.player.y - G.player.r, '+' + healAmt, '#44ff88');
-                    setFeedback('💚 回复' + healAmt + '护盾！', '#44ff88'); } },
+                    UI.setFeedback('💚 回复' + healAmt + '护盾！', '#44ff88'); } },
         { id: 'speedUp',   label: '疾步',     emoji: '💨', desc: '永久移速+5%',       color: '#88ddff', shopCost: 12,
-          apply() { G.buffs.speedUp = Math.min(G.buffs.speedUp + 0.05, playerCap(6)); setFeedback('💨 移速永久+5%！', '#88ddff'); } },
+          apply() { G.buffs.speedUp = Math.min(G.buffs.speedUp + 0.05, playerCap(6)); UI.setFeedback('💨 移速永久+5%！', '#88ddff'); } },
         { id: 'trailUp',   label: '轨迹淬炼', emoji: '🐾', desc: '永久轨迹伤害+1',    color: '#ffdd44', shopCost: 14,
-          apply() { G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1, playerCap(400)); setFeedback('🐾 轨迹伤害永久+1！', '#ffdd44'); } },
+          apply() { G.buffs.trailDmg = Math.min(G.buffs.trailDmg + 1, playerCap(400)); UI.setFeedback('🐾 轨迹伤害永久+1！', '#ffdd44'); } },
         // v9.18 新增两条
         { id: 'trailWidth', label: '轨迹拓宽', emoji: '📏', desc: '永久轨迹宽度+1',   color: '#66dd88', shopCost: 14,
           // v9.31: 原来这里封 60，而 E06 封 150——宽到 150 之后再拿这一项，
@@ -728,13 +741,13 @@
           // 而且写成**只增不减**，保证这条路径永远不会把已有的宽度吃掉。
           apply() { G.buffs.trailWidth = Math.max(G.buffs.trailWidth,
               Math.min(G.buffs.trailWidth + 1, getTrailWidthCap()));
-              setFeedback('📏 轨迹宽度永久+1！', '#66dd88'); } },
+              UI.setFeedback('📏 轨迹宽度永久+1！', '#66dd88'); } },
         // v9.20: 跟着基础血量一起缩到 30%（3 → 1）。不缩的话，塔基础血只剩
         // 2/4/6 而这一项还加 3，一次购买就能把小环从 2 顶到 5——比削弱前还硬。
         { id: 'turretHp',  label: '图腾加固', emoji: '🗼', desc: '图腾血量+1',        color: '#88aacc', shopCost: 14,
           apply() { G.turretHpBonus = (G.turretHpBonus || 0) + 1;
                     for (const t of G.turrets) { t.maxHp += 1; t.hp += 1; }   // 已有的塔一起加厚
-                    setFeedback('🗼 图腾血量+1！（含场上 ' + G.turrets.length + ' 座）', '#88aacc'); } },
+                    UI.setFeedback('🗼 图腾血量+1！（含场上 ' + G.turrets.length + ' 座）', '#88aacc'); } },
     ];
 
     // ---------- v9.21 图腾扩容 ----------
@@ -746,7 +759,7 @@
         color: '#ffdd66',
         apply() {
             G.maxTurrets = (G.maxTurrets || 10) + 1;
-            setFeedback('🗼 图腾上限 +1 → ' + G.maxTurrets + '！', '#ffdd66');
+            UI.setFeedback('🗼 图腾上限 +1 → ' + G.maxTurrets + '！', '#ffdd66');
             showNotification('🗼 图腾上限 +1', '#ffdd66', 200);
         },
     };
@@ -812,4 +825,23 @@
             }
         }
     }
+
+    return {
+        TRIGGERS, EFFECTS, MONSTER_TYPES, MONSTER_TYPE_LIST, AFFIXES, affixDef,
+        FATE_CHOICES, STAGE_TYPES, CHAIR_COMBOS, NODE_POOL, CLASSES, RELICS,
+        STAT_CHOICES, TURRET_SLOT_CHOICE, TRAIL_STYLES, START_CARDS, JOYSTICK,
+        T03_EFFECT_MUL, TURRET_RATIO_NORM, BOSS_CARD_STEP, KILL_CARD_CHANCE,
+        KILL_CARD_EVERY, RARE_CARD_MIN_FLOOR, RARE_E15_CAP, RARE_E16_CAP, RARE_E17_CAP,
+        RARE_CARD_MIN_CHANCE, RARE_CARD_MAX_CHANCE, rareChance, PLAYER_CAP_RATE,
+        ELITE_BOSS_AFFIX_WEIGHT, ENEMY_SHOOTER_UNLOCK_FLOOR,
+        BOSS_EARLY_MUL_START, BOSS_EARLY_RAMP_END,
+        FREEZE_MAX_FRAMES, ELIMINATE_COOLDOWN, EVOKER_SUM_MUL, ENEMY_SHOT_LIFE,
+        ENEMY_SHOOTER_RANGE, ENEMY_SHOOTER_INTERVAL, PLAYER_FIRE_RATE_MUL,
+        MONSTER_STAT_MUL, EARLY_NORMAL_MUL, HP_OVERFLOW_GUARD, ATK_OVERFLOW_GUARD,
+        AFFIX_ZONE_R_MUL, AFFIX_ZONE_MAX_PER_KIND,
+        pickAffixes, randomTrigger, randomEffect, rollBossCardCount, bossEarlyMul,
+        bossSummonInterval, getBossHp, getFloorClearCards, getMerchantStock,
+        generateTerrain, playerCap, getTrailWidthCap,
+    };
+})();
 

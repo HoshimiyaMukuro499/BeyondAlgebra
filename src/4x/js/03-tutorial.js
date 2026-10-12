@@ -1,3 +1,14 @@
+// ============================================================
+//  03-tutorial —— 新手教程「古老的石板」与机制图鉴
+// ============================================================
+// 4.0: 包成 IIFE 并导出命名空间 `Tutor`。边界见 web/scope-check.mjs。
+const Tutor = (function () {
+
+    const { G, clamp } = Core;
+    const { EFFECTS, TRIGGERS } = Data;
+    const { TUTORIAL_FONT, TUTORIAL_FORCE, TUTORIAL_TIMEOUT } = Combat;
+    const { canvas, ctx } = State;
+
     // ============================================================
     //  v9.26 五块石板：移动方式 → 图腾生成 → 密文版 → 敌人 → 核心
     // ============================================================
@@ -455,7 +466,7 @@
             }
             // 预设终极技能直接充满
             if (cfg.ultFull) G.ultimateGauge = G.ultimateMax;
-            updateUI();
+            UI.updateUI();
         },
 
         // startFloor 的开场钩子：返回 true 表示出怪被教程接管
@@ -535,8 +546,8 @@
             if (!t || !e) return;
             G.triggerSlot = { ...t };
             G.effectSlot = { ...e };
-            updateUI();
-            setFeedback(`🎓 教程已帮你填好 ${t.emoji}${t.label} + ${e.emoji}${e.label}，按 空格 宣读`, '#f5c542');
+            UI.updateUI();
+            UI.setFeedback(`🎓 教程已帮你填好 ${t.emoji}${t.label} + ${e.emoji}${e.label}，按 空格 宣读`, '#f5c542');
         },
 
         // ---------- 步骤调度 ----------
@@ -569,9 +580,9 @@
             // v9.24: 手机上这些节点（手牌 / 宣读按钮 / 槽位）都在左侧抽屉里，
             // 默认是收起来的——讲到它们时自动把抽屉拉开。抽屉顺带把时间压到 50%，
             // 正好配合教程的阅读节奏；这一步播完由 advance() 收起。
-            if (typeof setDrawer === 'function' && G.mobileMode
+            if (typeof Events.setDrawer === 'function' && G.mobileMode
                 && (s.point === 'hand' || s.point === 'combine' || s.point === 'slot')) {
-                setDrawer(true);
+                Events.setDrawer(true);
                 // 只记「是我们自己拉开的」——玩家手动开的抽屉不该被教程关掉
                 this.drawerAutoOpened = true;
             }
@@ -596,8 +607,8 @@
             const cur = this.text && this.text.step;
             if (cur && cur.gate && this.gateLeft > 0) this.gateLeft--;
             // v9.24: 收起教程自动拉开的抽屉（手机上），把画面还回战斗
-            if (typeof setDrawer === 'function' && G.mobileMode && this.drawerAutoOpened) {
-                setDrawer(false);
+            if (typeof Events.setDrawer === 'function' && G.mobileMode && this.drawerAutoOpened) {
+                Events.setDrawer(false);
             }
             this.drawerAutoOpened = false;
             this.text = null;
@@ -694,8 +705,8 @@
         replay() {
             this.seen = false;
             this.finished = false;
-            resetGame();   // reset() 会把 restarted 一并清掉
-            setFeedback('🎓 重新开始教程 · 古老的石板 1', '#7bb3ff');
+            Main.resetGame();   // reset() 会把 restarted 一并清掉
+            UI.setFeedback('🎓 重新开始教程 · 古老的石板 1', '#7bb3ff');
         },
 
         handleClick(x, y) {
@@ -735,11 +746,11 @@
         // （Tutorial.reset() 本身不清 seen，所以 resetGame() 走完之后它仍然是 true。）
         Tutorial.seen = true;
         Tutorial.pendingRestart = false;
-        resetGame();
+        Main.resetGame();
         // resetGame() 会调 Tutorial.reset()（那里面会把这个标记清回 false），
         // 所以必须放在它之后。
         Tutorial.restarted = true;
-        setFeedback('🎓 教程结束 · 从第 1 层重新开始', '#f5c542');
+        UI.setFeedback('🎓 教程结束 · 从第 1 层重新开始', '#f5c542');
     }
 
     // 脚本掉落：按 id 直接发放
@@ -751,11 +762,11 @@
         if (G.hand.length >= 20) G.hand.shift();
         G.hand.push({ ...card, type: t ? 'trigger' : 'effect' });
         if (!silent) {
-            setFeedback(`📥 拾取 ${card.emoji} ${card.label}`, '#8ab3d0');
+            UI.setFeedback(`📥 拾取 ${card.emoji} ${card.label}`, '#8ab3d0');
             Tutorial.emit('pickup', card);
             if (cardId === 'T12' || cardId === 'E12') Tutorial.emit('pickup2', card);
         }
-        updateUI();
+        UI.updateUI();
     }
 
     // 开发期自检：脚本掉落必须 T/E 交替，否则玩家会抽不了牌
@@ -1065,4 +1076,10 @@
 
         drawTutorialCorners();
     }
+
+    return {
+        CODEX_PAGES, Tutorial, drawTutorial, restartRunAfterTutorial, setCanvasPointer, tutorialCheckBalance, tutorialSyncPointer,
+        TUTORIAL_FLOORS, TUTORIAL_NODEMAP, TUTORIAL_OUTRO,
+    };
+})();
 
